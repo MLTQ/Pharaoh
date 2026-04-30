@@ -159,6 +159,7 @@ export interface MockTrackClip {
   len: number;
   label: string;
   take: number;
+  row_index?: number; // script CSV row; set when derived from real project
 }
 
 export interface MockTrack {
