@@ -15,6 +15,8 @@ import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
+import { getProjectsDir } from "./lib/tauriCommands";
+import type { Project } from "./lib/types";
 import { MOCK_AGENT_LOG, MOCK_TRACKS } from "./lib/mockData";
 import type { ViewId, RightTab } from "./lib/types";
 
@@ -35,7 +37,7 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function App() {
-  const { project, scenes, cast, assets, activeSceneNo, setActiveScene, updateScene } = useProjectStore();
+  const { project, scenes, cast, assets, activeSceneNo, setActiveScene, updateScene, loadRealProject } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setRightTab } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
@@ -95,9 +97,15 @@ export default function App() {
   if (showProjectPicker) {
     return (
       <ProjectPicker
-        onOpen={(_p) => {
-          // TODO: load real project into projectStore
+        onOpen={async (p: Project) => {
+          try {
+            const pDir = await getProjectsDir();
+            loadRealProject(p, pDir);
+          } catch {
+            // Running in browser — still close picker
+          }
           setShowProjectPicker(false);
+          setView("pyramid");
         }}
       />
     );
