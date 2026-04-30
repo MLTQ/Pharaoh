@@ -24,17 +24,25 @@ interface JobFailedEvent {
   error: string;
 }
 
+export function takeKey(sceneSlug: string, rowIndex: number): string {
+  return `${sceneSlug}:${rowIndex}`;
+}
+
 interface JobState {
   jobs: Job[];
+  // Maps "{scene_slug}:{row_index}" → job_id of the active (selected) take
+  activeTakes: Record<string, string>;
   addJob: (job: Job) => void;
   updateJob: (id: string, update: Partial<Job>) => void;
   removeJob: (id: string) => void;
+  setActiveTake: (sceneSlug: string, rowIndex: number, jobId: string) => void;
   // Returns an unlisten function; call on unmount
   initListeners: () => Promise<() => void>;
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: MOCK_JOBS,
+  activeTakes: {},
 
   addJob: (job) =>
     set((state) => ({ jobs: [job, ...state.jobs] })),
@@ -47,8 +55,12 @@ export const useJobStore = create<JobState>((set, get) => ({
   removeJob: (id) =>
     set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),
 
+  setActiveTake: (sceneSlug, rowIndex, jobId) =>
+    set((state) => ({
+      activeTakes: { ...state.activeTakes, [takeKey(sceneSlug, rowIndex)]: jobId },
+    })),
+
   initListeners: async () => {
-    // Dynamically import to avoid crashing in browser/Vite without Tauri
     let unlisten: Array<() => void> = [];
     try {
       const { listen } = await import("@tauri-apps/api/event");
@@ -66,7 +78,14 @@ export const useJobStore = create<JobState>((set, get) => ({
           progress: 100,
           output_path: payload.output_path,
         });
-        // Fetch waveform peaks for the completed audio file
+
+        // Auto-select as active take if this row has no active take yet
+        const key = takeKey(payload.scene_slug, payload.row_index);
+        if (!get().activeTakes[key]) {
+          get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
+        }
+
+        // Fetch waveform peaks
         try {
           const { getWaveformPeaks } = await import("../lib/tauriCommands");
           const peaks = await getWaveformPeaks(payload.output_path, 120);
