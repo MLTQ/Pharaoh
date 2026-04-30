@@ -116,6 +116,7 @@ export interface Job {
   scene_slug: string | null;
   row_index: number | null;
   output_path: string | null;
+  peaks: number[] | null; // waveform peaks fetched after completion
   error: string | null;
 }
 

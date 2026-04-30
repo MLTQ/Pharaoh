@@ -60,12 +60,20 @@ export const useJobStore = create<JobState>((set, get) => ({
         });
       });
 
-      const u2 = await listen<JobCompleteEvent>("job-complete", ({ payload }) => {
+      const u2 = await listen<JobCompleteEvent>("job-complete", async ({ payload }) => {
         get().updateJob(payload.job_id, {
           status: "complete",
           progress: 100,
           output_path: payload.output_path,
         });
+        // Fetch waveform peaks for the completed audio file
+        try {
+          const { getWaveformPeaks } = await import("../lib/tauriCommands");
+          const peaks = await getWaveformPeaks(payload.output_path, 120);
+          get().updateJob(payload.job_id, { peaks });
+        } catch {
+          // Not fatal — peaks stay null, Wave fallback renders instead
+        }
       });
 
       const u3 = await listen<JobFailedEvent>("job-failed", ({ payload }) => {

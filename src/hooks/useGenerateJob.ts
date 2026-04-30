@@ -75,6 +75,7 @@ export function useGenerateJob() {
       scene_slug: sceneSlug,
       row_index: params.rowIndex ?? 0,
       output_path: null,
+      peaks: null,
       error: null,
     };
     addJob(job);
@@ -119,6 +120,7 @@ export function useGenerateJob() {
       scene_slug: sceneSlug,
       row_index: params.rowIndex ?? 0,
       output_path: null,
+      peaks: null,
       error: null,
     };
     addJob(job);
@@ -171,6 +173,7 @@ export function useGenerateJob() {
       scene_slug: sceneSlug,
       row_index: params.rowIndex ?? 0,
       output_path: null,
+      peaks: null,
       error: null,
     };
     addJob(job);
