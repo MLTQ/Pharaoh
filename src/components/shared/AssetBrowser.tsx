@@ -3,8 +3,8 @@ import { Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
-import { updateScriptRow } from "../../lib/tauriCommands";
-import type { Job, MockAssets } from "../../lib/types";
+import { updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
+import type { Job, MockAssets, QaJobStatus } from "../../lib/types";
 
 interface AssetBrowserProps {
   assets: MockAssets;
@@ -22,18 +22,26 @@ const KIND_COLOR: Record<string, string> = {
 
 // ── Take group ─────────────────────────────────────────────────────────────
 
+const QA_COLORS: Record<QaJobStatus, string> = {
+  unreviewed: "var(--fg-4)",
+  approved:   "var(--st-rendered)",
+  rejected:   "var(--sfx)",
+};
+
 interface TakeGroupProps {
   jobs: Job[];            // all completed takes for one row, oldest-first
   activeJobId: string | null;
   onUse: (job: Job) => void;
+  onQa: (job: Job, status: QaJobStatus) => void;
 }
 
-const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse }) => {
+const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa }) => {
   const color = KIND_COLOR[jobs[0].model] ?? "currentColor";
   return (
     <div style={{ borderBottom: "1px solid var(--line-1)" }}>
       {jobs.map((job, ti) => {
         const isActive = job.id === activeJobId;
+        const qaColor = QA_COLORS[job.qa_status];
         return (
           <div
             key={job.id}
@@ -57,8 +65,37 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse }) => {
               </span>
               <span className="sub">{job.description}</span>
             </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
               <PlayButton path={job.output_path} size={12} />
+              {/* QA approve/reject */}
+              <button
+                className="btn btn-sm"
+                style={{
+                  padding: "2px 4px", minWidth: 0,
+                  color: job.qa_status === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
+                  borderColor: job.qa_status === "approved" ? "var(--st-rendered)" : undefined,
+                }}
+                title="Approve take"
+                onClick={() => onQa(job, job.qa_status === "approved" ? "unreviewed" : "approved")}
+              >✓</button>
+              <button
+                className="btn btn-sm"
+                style={{
+                  padding: "2px 4px", minWidth: 0,
+                  color: job.qa_status === "rejected" ? "var(--sfx)" : "var(--fg-4)",
+                  borderColor: job.qa_status === "rejected" ? "var(--sfx)" : undefined,
+                }}
+                title="Reject take"
+                onClick={() => onQa(job, job.qa_status === "rejected" ? "unreviewed" : "rejected")}
+              >✕</button>
+              {/* QA badge */}
+              {job.qa_status !== "unreviewed" && (
+                <span style={{
+                  fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.06em",
+                  color: qaColor, textTransform: "uppercase",
+                }}>{job.qa_status}</span>
+              )}
+              {/* Use / using button */}
               <button
                 className={`btn btn-sm${isActive ? " btn-primary" : ""}`}
                 style={isActive ? { borderColor: color, color } : undefined}
@@ -78,7 +115,7 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse }) => {
 // ── Asset browser ─────────────────────────────────────────────────────────
 
 export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
-  const { jobs, activeTakes, setActiveTake } = useJobStore();
+  const { jobs, activeTakes, setActiveTake, setQaStatus } = useJobStore();
   const { realProjectId, activeSceneSlug } = useProjectStore();
 
   const completedByModel = (model: "tts" | "sfx" | "music") =>
@@ -96,6 +133,17 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
     });
     return map;
   }
+
+  const handleQa = (job: Job, status: QaJobStatus) => {
+    setQaStatus(job.id, status);
+    if (job.output_path) {
+      updateSidecarQa({
+        audioPath: job.output_path,
+        qaStatus: status,
+        qaNotes: "",
+      }).catch(console.error);
+    }
+  };
 
   const handleUse = (job: Job) => {
     if (!job.output_path || job.scene_slug == null || job.row_index == null) return;
@@ -135,6 +183,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             jobs={groupJobs}
             activeJobId={activeTakes[key] ?? null}
             onUse={handleUse}
+            onQa={handleQa}
           />
         ))}
         {mockItems.map((a, i) => (

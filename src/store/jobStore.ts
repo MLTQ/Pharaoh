@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Job } from "../lib/types";
+import type { Job, QaJobStatus } from "../lib/types";
 import { MOCK_JOBS } from "../lib/mockData";
 
 interface JobProgressEvent {
@@ -36,6 +36,7 @@ interface JobState {
   updateJob: (id: string, update: Partial<Job>) => void;
   removeJob: (id: string) => void;
   setActiveTake: (sceneSlug: string, rowIndex: number, jobId: string) => void;
+  setQaStatus: (jobId: string, status: QaJobStatus) => void;
   // Returns an unlisten function; call on unmount
   initListeners: () => Promise<() => void>;
 }
@@ -58,6 +59,11 @@ export const useJobStore = create<JobState>((set, get) => ({
   setActiveTake: (sceneSlug, rowIndex, jobId) =>
     set((state) => ({
       activeTakes: { ...state.activeTakes, [takeKey(sceneSlug, rowIndex)]: jobId },
+    })),
+
+  setQaStatus: (jobId, status) =>
+    set((state) => ({
+      jobs: state.jobs.map((j) => (j.id === jobId ? { ...j, qa_status: status } : j)),
     })),
 
   initListeners: async () => {

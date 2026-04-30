@@ -104,6 +104,8 @@ export interface SidecarMeta {
 export type ModelKind = "tts" | "sfx" | "music";
 export type JobStatus = "pending" | "running" | "complete" | "failed";
 
+export type QaJobStatus = "unreviewed" | "approved" | "rejected";
+
 export interface Job {
   id: string;
   model: ModelKind;
@@ -117,6 +119,7 @@ export interface Job {
   row_index: number | null;
   output_path: string | null;
   peaks: number[] | null; // waveform peaks fetched after completion
+  qa_status: QaJobStatus; // defaults to "unreviewed" on job creation
   error: string | null;
 }
 

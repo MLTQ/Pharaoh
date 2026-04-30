@@ -76,6 +76,7 @@ export function useGenerateJob() {
       row_index: params.rowIndex ?? 0,
       output_path: null,
       peaks: null,
+      qa_status: "unreviewed",
       error: null,
     };
     addJob(job);
@@ -121,6 +122,7 @@ export function useGenerateJob() {
       row_index: params.rowIndex ?? 0,
       output_path: null,
       peaks: null,
+      qa_status: "unreviewed",
       error: null,
     };
     addJob(job);
@@ -174,6 +176,7 @@ export function useGenerateJob() {
       row_index: params.rowIndex ?? 0,
       output_path: null,
       peaks: null,
+      qa_status: "unreviewed",
       error: null,
     };
     addJob(job);
