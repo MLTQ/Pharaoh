@@ -1,5 +1,6 @@
 import React from "react";
 import { Icon, Wave, PeaksWave } from "./atoms";
+import { PlayButton } from "./PlayButton";
 import { useJobStore } from "../../store/jobStore";
 import type { Job, MockAssets } from "../../lib/types";
 
@@ -33,7 +34,7 @@ function JobAssetRow({ job }: { job: Job }) {
         <span className="name" title={job.output_path ?? undefined}>{basename(job.output_path!)}</span>
         <span className="sub">{job.description}</span>
       </div>
-      <span className="badge resolved">done</span>
+      <PlayButton path={job.output_path} size={12} />
     </div>
   );
 }
@@ -78,7 +79,10 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             <span className="name">{a.name}</span>
             <span className="sub">{a.sub}</span>
           </div>
-          <span className={`badge ${a.state}`}>{a.state}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <PlayButton path={a.file_path} size={12} />
+            <span className={`badge ${a.state}`}>{a.state}</span>
+          </div>
         </div>
       ))}
 
@@ -101,7 +105,10 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             <span className="name">{a.name}</span>
             <span className="sub">{a.sub}</span>
           </div>
-          <span className={`badge ${a.state}`}>{a.state}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <PlayButton path={a.file_path} size={12} />
+            <span className={`badge ${a.state}`}>{a.state}</span>
+          </div>
         </div>
       ))}
 
@@ -124,7 +131,10 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             <span className="name">{a.name}</span>
             <span className="sub">{a.sub}</span>
           </div>
-          <span className={`badge ${a.state}`}>{a.state}</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+            <PlayButton path={a.file_path} size={12} />
+            <span className={`badge ${a.state}`}>{a.state}</span>
+          </div>
         </div>
       ))}
     </div>

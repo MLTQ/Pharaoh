@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef } from "react";
 import { Icon, Wave } from "../shared/atoms";
 import { useProjectStore } from "../../store/projectStore";
+import { useAudioStore } from "../../store/audioStore";
 import { readScript, updateScriptRow } from "../../lib/tauriCommands";
 import type { MockScene, MockTrack, MockAssets, AssetItem, ScriptRow } from "../../lib/types";
 
@@ -21,7 +22,9 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   scene, scenes, tracks, assets, onSwitchScene, onOpenPyramid, onUpdateScene,
 }) => {
   const [selected, setSelected] = useState<string | null>(null);
-  const playheadSec = 72;
+  const staticPlayheadSec = 72;
+  const { playing, position } = useAudioStore();
+  const playheadSec = playing ? position : staticPlayheadSec;
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(scene.title);
   const [desc, setDesc] = useState(scene.desc);
