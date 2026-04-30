@@ -14,6 +14,8 @@ interface ProjectState {
   characters: Character[];
   selectedCharId: string | null;
   setSelectedChar: (id: string) => void;
+  addCharacter: (c: Character) => void;
+  removeCharacter: (id: string) => void;
   updateCharacter: (id: string, patch: Partial<Character>) => void;
   updateVoiceAssignment: (id: string, patch: Partial<Character["voice_assignment"]>) => void;
 
@@ -46,6 +48,17 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   selectedCharId: MOCK_CHARACTERS[0]?.id ?? null,
 
   setSelectedChar: (id) => set({ selectedCharId: id }),
+
+  addCharacter: (c) =>
+    set((state) => ({ characters: [...state.characters, c], selectedCharId: c.id })),
+
+  removeCharacter: (id) =>
+    set((state) => {
+      const remaining = state.characters.filter((c) => c.id !== id);
+      const selectedCharId =
+        state.selectedCharId === id ? (remaining[0]?.id ?? null) : state.selectedCharId;
+      return { characters: remaining, selectedCharId };
+    }),
 
   updateCharacter: (id, patch) =>
     set((state) => ({

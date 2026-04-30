@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useMemo } from "react";
+import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Wave, PeaksWave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { useProjectStore } from "../../store/projectStore";
@@ -6,148 +6,129 @@ import { useJobStore } from "../../store/jobStore";
 import {
   submitTtsVoiceDesign,
   submitTtsVoiceClone,
-  submitTtsCustomVoice,
 } from "../../lib/tauriCommands";
 import type { Job, Character, QaJobStatus } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
-const TONE_CHIPS = [
-  "warm", "cold", "breathy", "gravelly", "nasal",
-  "bright", "dark", "smooth", "rough", "husky",
-  "whispered", "resonant", "crisp", "airy",
-];
-
-const SPEAKERS = [
-  { id: "Vivian",   desc: "Bright, edgy young female" },
-  { id: "Lili",     desc: "Warm, gentle young female" },
-  { id: "Magnus",   desc: "Seasoned male, low mellow" },
-  { id: "Jinchen",  desc: "Youthful Beijing male, natural" },
-  { id: "Chengdu",  desc: "Lively male, slightly husky" },
-  { id: "Dynamic",  desc: "Male, strong rhythmic drive" },
-  { id: "Ryan",     desc: "Sunny American male, clear" },
-  { id: "Japanese", desc: "Playful female, light nimble" },
-  { id: "Korean",   desc: "Warm female, rich emotion" },
-];
-
-const MODEL_LABEL: Record<string, string> = {
-  CustomVoice: "custom",
-  VoiceDesign: "design",
-  Clone: "clone",
-  FineTuned: "fine-tuned",
-};
-
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
-
 const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
 
-// ── CharSceneSlug: maps char id to a stable scene_slug for the job store ──
-
 const charSceneSlug = (charId: string) => `__char__${charId}`;
-const DESIGN_ROW  = 0;
-const CLONE_ROW   = 1;
-const CUSTOM_ROW  = 2;
+const DESIGN_ROW = 0;
+const CLONE_ROW  = 1;
+
+function newCharId() {
+  return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+// ── File picker ────────────────────────────────────────────────────────────
+
+async function pickAudioFile(): Promise<string | null> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const result = await open({
+      multiple: false,
+      filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac"] }],
+    });
+    return typeof result === "string" ? result : null;
+  } catch {
+    return null; // browser / no dialog plugin — caller falls back to file input
+  }
+}
 
 // ── TakeRow ────────────────────────────────────────────────────────────────
 
 interface TakeRowProps {
   job: Job;
   index: number;
-  isRef: boolean;
-  onSetRef: () => void;
+  saveLabel: string;
+  isSaved: boolean;
+  onSave: () => void;
   onQa: (status: QaJobStatus) => void;
 }
 
-const TakeRow: React.FC<TakeRowProps> = ({ job, index, isRef, onSetRef, onQa }) => {
-  const color = "var(--tts)";
-  return (
-    <div style={{
-      display: "flex", alignItems: "center", gap: 8,
-      padding: "6px 12px",
-      background: isRef ? "color-mix(in oklch, var(--tts) 8%, var(--bg-1))" : undefined,
-      borderLeft: isRef ? "2px solid var(--tts)" : "2px solid transparent",
-      borderBottom: "1px solid var(--line-1)",
+const TakeRow: React.FC<TakeRowProps> = ({ job, index, saveLabel, isSaved, onSave, onQa }) => (
+  <div style={{
+    display: "flex", alignItems: "center", gap: 8,
+    padding: "6px 12px",
+    background: isSaved ? "color-mix(in oklch, var(--tts) 8%, var(--bg-1))" : undefined,
+    borderLeft: isSaved ? "2px solid var(--tts)" : "2px solid transparent",
+    borderBottom: "1px solid var(--line-1)",
+  }}>
+    <span style={{
+      fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)",
+      letterSpacing: "0.06em", minWidth: 40,
     }}>
-      <span style={{
-        fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)",
-        letterSpacing: "0.06em", minWidth: 40,
-      }}>
-        take {index + 1}
-      </span>
-      <div style={{ flex: 1 }}>
-        {job.peaks ? (
-          <PeaksWave peaks={job.peaks} width={140} height={18} color={color} opacity={0.8} />
-        ) : (
-          <Wave width={140} height={18} seed={job.id.charCodeAt(0)} count={28} color={color} opacity={0.6} />
-        )}
-      </div>
-      <PlayButton path={job.output_path} size={11} />
-      <button
-        className="btn btn-sm"
-        style={{
-          padding: "2px 4px", minWidth: 0,
-          color: job.qa_status === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
-          borderColor: job.qa_status === "approved" ? "var(--st-rendered)" : undefined,
-        }}
-        onClick={() => onQa(job.qa_status === "approved" ? "unreviewed" : "approved")}
-        title="Approve"
-      >✓</button>
-      <button
-        className="btn btn-sm"
-        style={{
-          padding: "2px 4px", minWidth: 0,
-          color: job.qa_status === "rejected" ? "var(--sfx)" : "var(--fg-4)",
-          borderColor: job.qa_status === "rejected" ? "var(--sfx)" : undefined,
-        }}
-        onClick={() => onQa(job.qa_status === "rejected" ? "unreviewed" : "rejected")}
-        title="Reject"
-      >✕</button>
-      <button
-        className={`btn btn-sm${isRef ? " btn-primary" : ""}`}
-        style={isRef ? { borderColor: "var(--tts)", color: "var(--tts)" } : undefined}
-        onClick={() => !isRef && onSetRef()}
-        disabled={isRef}
-        title={isRef ? "Currently the reference voice" : "Use as reference for Clone"}
-      >
-        {isRef ? "ref ✓" : "set ref"}
-      </button>
+      take {index + 1}
+    </span>
+    <div style={{ flex: 1 }}>
+      {job.peaks ? (
+        <PeaksWave peaks={job.peaks} width={140} height={18} color="var(--tts)" opacity={0.8} />
+      ) : (
+        <Wave width={140} height={18} seed={job.id.charCodeAt(0)} count={28} color="var(--tts)" opacity={0.6} />
+      )}
     </div>
-  );
-};
+    <PlayButton path={job.output_path} size={11} />
+    <button
+      className="btn btn-sm"
+      style={{
+        padding: "2px 4px", minWidth: 0,
+        color: job.qa_status === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
+        borderColor: job.qa_status === "approved" ? "var(--st-rendered)" : undefined,
+      }}
+      onClick={() => onQa(job.qa_status === "approved" ? "unreviewed" : "approved")}
+      title="Approve"
+    >✓</button>
+    <button
+      className="btn btn-sm"
+      style={{
+        padding: "2px 4px", minWidth: 0,
+        color: job.qa_status === "rejected" ? "var(--sfx)" : "var(--fg-4)",
+        borderColor: job.qa_status === "rejected" ? "var(--sfx)" : undefined,
+      }}
+      onClick={() => onQa(job.qa_status === "rejected" ? "unreviewed" : "rejected")}
+      title="Reject"
+    >✕</button>
+    <button
+      className={`btn btn-sm${isSaved ? " btn-primary" : ""}`}
+      style={isSaved ? { borderColor: "var(--tts)", color: "var(--tts)" } : undefined}
+      onClick={() => !isSaved && onSave()}
+      disabled={isSaved}
+    >
+      {isSaved ? "saved ✓" : saveLabel}
+    </button>
+  </div>
+);
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-type DesignTab = "design" | "clone" | "custom";
+type DesignTab = "design" | "clone";
 
 export const CharacterDesignerView: React.FC = () => {
   const {
     characters, selectedCharId,
-    setSelectedChar, updateCharacter, updateVoiceAssignment,
+    setSelectedChar, addCharacter, removeCharacter,
+    updateCharacter, updateVoiceAssignment,
     realProjectId, projectsDir,
   } = useProjectStore();
   const { jobs, addJob, setQaStatus } = useJobStore();
 
   const char = characters.find((c) => c.id === selectedCharId) ?? characters[0];
 
-  // ── Per-character local editable state ──
-  const [tab, setTab] = useState<DesignTab>(() => {
-    const m = char?.voice_assignment.model;
-    if (m === "Clone") return "clone";
-    if (m === "CustomVoice") return "custom";
-    return "design";
-  });
-  const [localName, setLocalName]     = useState(char?.name ?? "");
-  const [localDesc, setLocalDesc]     = useState(char?.description ?? "");
-  const [voiceDesc, setVoiceDesc]     = useState(char?.voice_assignment.instruct_default ?? "");
-  const [toneChips, setToneChips]     = useState<Set<string>>(new Set());
-  const [testLine, setTestLine]       = useState(DEFAULT_TEST_LINE);
-  const [instruct, setInstruct]       = useState(char?.voice_assignment.instruct_default ?? "");
+  const [tab, setTab] = useState<DesignTab>("design");
+  const [localName, setLocalName]         = useState(char?.name ?? "");
+  const [localDesc, setLocalDesc]         = useState(char?.description ?? "");
+  const [voiceDesc, setVoiceDesc]         = useState(char?.voice_assignment.instruct_default ?? "");
+  const [testLine, setTestLine]           = useState(DEFAULT_TEST_LINE);
+  const [instruct, setInstruct]           = useState(char?.voice_assignment.instruct_default ?? "");
   const [refTranscript, setRefTranscript] = useState(char?.voice_assignment.ref_transcript ?? "");
-  const [selectedSpeaker, setSelectedSpeaker] = useState(char?.voice_assignment.speaker ?? "Vivian");
-  const [generating, setGenerating]   = useState(false);
-  const [genError, setGenError]       = useState<string | null>(null);
+  const [generating, setGenerating]       = useState(false);
+  const [genError, setGenError]           = useState<string | null>(null);
+  const [addingChar, setAddingChar]       = useState(false);
+  const [newName, setNewName]             = useState("");
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // Sync local state when character changes
   useEffect(() => {
     if (!char) return;
     setLocalName(char.name);
@@ -155,14 +136,11 @@ export const CharacterDesignerView: React.FC = () => {
     setVoiceDesc(char.voice_assignment.instruct_default ?? "");
     setInstruct(char.voice_assignment.instruct_default ?? "");
     setRefTranscript(char.voice_assignment.ref_transcript ?? "");
-    setSelectedSpeaker(char.voice_assignment.speaker ?? "Vivian");
-    setToneChips(new Set());
     setGenError(null);
-    const m = char.voice_assignment.model;
-    setTab(m === "Clone" ? "clone" : m === "CustomVoice" ? "custom" : "design");
+    setTab(char.voice_assignment.model === "Clone" ? "clone" : "design");
   }, [char?.id]);
 
-  // ── Jobs for this character ──
+  // ── Jobs ──
   const slug = char ? charSceneSlug(char.id) : "";
 
   const designJobs = useMemo(() =>
@@ -179,73 +157,60 @@ export const CharacterDesignerView: React.FC = () => {
     [jobs, slug]
   );
 
-  const runningJobs = useMemo(() =>
-    jobs.filter((j) => j.scene_slug === slug && (j.status === "running" || j.status === "pending")),
-    [jobs, slug]
-  );
+  const runningDesign = jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
+  const runningClone  = jobs.some((j) => j.scene_slug === slug && j.row_index === CLONE_ROW  && (j.status === "running" || j.status === "pending"));
 
-  // ── Save helpers ──
+  // ── Helpers ──
 
   const saveCharMeta = () => {
     if (!char) return;
     updateCharacter(char.id, { name: localName, description: localDesc });
   };
 
-  const saveVoiceAssignment = (patch: Partial<Character["voice_assignment"]>) => {
+  const saveVoice = (patch: Partial<Character["voice_assignment"]>) => {
     if (!char) return;
     updateVoiceAssignment(char.id, patch);
   };
 
-  // ── Generation ──
-
   const outputPath = (suffix: string) => {
     const ts = Date.now();
-    if (realProjectId && projectsDir) {
-      return `${projectsDir}/${realProjectId}/characters/${char!.id}/${suffix}_${ts}.wav`;
-    }
-    return `/tmp/pharaoh_${char!.id}_${suffix}_${ts}.wav`;
+    return realProjectId && projectsDir
+      ? `${projectsDir}/${realProjectId}/characters/${char!.id}/${suffix}_${ts}.wav`
+      : `/tmp/pharaoh_${char!.id}_${suffix}_${ts}.wav`;
   };
 
+  const pushJob = (jobId: string, rowIndex: number, description: string) => {
+    addJob({
+      id: jobId, model: "tts", description, status: "pending",
+      progress: 0, eta: "~2s", started_at: new Date().toISOString(),
+      scene_id: null, scene_slug: slug, row_index: rowIndex,
+      output_path: null, peaks: null, qa_status: "unreviewed", error: null,
+    });
+  };
+
+  // ── Generation ──
+
   const handleGenerateDesign = async () => {
-    if (!char || generating) return;
-    const description = [voiceDesc, ...Array.from(toneChips)].filter(Boolean).join(", ");
-    if (!description) { setGenError("Add a voice description first."); return; }
-    setGenerating(true);
-    setGenError(null);
+    if (!char || generating || !voiceDesc.trim()) {
+      if (!voiceDesc.trim()) setGenError("Add a voice description first.");
+      return;
+    }
+    setGenerating(true); setGenError(null);
     try {
       const jobId = await submitTtsVoiceDesign({
         projectId: realProjectId ?? "demo",
-        sceneSlug: slug,
-        rowIndex: DESIGN_ROW,
+        sceneSlug: slug, rowIndex: DESIGN_ROW,
         params: {
           text: testLine || DEFAULT_TEST_LINE,
-          voice_description: description,
-          language: "en",
-          seed: Math.floor(Math.random() * 9999),
-          temperature: 0.7,
-          top_p: 0.9,
-          max_new_tokens: 2048,
+          voice_description: voiceDesc.trim(),
+          language: "en", seed: Math.floor(Math.random() * 9999),
+          temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
           output_path: outputPath("design"),
         },
       });
-      addJob({
-        id: jobId,
-        model: "tts",
-        description: `Voice design · ${char.name}`,
-        status: "pending",
-        progress: 0,
-        eta: "~2s",
-        started_at: new Date().toISOString(),
-        scene_id: null,
-        scene_slug: slug,
-        row_index: DESIGN_ROW,
-        output_path: null,
-        peaks: null,
-        qa_status: "unreviewed",
-        error: null,
-      });
+      pushJob(jobId, DESIGN_ROW, `Voice design · ${char.name}`);
     } catch (e: unknown) {
-      setGenError(e instanceof Error ? e.message : "Generation failed. Is the TTS server running?");
+      setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
     } finally {
       setGenerating(false);
     }
@@ -254,148 +219,185 @@ export const CharacterDesignerView: React.FC = () => {
   const handleGenerateClone = async () => {
     if (!char || generating) return;
     const refPath = char.voice_assignment.ref_audio_path;
-    if (!refPath) { setGenError("No reference audio set. Generate a Voice Design take first."); return; }
-    setGenerating(true);
-    setGenError(null);
+    if (!refPath) { setGenError("Set a reference audio first."); return; }
+    setGenerating(true); setGenError(null);
     try {
       const jobId = await submitTtsVoiceClone({
         projectId: realProjectId ?? "demo",
-        sceneSlug: slug,
-        rowIndex: CLONE_ROW,
+        sceneSlug: slug, rowIndex: CLONE_ROW,
         params: {
           text: testLine || DEFAULT_TEST_LINE,
           ref_audio_path: refPath,
           ref_transcript: refTranscript,
-          language: "en",
-          icl_mode: false,
+          language: "en", icl_mode: false,
           seed: Math.floor(Math.random() * 9999),
-          temperature: 0.7,
-          top_p: 0.9,
+          temperature: 0.7, top_p: 0.9,
           output_path: outputPath("clone"),
         },
       });
-      addJob({
-        id: jobId,
-        model: "tts",
-        description: `Clone test · ${char.name}`,
-        status: "pending",
-        progress: 0,
-        eta: "~2s",
-        started_at: new Date().toISOString(),
-        scene_id: null,
-        scene_slug: slug,
-        row_index: CLONE_ROW,
-        output_path: null,
-        peaks: null,
-        qa_status: "unreviewed",
-        error: null,
-      });
+      pushJob(jobId, CLONE_ROW, `Clone test · ${char.name}`);
     } catch (e: unknown) {
-      setGenError(e instanceof Error ? e.message : "Generation failed. Is the TTS server running?");
+      setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
     } finally {
       setGenerating(false);
     }
   };
 
-  const handleGenerateCustom = async () => {
-    if (!char || generating) return;
-    setGenerating(true);
-    setGenError(null);
-    try {
-      const jobId = await submitTtsCustomVoice({
-        projectId: realProjectId ?? "demo",
-        sceneSlug: slug,
-        rowIndex: CUSTOM_ROW,
-        params: {
-          text: testLine || DEFAULT_TEST_LINE,
-          speaker: selectedSpeaker,
-          language: "en",
-          instruct: instruct,
-          seed: Math.floor(Math.random() * 9999),
-          temperature: 0.7,
-          top_p: 0.9,
-          max_new_tokens: 2048,
-          output_path: outputPath("custom"),
-        },
-      });
-      addJob({
-        id: jobId,
-        model: "tts",
-        description: `Custom voice test · ${char.name}`,
-        status: "pending",
-        progress: 0,
-        eta: "~2s",
-        started_at: new Date().toISOString(),
-        scene_id: null,
-        scene_slug: slug,
-        row_index: CUSTOM_ROW,
-        output_path: null,
-        peaks: null,
-        qa_status: "unreviewed",
-        error: null,
-      });
-    } catch (e: unknown) {
-      setGenError(e instanceof Error ? e.message : "Generation failed. Is the TTS server running?");
-    } finally {
-      setGenerating(false);
+  // ── File upload ──
+
+  const handlePickFile = async () => {
+    const path = await pickAudioFile();
+    if (path) {
+      saveVoice({ ref_audio_path: path, model: "Clone" });
+    } else {
+      // Fallback: trigger hidden file input (browser/demo mode)
+      fileInputRef.current?.click();
     }
+  };
+
+  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    // In browser mode we only get a fake path; store the name as a placeholder
+    const fakePath = `/uploads/${file.name}`;
+    saveVoice({ ref_audio_path: fakePath, model: "Clone" });
+    e.target.value = "";
+  };
+
+  // ── Character CRUD ──
+
+  const handleAddCharacter = () => {
+    if (!newName.trim()) return;
+    const id = newCharId();
+    addCharacter({
+      id,
+      name: newName.trim(),
+      description: "",
+      voice_assignment: {
+        model: "VoiceDesign",
+        speaker: null,
+        instruct_default: "",
+        ref_audio_path: null,
+        ref_transcript: null,
+      },
+    });
+    setNewName(""); setAddingChar(false);
+  };
+
+  const handleRemoveCharacter = (id: string) => {
+    if (characters.length <= 1) return;
+    if (!confirm(`Remove "${characters.find((c) => c.id === id)?.name}"?`)) return;
+    removeCharacter(id);
   };
 
   if (!char) return null;
 
-  const hue = CHAR_HUE(char.id);
-  const charColor = `oklch(0.7 0.12 ${hue})`;
+  const charColor = `oklch(0.7 0.12 ${CHAR_HUE(char.id)})`;
+  const refPath   = char.voice_assignment.ref_audio_path;
 
   // ── Render ─────────────────────────────────────────────────────────────
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
 
+      {/* hidden file input fallback */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".wav,.mp3,.aac,.ogg,.flac"
+        style={{ display: "none" }}
+        onChange={handleFileInputChange}
+      />
+
       {/* ── Character list ──────────────────────────────────────────────── */}
       <div style={{
         width: 200, flexShrink: 0,
         borderRight: "1px solid var(--line-1)",
         display: "flex", flexDirection: "column",
-        background: "var(--bg-1)",
-        overflowY: "auto",
+        background: "var(--bg-1)", overflowY: "auto",
       }}>
         <div style={{
-          padding: "10px 14px 6px",
-          fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
-          color: "var(--fg-4)", textTransform: "uppercase",
+          padding: "8px 10px 8px 14px",
+          display: "flex", alignItems: "center", justifyContent: "space-between",
           borderBottom: "1px solid var(--line-1)",
         }}>
-          Cast · {characters.length}
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
+            color: "var(--fg-4)", textTransform: "uppercase",
+          }}>
+            Cast · {characters.length}
+          </span>
+          <button
+            className="btn btn-sm"
+            style={{ padding: "2px 7px", fontSize: 14, lineHeight: 1 }}
+            title="Add character"
+            onClick={() => { setAddingChar(true); setNewName(""); }}
+          >+</button>
         </div>
+
+        {/* New character inline form */}
+        {addingChar && (
+          <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line-1)", display: "flex", gap: 4 }}>
+            <input
+              className="input"
+              autoFocus
+              value={newName}
+              onChange={(e) => setNewName(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") handleAddCharacter(); if (e.key === "Escape") setAddingChar(false); }}
+              placeholder="Character name…"
+              style={{ flex: 1, fontSize: 11, padding: "3px 6px" }}
+            />
+            <button className="btn btn-sm btn-primary" onClick={handleAddCharacter}
+              style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 6px" }}>
+              Add
+            </button>
+          </div>
+        )}
+
         {characters.map((c) => {
           const active = c.id === char.id;
-          const ch = CHAR_HUE(c.id);
+          const hue = CHAR_HUE(c.id);
+          const modelLabel = c.voice_assignment.model === "Clone" ? "clone"
+            : c.voice_assignment.model === "VoiceDesign" ? "design" : "custom";
           return (
             <div
               key={c.id}
               className={`side-item ${active ? "active" : ""}`}
               onClick={() => setSelectedChar(c.id)}
-              style={{ paddingTop: 8, paddingBottom: 8, cursor: "pointer" }}
+              style={{ paddingTop: 8, paddingBottom: 8, cursor: "pointer", paddingRight: 6 }}
             >
               <span className="ico">
                 <span style={{
                   display: "inline-block", width: 10, height: 10, borderRadius: "50%",
-                  background: `oklch(0.7 0.12 ${ch})`,
+                  background: `oklch(0.7 0.12 ${hue})`,
                   border: "1px solid var(--line-2)",
                 }} />
               </span>
-              <span style={{ flex: 1, minWidth: 0 }}>
-                <span style={{ display: "block", fontSize: 12, fontWeight: active ? 500 : 400 }}>
+              <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
+                <span style={{
+                  display: "block", fontSize: 12, fontWeight: active ? 500 : 400,
+                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                }}>
                   {c.name.split(" ")[0]}
                 </span>
+                <span style={{
+                  fontFamily: "var(--font-mono)", fontSize: 8.5,
+                  color: "var(--fg-4)", letterSpacing: "0.04em",
+                }}>
+                  {modelLabel}
+                </span>
               </span>
-              <span style={{
-                fontFamily: "var(--font-mono)", fontSize: 8.5,
-                color: "var(--fg-4)", letterSpacing: "0.04em",
-                textTransform: "uppercase", flexShrink: 0,
-              }}>
-                {MODEL_LABEL[c.voice_assignment.model]}
-              </span>
+              {characters.length > 1 && (
+                <button
+                  className="btn btn-sm"
+                  style={{
+                    padding: "1px 5px", minWidth: 0, fontSize: 11, opacity: 0.4,
+                    color: "var(--sfx)", borderColor: "transparent",
+                  }}
+                  title="Remove character"
+                  onClick={(e) => { e.stopPropagation(); handleRemoveCharacter(c.id); }}
+                >×</button>
+              )}
             </div>
           );
         })}
@@ -404,17 +406,16 @@ export const CharacterDesignerView: React.FC = () => {
       {/* ── Detail panel ────────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto", minWidth: 0 }}>
 
-        {/* Header */}
+        {/* Character header */}
         <div style={{
           padding: "20px 24px 16px",
           borderBottom: "1px solid var(--line-1)",
-          background: "var(--bg-1)",
+          background: "var(--bg-1)", flexShrink: 0,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
             <span style={{
               width: 14, height: 14, borderRadius: "50%",
-              background: charColor,
-              display: "inline-block", flexShrink: 0,
+              background: charColor, display: "inline-block", flexShrink: 0,
             }} />
             <input
               className="input"
@@ -423,20 +424,18 @@ export const CharacterDesignerView: React.FC = () => {
               onBlur={saveCharMeta}
               style={{
                 background: "transparent", border: "none", padding: 0,
-                fontSize: 20, fontWeight: 600, color: "var(--fg-1)",
-                flex: 1,
+                fontSize: 20, fontWeight: 600, color: "var(--fg-1)", flex: 1,
               }}
             />
             <span style={{
               fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em",
               color: "var(--tts)", textTransform: "uppercase",
               background: "color-mix(in oklch, var(--tts) 12%, var(--bg-2))",
-              padding: "2px 6px", borderRadius: 3,
+              padding: "2px 6px", borderRadius: 3, flexShrink: 0,
             }}>
-              {char.voice_assignment.model === "CustomVoice" ? "Custom Voice"
+              {char.voice_assignment.model === "Clone" ? "Clone"
                 : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
-                : char.voice_assignment.model === "Clone" ? "Clone"
-                : "Fine-Tuned"}
+                : "Custom"}
             </span>
           </div>
           <textarea
@@ -450,7 +449,7 @@ export const CharacterDesignerView: React.FC = () => {
               fontSize: 12, color: "var(--fg-3)", width: "100%",
               resize: "none", lineHeight: 1.5,
             }}
-            placeholder="Character description…"
+            placeholder="Character notes — age, role, personality, vocal direction…"
           />
         </div>
 
@@ -459,25 +458,21 @@ export const CharacterDesignerView: React.FC = () => {
           display: "flex", borderBottom: "1px solid var(--line-1)",
           background: "var(--bg-1)", flexShrink: 0,
         }}>
-          {(["design", "clone", "custom"] as DesignTab[]).map((t) => {
-            const labels = { design: "Voice Design", clone: "Clone", custom: "Custom Voice" };
+          {(["design", "clone"] as DesignTab[]).map((t) => {
+            const label = t === "design" ? "Voice Design" : "Clone";
             const active = tab === t;
             return (
-              <button
-                key={t}
-                onClick={() => setTab(t)}
-                style={{
-                  padding: "8px 18px",
-                  fontFamily: "var(--font-mono)", fontSize: 10,
-                  letterSpacing: "0.08em", textTransform: "uppercase",
-                  color: active ? "var(--tts)" : "var(--fg-4)",
-                  borderBottom: active ? "2px solid var(--tts)" : "2px solid transparent",
-                  marginBottom: -1,
-                  background: "transparent", border: "none", cursor: "pointer",
-                  borderLeft: "none", borderRight: "none", borderTop: "none",
-                }}
-              >
-                {labels[t]}
+              <button key={t} onClick={() => setTab(t)} style={{
+                padding: "8px 18px",
+                fontFamily: "var(--font-mono)", fontSize: 10,
+                letterSpacing: "0.08em", textTransform: "uppercase",
+                color: active ? "var(--tts)" : "var(--fg-4)",
+                borderBottom: active ? "2px solid var(--tts)" : "2px solid transparent",
+                marginBottom: -1,
+                background: "transparent", border: "none", cursor: "pointer",
+                borderLeft: "none", borderRight: "none", borderTop: "none",
+              }}>
+                {label}
               </button>
             );
           })}
@@ -486,59 +481,29 @@ export const CharacterDesignerView: React.FC = () => {
         {/* Tab body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
 
-          {/* ── VOICE DESIGN TAB ─────────────────────────────────────────── */}
+          {/* ── VOICE DESIGN ─────────────────────────────────────────────── */}
           {tab === "design" && (
             <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.5 }}>
-                Describe the voice in plain language. Pharaoh sends this to Qwen3-TTS Voice Design
-                to synthesize a reference take. Approve the best take, then set it as the Clone reference.
+              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
+                Describe this character's voice in plain language. Qwen3-TTS synthesises a novel
+                speaker from the description — no preset selection needed. When you find a take you
+                like, save it as the character's reference and switch to Clone for production use.
               </p>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Voice description
-                </label>
+                <label style={labelStyle}>Voice description</label>
                 <textarea
                   className="input"
                   value={voiceDesc}
                   onChange={(e) => setVoiceDesc(e.target.value)}
                   rows={3}
                   style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="e.g. Burnished alto, mid-40s American, slight vocal roughness. Controlled, forensic cadence."
+                  placeholder="e.g. Burnished alto, mid-40s American, slight vocal roughness. Controlled, forensic cadence. Understates emotion."
                 />
               </div>
 
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 6 }}>
-                  Characteristics
-                </label>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
-                  {TONE_CHIPS.map((chip) => {
-                    const on = toneChips.has(chip);
-                    return (
-                      <button
-                        key={chip}
-                        className={`btn btn-sm${on ? " btn-primary" : ""}`}
-                        style={on ? { borderColor: "var(--tts)", color: "var(--tts)", background: "color-mix(in oklch, var(--tts) 10%, var(--bg-2))" } : undefined}
-                        onClick={() => {
-                          setToneChips((prev) => {
-                            const next = new Set(prev);
-                            if (next.has(chip)) next.delete(chip); else next.add(chip);
-                            return next;
-                          });
-                        }}
-                      >
-                        {chip}
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Test line
-                </label>
+                <label style={labelStyle}>Test line</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     className="input"
@@ -553,169 +518,134 @@ export const CharacterDesignerView: React.FC = () => {
                     disabled={generating}
                     style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
                   >
-                    {generating ? "Generating…" : "Generate reference"}
+                    {generating ? "Generating…" : "Generate"}
                   </button>
                 </div>
-                {genError && (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{genError}</div>
-                )}
+                {genError && <div style={errorStyle}>{genError}</div>}
               </div>
 
-              {/* Running indicator */}
-              {runningJobs.some((j) => j.row_index === DESIGN_ROW) && (
-                <div style={{
-                  padding: "8px 12px", marginBottom: 8,
-                  background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                  borderRadius: "var(--r)", fontSize: 11, color: "var(--tts)",
-                  fontFamily: "var(--font-mono)",
-                }}>
-                  ◐ Synthesizing voice…
-                </div>
-              )}
+              {runningDesign && <RunningBadge label="Synthesising voice…" />}
 
-              {/* Design takes */}
               {designJobs.length > 0 && (
-                <div style={{ borderRadius: "var(--r)", border: "1px solid var(--line-1)", overflow: "hidden" }}>
-                  <div style={{
-                    padding: "6px 12px", background: "var(--bg-2)",
-                    fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)",
-                    letterSpacing: "0.07em", textTransform: "uppercase",
-                  }}>
-                    Reference takes · {designJobs.length}
-                  </div>
+                <TakeList label={`Design takes · ${designJobs.length}`}>
                   {designJobs.map((job, i) => (
                     <TakeRow
-                      key={job.id}
-                      job={job}
-                      index={i}
-                      isRef={char.voice_assignment.ref_audio_path === job.output_path}
-                      onSetRef={() => {
-                        saveVoiceAssignment({
-                          ref_audio_path: job.output_path,
-                          model: "Clone",
-                        });
+                      key={job.id} job={job} index={i}
+                      saveLabel="Save as character voice"
+                      isSaved={refPath === job.output_path}
+                      onSave={() => {
+                        saveVoice({ ref_audio_path: job.output_path, model: "Clone" });
                         setTab("clone");
                       }}
-                      onQa={(status) => setQaStatus(job.id, status)}
+                      onQa={(s) => setQaStatus(job.id, s)}
                     />
                   ))}
-                </div>
+                </TakeList>
               )}
 
-              {designJobs.length === 0 && !runningJobs.some((j) => j.row_index === DESIGN_ROW) && (
-                <div style={{
-                  padding: "24px", textAlign: "center",
-                  border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                  fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6,
-                }}>
-                  No reference takes yet.<br />
-                  Write a description and generate one above.
-                </div>
+              {designJobs.length === 0 && !runningDesign && (
+                <EmptyTakes label="No takes yet — write a description and generate above." />
               )}
-
-              <div style={{ marginTop: 20, padding: "12px 14px", background: "var(--bg-2)", borderRadius: "var(--r)" }}>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>
-                  Workflow tip
-                </div>
-                <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.6 }}>
-                  Generate several takes with different descriptions. Approve the closest match,
-                  then click <strong>set ref</strong> to promote it to the Clone reference.
-                  The Clone tab uses that audio to maintain vocal consistency across all lines.
-                </div>
-              </div>
             </div>
           )}
 
-          {/* ── CLONE TAB ────────────────────────────────────────────────── */}
+          {/* ── CLONE ────────────────────────────────────────────────────── */}
           {tab === "clone" && (
             <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.5 }}>
-                Clone uses a reference take as a vocal fingerprint. Every line rendered with
-                this character will match that timbre — even across sessions.
+              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
+                Clone uses a reference audio clip as a vocal fingerprint.
+                Upload any WAV or generate one from Voice Design — every production line
+                for this character will match that timbre.
               </p>
 
               {/* Reference audio */}
               <div style={{ marginBottom: 18 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 8 }}>
-                  Reference audio
-                </label>
-                {char.voice_assignment.ref_audio_path ? (
+                <label style={labelStyle}>Reference audio</label>
+                {refPath ? (
                   <div style={{
                     display: "flex", alignItems: "center", gap: 10,
                     padding: "10px 12px",
                     background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
                     borderRadius: "var(--r)", border: "1px solid var(--line-2)",
                   }}>
-                    <PlayButton path={char.voice_assignment.ref_audio_path} size={12} />
-                    <Wave width={120} height={18} seed={char.id.charCodeAt(0)} count={30} color="var(--tts)" opacity={0.7} />
-                    <span style={{ flex: 1, fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                      {char.voice_assignment.ref_audio_path.split("/").pop()}
+                    <PlayButton path={refPath} size={12} />
+                    <Wave width={110} height={18} seed={char.id.charCodeAt(0)} count={28} color="var(--tts)" opacity={0.7} />
+                    <span style={{
+                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
+                      color: "var(--fg-3)", overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {refPath.split("/").pop()}
                     </span>
+                    <button className="btn btn-sm" onClick={handlePickFile}>replace</button>
                     <button
                       className="btn btn-sm"
-                      onClick={() => saveVoiceAssignment({ ref_audio_path: null })}
-                      title="Clear reference"
-                    >
-                      clear
-                    </button>
+                      style={{ color: "var(--sfx)" }}
+                      onClick={() => saveVoice({ ref_audio_path: null })}
+                    >clear</button>
                   </div>
                 ) : (
                   <div style={{
-                    padding: "16px", border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                    fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6,
+                    padding: "16px 14px",
+                    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+                    display: "flex", flexDirection: "column", gap: 8,
                   }}>
-                    No reference audio set.{" "}
+                    <div style={{ fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6 }}>
+                      No reference audio. Upload a clip or{" "}
+                      <button
+                        className="btn btn-sm"
+                        onClick={() => setTab("design")}
+                        style={{ display: "inline", padding: "1px 6px" }}
+                      >
+                        generate one in Voice Design →
+                      </button>
+                    </div>
                     <button
                       className="btn btn-sm"
-                      onClick={() => setTab("design")}
-                      style={{ display: "inline", padding: "1px 6px" }}
+                      onClick={handlePickFile}
+                      style={{ alignSelf: "flex-start" }}
                     >
-                      Go to Voice Design →
+                      Upload audio file…
                     </button>
-                    {" "}to generate takes and promote one as the reference.
                   </div>
                 )}
               </div>
 
               {/* ref_transcript */}
               <div style={{ marginBottom: 14 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Reference transcript <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none" }}>(optional — helps ICL mode)</span>
+                <label style={labelStyle}>
+                  Reference transcript{" "}
+                  <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    — optional, helps ICL mode
+                  </span>
                 </label>
                 <input
                   className="input"
                   value={refTranscript}
                   onChange={(e) => setRefTranscript(e.target.value)}
-                  onBlur={() => saveVoiceAssignment({ ref_transcript: refTranscript })}
+                  onBlur={() => saveVoice({ ref_transcript: refTranscript })}
                   style={{ width: "100%", fontSize: 12 }}
-                  placeholder="What is said in the reference audio…"
+                  placeholder="What is spoken in the reference audio…"
                 />
               </div>
 
-              {/* instruct_default */}
+              {/* instruct */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Voice instructions
-                </label>
+                <label style={labelStyle}>Voice instructions</label>
                 <textarea
                   className="input"
                   value={instruct}
                   onChange={(e) => setInstruct(e.target.value)}
-                  onBlur={() => saveVoiceAssignment({ instruct_default: instruct })}
+                  onBlur={() => saveVoice({ instruct_default: instruct })}
                   rows={2}
                   style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="Directorial style notes applied to every line for this character…"
+                  placeholder="Directorial notes pre-filled in the TTS panel for every line…"
                 />
-                <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 3 }}>
-                  These become the default <code>[instruct]</code> in the TTS panel.
-                </div>
               </div>
 
-              {/* Test line + generate */}
+              {/* Test clone */}
               <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Test clone
-                </label>
+                <label style={labelStyle}>Test clone</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <input
                     className="input"
@@ -727,185 +657,32 @@ export const CharacterDesignerView: React.FC = () => {
                   <button
                     className="btn btn-primary"
                     onClick={handleGenerateClone}
-                    disabled={generating || !char.voice_assignment.ref_audio_path}
+                    disabled={generating || !refPath}
                     style={{
                       background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
-                      opacity: !char.voice_assignment.ref_audio_path ? 0.4 : 1,
+                      opacity: !refPath ? 0.4 : 1, flexShrink: 0,
                     }}
                   >
-                    {generating ? "Generating…" : "Generate clone"}
+                    {generating ? "Generating…" : "Generate"}
                   </button>
                 </div>
-                {genError && (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{genError}</div>
-                )}
+                {genError && <div style={errorStyle}>{genError}</div>}
               </div>
 
-              {/* Running indicator */}
-              {runningJobs.some((j) => j.row_index === CLONE_ROW) && (
-                <div style={{
-                  padding: "8px 12px", marginBottom: 8,
-                  background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                  borderRadius: "var(--r)", fontSize: 11, color: "var(--tts)",
-                  fontFamily: "var(--font-mono)",
-                }}>
-                  ◐ Cloning voice…
-                </div>
-              )}
+              {runningClone && <RunningBadge label="Cloning voice…" />}
 
-              {/* Clone takes */}
               {cloneJobs.length > 0 && (
-                <div style={{ borderRadius: "var(--r)", border: "1px solid var(--line-1)", overflow: "hidden" }}>
-                  <div style={{
-                    padding: "6px 12px", background: "var(--bg-2)",
-                    fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)",
-                    letterSpacing: "0.07em", textTransform: "uppercase",
-                  }}>
-                    Clone test takes · {cloneJobs.length}
-                  </div>
+                <TakeList label={`Clone takes · ${cloneJobs.length}`}>
                   {cloneJobs.map((job, i) => (
                     <TakeRow
-                      key={job.id}
-                      job={job}
-                      index={i}
-                      isRef={false}
-                      onSetRef={() => {}}
-                      onQa={(status) => setQaStatus(job.id, status)}
+                      key={job.id} job={job} index={i}
+                      saveLabel="Save as new reference"
+                      isSaved={refPath === job.output_path}
+                      onSave={() => saveVoice({ ref_audio_path: job.output_path })}
+                      onQa={(s) => setQaStatus(job.id, s)}
                     />
                   ))}
-                </div>
-              )}
-
-              <div style={{ marginTop: 20, padding: "12px 14px", background: "var(--bg-2)", borderRadius: "var(--r)" }}>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.07em", textTransform: "uppercase", marginBottom: 4 }}>
-                  Production use
-                </div>
-                <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.6 }}>
-                  When generating lines in the <strong>Voice / Dialogue</strong> panel, selecting
-                  this character will automatically use Clone mode with this reference and
-                  voice instructions pre-filled.
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ── CUSTOM VOICE TAB ─────────────────────────────────────────── */}
-          {tab === "custom" && (
-            <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.5 }}>
-                Use one of Qwen3-TTS's built-in speaker presets. Consistent but less character-specific
-                than Clone. Good for minor roles or radio voices.
-              </p>
-
-              <div style={{ marginBottom: 18 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 8 }}>
-                  Speaker preset
-                </label>
-                <div style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", gap: 6 }}>
-                  {SPEAKERS.map((sp) => {
-                    const active = selectedSpeaker === sp.id;
-                    return (
-                      <button
-                        key={sp.id}
-                        onClick={() => {
-                          setSelectedSpeaker(sp.id);
-                          saveVoiceAssignment({ speaker: sp.id, model: "CustomVoice" });
-                        }}
-                        style={{
-                          padding: "8px 10px", textAlign: "left",
-                          background: active ? "color-mix(in oklch, var(--tts) 10%, var(--bg-2))" : "var(--bg-2)",
-                          border: active ? "1px solid var(--tts)" : "1px solid var(--line-1)",
-                          borderRadius: "var(--r)", cursor: "pointer",
-                        }}
-                      >
-                        <div style={{ fontWeight: 500, fontSize: 12, color: active ? "var(--tts)" : "var(--fg-1)", marginBottom: 2 }}>
-                          {sp.id}
-                        </div>
-                        <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)" }}>
-                          {sp.desc}
-                        </div>
-                      </button>
-                    );
-                  })}
-                </div>
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Voice instructions
-                </label>
-                <textarea
-                  className="input"
-                  value={instruct}
-                  onChange={(e) => setInstruct(e.target.value)}
-                  onBlur={() => saveVoiceAssignment({ instruct_default: instruct })}
-                  rows={2}
-                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="Style notes applied to every line (optional)…"
-                />
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em", color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4 }}>
-                  Test line
-                </label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input"
-                    value={testLine}
-                    onChange={(e) => setTestLine(e.target.value)}
-                    style={{ flex: 1, fontSize: 12 }}
-                    placeholder="Line to synthesize…"
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleGenerateCustom}
-                    disabled={generating}
-                    style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
-                  >
-                    {generating ? "Generating…" : "Generate test"}
-                  </button>
-                </div>
-                {genError && (
-                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{genError}</div>
-                )}
-              </div>
-
-              {/* Running indicator */}
-              {runningJobs.some((j) => j.row_index === CUSTOM_ROW) && (
-                <div style={{
-                  padding: "8px 12px", marginBottom: 8,
-                  background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                  borderRadius: "var(--r)", fontSize: 11, color: "var(--tts)",
-                  fontFamily: "var(--font-mono)",
-                }}>
-                  ◐ Synthesizing…
-                </div>
-              )}
-
-              {/* Custom test takes */}
-              {jobs.filter((j) => j.scene_slug === slug && j.row_index === CUSTOM_ROW && j.status === "complete" && j.output_path).length > 0 && (
-                <div style={{ borderRadius: "var(--r)", border: "1px solid var(--line-1)", overflow: "hidden" }}>
-                  <div style={{
-                    padding: "6px 12px", background: "var(--bg-2)",
-                    fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)",
-                    letterSpacing: "0.07em", textTransform: "uppercase",
-                  }}>
-                    Test takes
-                  </div>
-                  {jobs
-                    .filter((j) => j.scene_slug === slug && j.row_index === CUSTOM_ROW && j.status === "complete" && j.output_path)
-                    .map((job, i) => (
-                      <TakeRow
-                        key={job.id}
-                        job={job}
-                        index={i}
-                        isRef={false}
-                        onSetRef={() => {}}
-                        onQa={(status) => setQaStatus(job.id, status)}
-                      />
-                    ))}
-                </div>
+                </TakeList>
               )}
             </div>
           )}
@@ -914,74 +691,95 @@ export const CharacterDesignerView: React.FC = () => {
 
       {/* ── Right meta panel ────────────────────────────────────────────── */}
       <div style={{
-        width: 180, flexShrink: 0,
+        width: 174, flexShrink: 0,
         borderLeft: "1px solid var(--line-1)",
         background: "var(--bg-1)",
-        padding: "14px 12px",
-        overflowY: "auto",
-        fontSize: 11,
+        padding: "14px 12px", overflowY: "auto", fontSize: 11,
       }}>
-        <div style={{
-          fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
-          color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 10,
-        }}>
-          Voice model
-        </div>
-        <div style={{ color: "var(--tts)", fontWeight: 500, marginBottom: 4 }}>
-          {char.voice_assignment.model === "CustomVoice" ? "Custom Voice" :
-           char.voice_assignment.model === "VoiceDesign" ? "Voice Design" :
-           char.voice_assignment.model === "Clone" ? "Voice Clone" : "Fine-Tuned"}
-        </div>
-        {char.voice_assignment.speaker && (
-          <div style={{ color: "var(--fg-3)", marginBottom: 8 }}>
-            Speaker: {char.voice_assignment.speaker}
+        <MetaSection label="Mode">
+          <div style={{ color: "var(--tts)", fontWeight: 500 }}>
+            {char.voice_assignment.model === "Clone" ? "Voice Clone"
+              : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
+              : "Custom"}
           </div>
-        )}
-        {char.voice_assignment.ref_audio_path && (
-          <div style={{ color: "var(--st-rendered)", fontSize: 10, marginBottom: 8 }}>
-            ✓ Reference set
-          </div>
-        )}
+          {refPath
+            ? <div style={{ color: "var(--st-rendered)", fontSize: 10, marginTop: 4 }}>✓ Reference set</div>
+            : <div style={{ color: "var(--fg-4)", fontSize: 10, marginTop: 4 }}>No reference</div>}
+        </MetaSection>
 
-        <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 12, marginTop: 4 }}>
-          <div style={{
-            fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
-            color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 8,
-          }}>
-            Instruct default
-          </div>
-          <div style={{ color: "var(--fg-3)", lineHeight: 1.5, fontSize: 10.5 }}>
-            {char.voice_assignment.instruct_default || <em style={{ color: "var(--fg-4)" }}>none</em>}
-          </div>
-        </div>
-
-        <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 12, marginTop: 12 }}>
-          <div style={{
-            fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
-            color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 8,
-          }}>
-            Design takes
-          </div>
-          <div style={{ color: "var(--fg-2)", fontSize: 13, fontWeight: 600 }}>
-            {designJobs.length}
-          </div>
-        </div>
-
-        {cloneJobs.length > 0 && (
-          <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 12, marginTop: 12 }}>
-            <div style={{
-              fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
-              color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 8,
-            }}>
-              Clone takes
+        {char.voice_assignment.instruct_default && (
+          <MetaSection label="Voice instructions">
+            <div style={{ color: "var(--fg-3)", lineHeight: 1.5, fontSize: 10.5 }}>
+              {char.voice_assignment.instruct_default}
             </div>
-            <div style={{ color: "var(--fg-2)", fontSize: 13, fontWeight: 600 }}>
-              {cloneJobs.length}
-            </div>
-          </div>
+          </MetaSection>
         )}
+
+        <MetaSection label="Takes">
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <span style={{ color: "var(--fg-3)" }}>Design: <strong style={{ color: "var(--fg-1)" }}>{designJobs.length}</strong></span>
+            <span style={{ color: "var(--fg-3)" }}>Clone: <strong style={{ color: "var(--fg-1)" }}>{cloneJobs.length}</strong></span>
+          </div>
+        </MetaSection>
       </div>
 
     </div>
   );
 };
+
+// ── Small shared sub-components ────────────────────────────────────────────
+
+const labelStyle: React.CSSProperties = {
+  fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em",
+  color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4,
+};
+
+const errorStyle: React.CSSProperties = {
+  marginTop: 6, fontSize: 11, color: "var(--sfx)",
+};
+
+const RunningBadge: React.FC<{ label: string }> = ({ label }) => (
+  <div style={{
+    padding: "8px 12px", marginBottom: 10,
+    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
+    borderRadius: "var(--r)", fontSize: 11, color: "var(--tts)",
+    fontFamily: "var(--font-mono)",
+  }}>
+    ◐ {label}
+  </div>
+);
+
+const EmptyTakes: React.FC<{ label: string }> = ({ label }) => (
+  <div style={{
+    padding: "24px", textAlign: "center",
+    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+    fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6,
+  }}>
+    {label}
+  </div>
+);
+
+const TakeList: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div style={{ borderRadius: "var(--r)", border: "1px solid var(--line-1)", overflow: "hidden" }}>
+    <div style={{
+      padding: "6px 12px", background: "var(--bg-2)",
+      fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)",
+      letterSpacing: "0.07em", textTransform: "uppercase",
+    }}>
+      {label}
+    </div>
+    {children}
+  </div>
+);
+
+const MetaSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
+  <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 12, marginTop: 12 }}>
+    <div style={{
+      fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
+      color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 6,
+    }}>
+      {label}
+    </div>
+    {children}
+  </div>
+);
