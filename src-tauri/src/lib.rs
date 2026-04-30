@@ -55,6 +55,10 @@ pub fn run() {
             commands::audio::get_waveform_peaks,
             commands::audio::get_duration_ms,
             commands::audio::find_zero_crossings,
+            // Audio engine (ffmpeg)
+            commands::audio_engine::normalize_clip,
+            commands::audio_engine::resample_to_48k,
+            commands::audio_engine::render_scene,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
