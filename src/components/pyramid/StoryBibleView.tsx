@@ -228,15 +228,15 @@ export const StoryBibleView: React.FC = () => {
 
         {/* Synopsis */}
         <h2>Synopsis</h2>
-        <p>
-          Vera Halloran has spent three winters cataloguing the disappearing dialects of the salt belt.
-          When her brother Abel sends a final transmission consisting only of a hymn and a man counting
-          backward in Dutch, Vera drives north toward a town called Sluis that no satellite has ever photographed.
-        </p>
-        <p>
-          What she finds beneath the salt is older than the mine. The voice on the radio has been speaking
-          for forty-one years. It knows her name.
-        </p>
+        <div style={{ fontSize: 14, color: "var(--fg-1)", lineHeight: 1.7, whiteSpace: "pre-wrap" }}>
+          <EditableText
+            value={project.synopsis}
+            onSave={(v) => updateProjectMeta({ synopsis: v })}
+            placeholder="Write a synopsis…"
+            multiline
+            style={{ fontSize: 14, display: "block", width: "100%" }}
+          />
+        </div>
 
         {/* Cast */}
         <h3>Cast &amp; voice direction</h3>

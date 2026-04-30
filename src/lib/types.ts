@@ -196,6 +196,7 @@ export interface MockProject {
   title: string;
   subtitle: string;
   logline: string;
+  synopsis: string;
   season: string;
   episode: string;
   runtime: string;
