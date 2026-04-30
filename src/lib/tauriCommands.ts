@@ -66,3 +66,138 @@ export const updateScriptRow = (args: {
   rowIndex: number;
   fields: Partial<Record<string, string>>;
 }): Promise<ScriptRow> => invoke("update_script_row", args);
+
+// ── Inference ────────────────────────────────────────────────────────────────
+
+export interface ServerHealth {
+  status: string;
+  model_loaded: boolean;
+  model_variant: string;
+  vram_mb: number;
+  stub: boolean;
+}
+
+export const checkServerHealth = (model: "tts" | "sfx" | "music"): Promise<ServerHealth> =>
+  invoke("check_server_health", { model });
+
+export const updateServerConfig = (cfg: {
+  ttsUrl?: string;
+  sfxUrl?: string;
+  musicUrl?: string;
+}): Promise<void> => invoke("update_server_config", cfg);
+
+export const submitTtsCustomVoice = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    text: string;
+    speaker: string;
+    language: string;
+    instruct: string;
+    seed: number;
+    temperature: number;
+    top_p: number;
+    max_new_tokens: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_tts_custom_voice", args);
+
+export const submitTtsVoiceDesign = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    text: string;
+    voice_description: string;
+    language: string;
+    seed: number;
+    temperature: number;
+    top_p: number;
+    max_new_tokens: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_tts_voice_design", args);
+
+export const submitSfxT2a = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    prompt: string;
+    duration_seconds: number;
+    model_variant: string;
+    steps: number;
+    seed: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_sfx_t2a", args);
+
+export const submitMusicText2Music = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    caption: string;
+    lyrics: string;
+    duration_seconds: number;
+    bpm?: number;
+    key: string;
+    language: string;
+    lm_model_size: string;
+    diffusion_steps: number;
+    thinking_mode: boolean;
+    reference_audio_path: string;
+    seed: number;
+    batch_size: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_music_text2music", args);
+
+// ── Sidecar ──────────────────────────────────────────────────────────────────
+
+export interface SidecarMeta {
+  model: string;
+  model_variant: string | null;
+  prompt: string;
+  instruct: string | null;
+  speaker: string | null;
+  language: string | null;
+  seed: number;
+  temperature: number | null;
+  top_p: number | null;
+  duration_target_ms: number | null;
+  duration_actual_ms: number | null;
+  sample_rate: number;
+  generated_at: string;
+  parent: string | null;
+  take_index: number;
+  qa_status: "unreviewed" | "approved" | "rejected";
+  qa_notes: string;
+}
+
+export const writeSidecar = (audioPath: string, meta: SidecarMeta): Promise<void> =>
+  invoke("write_sidecar", { audioPath, meta });
+
+export const readSidecar = (audioPath: string): Promise<SidecarMeta | null> =>
+  invoke("read_sidecar", { audioPath });
+
+export const getTakes = (baseAudioPath: string): Promise<SidecarMeta[]> =>
+  invoke("get_takes", { baseAudioPath });
+
+export const updateSidecarQa = (args: {
+  audioPath: string;
+  qaStatus: string;
+  qaNotes: string;
+}): Promise<void> => invoke("update_sidecar_qa", args);
+
+// ── Audio utilities ──────────────────────────────────────────────────────────
+
+export const getWaveformPeaks = (path: string, numPeaks: number): Promise<number[]> =>
+  invoke("get_waveform_peaks", { path, numPeaks });
+
+export const getDurationMs = (path: string): Promise<number> =>
+  invoke("get_duration_ms", { path });
+
+export const findZeroCrossings = (path: string, nearMs: number): Promise<number[]> =>
+  invoke("find_zero_crossings", { path, nearMs });
