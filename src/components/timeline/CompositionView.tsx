@@ -1,8 +1,9 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Icon, Wave } from "../shared/atoms";
+import { PlayButton } from "../shared/PlayButton";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
-import { readScript, updateScriptRow } from "../../lib/tauriCommands";
+import { readScript, updateScriptRow, renderScene } from "../../lib/tauriCommands";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, AssetItem, ScriptRow } from "../../lib/types";
 
 const PX_PER_SEC = 4;
@@ -96,38 +97,6 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   scene, scenes, tracks, assets, onSwitchScene, onOpenPyramid, onUpdateScene,
 }) => {
   const [selected, setSelected] = useState<string | null>(null);
-  // Local clip start positions — index matches tracks[ti].clips[ci].start, overrides on drag
-  const [clipStarts, setClipStarts] = useState<number[][]>(() =>
-    tracks.map((t) => t.clips.map((c) => c.start))
-  );
-
-  // Reset clip positions when scene/tracks change
-  useEffect(() => {
-    setClipStarts(tracks.map((t) => t.clips.map((c) => c.start)));
-  }, [scene.no]);
-
-  const handleClipMove = (ti: number, ci: number, newStartSec: number) => {
-    setClipStarts((prev) => prev.map((row, i) =>
-      i === ti ? row.map((s, j) => j === ci ? newStartSec : s) : row
-    ));
-    // Write-back to script CSV when real project is open and clip has row info
-    // (mock clips don't carry row_index; this fires when real tracks are wired)
-    if (realProjectId && activeSceneSlug) {
-      const rowIndex = (tracks[ti]?.clips[ci] as { row_index?: number }).row_index;
-      if (rowIndex != null) {
-        updateScriptRow({
-          projectId: realProjectId,
-          sceneSlug: activeSceneSlug,
-          rowIndex,
-          fields: { start_ms: String(Math.round(newStartSec * 1000)) },
-        }).catch(console.error);
-      }
-    }
-  };
-
-  const staticPlayheadSec = 72;
-  const { playing, position } = useAudioStore();
-  const playheadSec = playing ? position : staticPlayheadSec;
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(scene.title);
   const [desc, setDesc] = useState(scene.desc);
@@ -140,7 +109,76 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [editingRow, setEditingRow] = useState<number | null>(null);
   const [editingPrompt, setEditingPrompt] = useState("");
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [renderState, setRenderState] = useState<"idle" | "rendering" | "done" | "error">("idle");
+  const [renderPath, setRenderPath] = useState<string | null>(null);
+  const [renderError, setRenderError] = useState<string | null>(null);
   const { realProjectId, activeSceneSlug } = useProjectStore();
+
+  // Derive timeline tracks from real script rows when a project is loaded
+  const activeTracks = useMemo<MockTrack[]>(() => {
+    if (!realProjectId || scriptRows.length === 0) return tracks;
+
+    const map = new Map<string, MockTrack>();
+    scriptRows.forEach((row, rowIndex) => {
+      const typeUp = row.type.toUpperCase();
+      if (typeUp === "DIRECTION") return;
+      if (!map.has(row.track)) {
+        const kind: MockTrack["kind"] =
+          typeUp === "DIALOGUE" ? "dialogue" :
+          typeUp === "MUSIC"    ? "music"    : "sfx";
+        map.set(row.track, { id: row.track, kind, name: row.track, clips: [] });
+      }
+      if (row.file && row.start_ms) {
+        const startSec = Number(row.start_ms) / 1000;
+        const durSec   = row.duration_ms ? Number(row.duration_ms) / 1000 : 5;
+        const label    = row.character || row.prompt.slice(0, 30) || row.file.split("/").pop() || "clip";
+        map.get(row.track)!.clips.push({ start: startSec, len: durSec, label, take: 1, row_index: rowIndex });
+      }
+    });
+    return Array.from(map.values());
+  }, [realProjectId, scriptRows, tracks]);
+
+  const handleRender = async () => {
+    if (!realProjectId || !activeSceneSlug) return;
+    setRenderState("rendering");
+    setRenderPath(null);
+    setRenderError(null);
+    try {
+      const outPath = await renderScene(realProjectId, activeSceneSlug);
+      setRenderPath(outPath);
+      setRenderState("done");
+    } catch (e) {
+      setRenderError(String(e));
+      setRenderState("error");
+    }
+  };
+
+  // Local clip start positions; reset whenever activeTracks changes
+  const [clipStarts, setClipStarts] = useState<number[][]>([]);
+  useEffect(() => {
+    setClipStarts(activeTracks.map((t) => t.clips.map((c) => c.start)));
+    setSelected(null);
+  }, [activeTracks]);
+
+  const handleClipMove = (ti: number, ci: number, newStartSec: number) => {
+    setClipStarts((prev) => prev.map((row, i) =>
+      i === ti ? row.map((s, j) => j === ci ? newStartSec : s) : row
+    ));
+    if (realProjectId && activeSceneSlug) {
+      const rowIndex = activeTracks[ti]?.clips[ci]?.row_index;
+      if (rowIndex != null) {
+        updateScriptRow({
+          projectId: realProjectId,
+          sceneSlug: activeSceneSlug,
+          rowIndex,
+          fields: { start_ms: String(Math.round(newStartSec * 1000)) },
+        }).catch(console.error);
+      }
+    }
+  };
+
+  const { playing, position } = useAudioStore();
+  const playheadSec = playing ? position : 72;
 
   useEffect(() => {
     setTitle(scene.title);
@@ -250,7 +288,33 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                 {scriptRows.length > 0 && <span style={{ marginLeft: 5, fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-3)" }}>{scriptRows.length}</span>}
               </button>
               <button className="btn"><Icon name="sparkle" style={{ width: 14, height: 14 }} /> Agent assist</button>
-              <button className="btn btn-primary"><Icon name="download" style={{ width: 14, height: 14 }} /> Render scene</button>
+              {/* Render scene — wired when real project open */}
+              {renderState === "done" && renderPath ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--st-rendered)" }}>render.wav</span>
+                  <PlayButton path={renderPath} size={13} />
+                  <button className="btn btn-primary" onClick={handleRender}>
+                    <Icon name="download" style={{ width: 14, height: 14 }} /> Re-render
+                  </button>
+                </div>
+              ) : renderState === "error" ? (
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--sfx)", maxWidth: 200, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={renderError ?? undefined}>
+                    {renderError?.split("\n")[0]}
+                  </span>
+                  <button className="btn btn-primary" onClick={handleRender}>Retry</button>
+                </div>
+              ) : (
+                <button
+                  className="btn btn-primary"
+                  onClick={handleRender}
+                  disabled={!realProjectId || renderState === "rendering"}
+                  title={!realProjectId ? "Open a real project to render" : undefined}
+                >
+                  <Icon name="download" style={{ width: 14, height: 14 }} />
+                  {renderState === "rendering" ? "Rendering…" : "Render scene"}
+                </button>
+              )}
             </>
           )}
         </div>
@@ -369,8 +433,13 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       {/* Timeline */}
       <div className="timeline" style={{ gridColumn: 1 }}>
         <div className="tracks-head">
-          <div className="tracks-time">TRACKS · {tracks.length}</div>
-          {tracks.map((t) => (
+          <div className="tracks-time">
+            TRACKS · {activeTracks.length}
+            {realProjectId && scriptRows.length > 0 && (
+              <span style={{ marginLeft: 6, fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--st-rendered)", textTransform: "uppercase", letterSpacing: "0.06em" }}>live</span>
+            )}
+          </div>
+          {activeTracks.map((t) => (
             <div key={t.id} className={`track-label ${t.kind}`}>
               <div className="name">{t.name}</div>
               <div className="track-controls">
@@ -384,7 +453,12 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         <div className="tracks-body">
           <div className="timeline-ruler" style={{ width: TOTAL_SEC * PX_PER_SEC }}>{ruler}</div>
           <div className="tracks-rows" style={{ width: TOTAL_SEC * PX_PER_SEC }}>
-            {tracks.map((t, ti) => (
+            {activeTracks.length === 0 && realProjectId && (
+              <div style={{ padding: "20px 16px", fontSize: 11, color: "var(--fg-4)" }}>
+                No placed clips yet — assign start_ms to script rows via the Script panel.
+              </div>
+            )}
+            {activeTracks.map((t, ti) => (
               <div
                 key={t.id}
                 className="track-row"
