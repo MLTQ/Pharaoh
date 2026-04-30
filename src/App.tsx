@@ -301,9 +301,9 @@ export default function App() {
             onUpdateScene={updateScene}
           />
         )}
-        {view === "bible"       && <StoryBibleView project={project} cast={cast} />}
+        {view === "bible"       && <StoryBibleView />}
         {view === "characters"  && <CharacterDesignerView />}
-        {view === "tts"   && <TTSPanel cast={cast} scenes={scenes} defaultScene={activeSceneNo} />}
+        {view === "tts"   && <TTSPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "sfx"   && <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "music" && <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />}
       </div>

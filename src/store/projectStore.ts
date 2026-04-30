@@ -24,6 +24,7 @@ interface ProjectState {
   projectsDir: string | null;
   activeSceneSlug: string | null;
 
+  updateProjectMeta: (patch: Partial<MockProject>) => void;
   setActiveScene: (no: string) => void;
   updateScene: (no: string, patch: Partial<MockScene>) => void;
   loadRealProject: (project: Project, projectsDir: string) => void;
@@ -46,6 +47,9 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
 
   characters: MOCK_CHARACTERS,
   selectedCharId: MOCK_CHARACTERS[0]?.id ?? null,
+
+  updateProjectMeta: (patch) =>
+    set((state) => ({ project: { ...state.project, ...patch } })),
 
   setSelectedChar: (id) => set({ selectedCharId: id }),
 
