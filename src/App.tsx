@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Icon, Wave } from "./components/shared/atoms";
 import { PyramidView } from "./components/pyramid/PyramidView";
 import { StoryBibleView } from "./components/pyramid/StoryBibleView";
@@ -9,10 +9,12 @@ import { MusicPanel } from "./components/generators/MusicPanel";
 import { AgentFeed } from "./components/shared/AgentFeed";
 import { AssetBrowser } from "./components/shared/AssetBrowser";
 import { JobQueue } from "./components/shared/JobQueue";
+import { ProjectPicker } from "./components/project/ProjectPicker";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
+import { useModelStore } from "./store/modelStore";
 import { MOCK_AGENT_LOG, MOCK_TRACKS } from "./lib/mockData";
 import type { ViewId, RightTab } from "./lib/types";
 
@@ -25,19 +27,42 @@ const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label:
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
 ];
 
+const STATUS_COLOR: Record<string, string> = {
+  online:  "var(--st-rendered)",
+  offline: "var(--sfx)",
+  loading: "var(--st-gen)",
+  unknown: "var(--fg-4)",
+};
+
 export default function App() {
   const { project, scenes, cast, assets, activeSceneNo, setActiveScene, updateScene } = useProjectStore();
-  const { jobs } = useJobStore();
+  const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setRightTab } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
+  const { tts, sfx, music, pollHealth } = useModelStore();
+  const [showProjectPicker, setShowProjectPicker] = useState(false);
 
-  const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[3];
+  const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
 
   // Apply theme to root
   useEffect(() => {
     document.documentElement.dataset.colorTemp = colorTemp === "forest" ? "" : colorTemp;
     document.documentElement.dataset.density   = density === "compact" ? "compact" : "";
   }, [colorTemp, density]);
+
+  // Wire Tauri job events
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    initListeners().then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  // Poll server health on mount and every 30s
+  useEffect(() => {
+    pollHealth();
+    const id = setInterval(pollHealth, 30_000);
+    return () => clearInterval(id);
+  }, []);
 
   const breadcrumb = (() => {
     if (view === "pyramid")     return [{ k: "Project", v: project.title, active: true }];
@@ -67,6 +92,17 @@ export default function App() {
     return `${m}:${s}`;
   };
 
+  if (showProjectPicker) {
+    return (
+      <ProjectPicker
+        onOpen={(_p) => {
+          // TODO: load real project into projectStore
+          setShowProjectPicker(false);
+        }}
+      />
+    );
+  }
+
   return (
     <div className="app">
       {/* ── TOPBAR ─────────────────────────────────────────────────────── */}
@@ -91,6 +127,32 @@ export default function App() {
           ))}
         </div>
         <div className="topbar-spacer" />
+
+        {/* Server health dots */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
+          {(["tts", "sfx", "music"] as const).map((m) => {
+            const s = m === "tts" ? tts : m === "sfx" ? sfx : music;
+            return (
+              <span
+                key={m}
+                title={`${m.toUpperCase()} server: ${s}`}
+                style={{
+                  display: "flex", alignItems: "center", gap: 4,
+                  fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)",
+                  letterSpacing: "0.06em", textTransform: "uppercase",
+                }}
+              >
+                <span style={{
+                  width: 6, height: 6, borderRadius: "50%",
+                  background: STATUS_COLOR[s] ?? "var(--fg-4)",
+                  boxShadow: s === "online" ? `0 0 4px ${STATUS_COLOR[s]}` : "none",
+                }} />
+                {m}
+              </span>
+            );
+          })}
+        </div>
+
         <div className="status-pills">
           <span className="status-pill"><span className="dot" /> autosaved {project.lastSync.split(" ")[1]}</span>
           {runningJobs > 0 && (
@@ -119,7 +181,9 @@ export default function App() {
           </button>
         ))}
         <div className="rail-spacer" />
-        <button className="rail-btn"><Icon name="folder"   style={{ width: 18, height: 18 }} /></button>
+        <button className="rail-btn" title="Switch project" onClick={() => setShowProjectPicker(true)}>
+          <Icon name="folder" style={{ width: 18, height: 18 }} />
+        </button>
         <button className="rail-btn"><Icon name="settings" style={{ width: 18, height: 18 }} /></button>
       </div>
 
