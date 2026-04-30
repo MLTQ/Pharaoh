@@ -201,3 +201,18 @@ export const getDurationMs = (path: string): Promise<number> =>
 
 export const findZeroCrossings = (path: string, nearMs: number): Promise<number[]> =>
   invoke("find_zero_crossings", { path, nearMs });
+
+// ── Audio engine (ffmpeg) ────────────────────────────────────────────────────
+
+/** Normalize a clip in-place to targetLufs LUFS; returns path to .norm.wav file. */
+export const normalizeClip = (path: string, targetLufs: number): Promise<string> =>
+  invoke("normalize_clip", { path, targetLufs });
+
+/** Resample a WAV file to 48 kHz stereo WAV at outputPath. */
+export const resampleTo48k = (path: string, outputPath: string): Promise<void> =>
+  invoke("resample_to_48k", { path, outputPath });
+
+/** Render a scene to render.wav by mixing all placed script rows via ffmpeg filter_complex.
+ *  Returns the output file path. */
+export const renderScene = (projectId: string, sceneSlug: string): Promise<string> =>
+  invoke("render_scene", { projectId, sceneSlug });

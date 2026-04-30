@@ -108,6 +108,42 @@ export const Wave: React.FC<WaveProps> = ({
   );
 };
 
+// ── PeaksWave ────────────────────────────────────────────────────────────────
+
+interface PeaksWaveProps {
+  peaks: number[];      // values 0..1
+  width?: number;
+  height?: number;
+  color?: string;
+  opacity?: number;
+}
+
+export const PeaksWave: React.FC<PeaksWaveProps> = ({
+  peaks, width = 200, height = 24, color = "currentColor", opacity = 0.85,
+}) => {
+  const count = peaks.length;
+  if (count === 0) return null;
+  const bw = width / count;
+  return (
+    <svg width="100%" height={height} viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none">
+      {peaks.map((p, i) => {
+        const h = Math.max(1, p * height);
+        return (
+          <rect
+            key={i}
+            x={i * bw + bw * 0.2}
+            y={(height - h) / 2}
+            width={bw * 0.55}
+            height={h}
+            fill={color}
+            opacity={opacity}
+          />
+        );
+      })}
+    </svg>
+  );
+};
+
 // ── StatusRing ──────────────────────────────────────────────────────────────
 
 type StatusRingStatus = "draft" | "gen" | "generating" | "ready" | "assets_ready" | "composed" | "rendered";

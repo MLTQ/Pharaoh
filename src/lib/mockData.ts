@@ -120,11 +120,11 @@ export const MOCK_ASSETS: MockAssets = {
 };
 
 export const MOCK_JOBS: Job[] = [
-  { id: "j1", model: "tts",   description: "VERA · S04 · \"Who carved this?\" — take 2",         status: "complete", progress: 100, eta: "done",   started_at: "14:21", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 2, output_path: null, error: null },
-  { id: "j2", model: "sfx",   description: "footsteps doubling · echo chamber · 18s",            status: "running",  progress: 64,  eta: "12s",    started_at: "14:22", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 5, output_path: null, error: null },
-  { id: "j3", model: "music", description: "Cue 4C · Counting Backward · 1:36 · variation 3",    status: "running",  progress: 22,  eta: "1m 40s", started_at: "14:22", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 7, output_path: null, error: null },
-  { id: "j4", model: "tts",   description: "ABEL · S05 · \"Forty-one years\" — take 1",          status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "05_counting_backward",  row_index: 0, output_path: null, error: null },
-  { id: "j5", model: "sfx",   description: "wind · salt flat · 0:42",                            status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "06_surface_dawn",       row_index: 1, output_path: null, error: null },
+  { id: "j1", model: "tts",   description: "VERA · S04 · \"Who carved this?\" — take 2",         status: "complete", progress: 100, eta: "done",   started_at: "14:21", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 2, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
+  { id: "j2", model: "sfx",   description: "footsteps doubling · echo chamber · 18s",            status: "running",  progress: 64,  eta: "12s",    started_at: "14:22", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 5, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
+  { id: "j3", model: "music", description: "Cue 4C · Counting Backward · 1:36 · variation 3",    status: "running",  progress: 22,  eta: "1m 40s", started_at: "14:22", scene_id: null, scene_slug: "04_the_vault_beneath", row_index: 7, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
+  { id: "j4", model: "tts",   description: "ABEL · S05 · \"Forty-one years\" — take 1",          status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "05_counting_backward",  row_index: 0, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
+  { id: "j5", model: "sfx",   description: "wind · salt flat · 0:42",                            status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "06_surface_dawn",       row_index: 1, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
 ];
 
 export const MOCK_AGENT_LOG: AgentLogEntry[] = [

@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { Job } from "../lib/types";
+import type { Job, QaJobStatus } from "../lib/types";
 import { MOCK_JOBS } from "../lib/mockData";
 
 interface JobProgressEvent {
@@ -24,17 +24,26 @@ interface JobFailedEvent {
   error: string;
 }
 
+export function takeKey(sceneSlug: string, rowIndex: number): string {
+  return `${sceneSlug}:${rowIndex}`;
+}
+
 interface JobState {
   jobs: Job[];
+  // Maps "{scene_slug}:{row_index}" → job_id of the active (selected) take
+  activeTakes: Record<string, string>;
   addJob: (job: Job) => void;
   updateJob: (id: string, update: Partial<Job>) => void;
   removeJob: (id: string) => void;
+  setActiveTake: (sceneSlug: string, rowIndex: number, jobId: string) => void;
+  setQaStatus: (jobId: string, status: QaJobStatus) => void;
   // Returns an unlisten function; call on unmount
   initListeners: () => Promise<() => void>;
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
   jobs: MOCK_JOBS,
+  activeTakes: {},
 
   addJob: (job) =>
     set((state) => ({ jobs: [job, ...state.jobs] })),
@@ -47,8 +56,17 @@ export const useJobStore = create<JobState>((set, get) => ({
   removeJob: (id) =>
     set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),
 
+  setActiveTake: (sceneSlug, rowIndex, jobId) =>
+    set((state) => ({
+      activeTakes: { ...state.activeTakes, [takeKey(sceneSlug, rowIndex)]: jobId },
+    })),
+
+  setQaStatus: (jobId, status) =>
+    set((state) => ({
+      jobs: state.jobs.map((j) => (j.id === jobId ? { ...j, qa_status: status } : j)),
+    })),
+
   initListeners: async () => {
-    // Dynamically import to avoid crashing in browser/Vite without Tauri
     let unlisten: Array<() => void> = [];
     try {
       const { listen } = await import("@tauri-apps/api/event");
@@ -60,12 +78,27 @@ export const useJobStore = create<JobState>((set, get) => ({
         });
       });
 
-      const u2 = await listen<JobCompleteEvent>("job-complete", ({ payload }) => {
+      const u2 = await listen<JobCompleteEvent>("job-complete", async ({ payload }) => {
         get().updateJob(payload.job_id, {
           status: "complete",
           progress: 100,
           output_path: payload.output_path,
         });
+
+        // Auto-select as active take if this row has no active take yet
+        const key = takeKey(payload.scene_slug, payload.row_index);
+        if (!get().activeTakes[key]) {
+          get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
+        }
+
+        // Fetch waveform peaks
+        try {
+          const { getWaveformPeaks } = await import("../lib/tauriCommands");
+          const peaks = await getWaveformPeaks(payload.output_path, 120);
+          get().updateJob(payload.job_id, { peaks });
+        } catch {
+          // Not fatal — peaks stay null, Wave fallback renders instead
+        }
       });
 
       const u3 = await listen<JobFailedEvent>("job-failed", ({ payload }) => {

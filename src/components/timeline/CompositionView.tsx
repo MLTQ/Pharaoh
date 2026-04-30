@@ -1,9 +1,86 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { Icon, Wave } from "../shared/atoms";
-import type { MockScene, MockTrack, MockAssets, AssetItem } from "../../lib/types";
+import { useProjectStore } from "../../store/projectStore";
+import { useAudioStore } from "../../store/audioStore";
+import { readScript, updateScriptRow } from "../../lib/tauriCommands";
+import type { MockScene, MockTrack, MockTrackClip, MockAssets, AssetItem, ScriptRow } from "../../lib/types";
 
 const PX_PER_SEC = 4;
 const TOTAL_SEC = 200;
+const SNAP_SEC = 0.5; // snap to 0.5s grid when dragging
+
+// ── Draggable clip ───────────────────────────────────────────────────────────
+
+interface DraggableClipProps {
+  clip: MockTrackClip;
+  startSec: number;    // current start (may differ from clip.start after moves)
+  trackIdx: number;
+  clipIdx: number;
+  trackKind: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
+}
+
+const DraggableClip: React.FC<DraggableClipProps> = ({
+  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove,
+}) => {
+  const pointerStartX = useRef(0);
+  const [dragOffsetPx, setDragOffsetPx] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartX.current = e.clientX;
+    setDragOffsetPx(0);
+    setDragging(true);
+    onSelect();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    setDragOffsetPx(e.clientX - pointerStartX.current);
+  };
+
+  const handlePointerUp = () => {
+    if (!dragging) return;
+    setDragging(false);
+    const rawSec = startSec + dragOffsetPx / PX_PER_SEC;
+    const snapped = Math.max(0, Math.round(rawSec / SNAP_SEC) * SNAP_SEC);
+    onMove(trackIdx, clipIdx, snapped);
+    setDragOffsetPx(0);
+  };
+
+  const effectiveLeft = (startSec * PX_PER_SEC) + dragOffsetPx;
+
+  return (
+    <div
+      className={`clip ${trackKind}${isSelected ? " selected" : ""}${dragging ? " dragging" : ""}`}
+      style={{
+        left: effectiveLeft,
+        width: clip.len * PX_PER_SEC,
+        cursor: dragging ? "grabbing" : "grab",
+        opacity: dragging ? 0.85 : 1,
+        zIndex: dragging ? 10 : undefined,
+        userSelect: "none",
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <div className="clip-label">{clip.label}</div>
+      <div className="clip-wave">
+        <Wave
+          width={clip.len * PX_PER_SEC}
+          height={28}
+          seed={trackIdx * 7 + clipIdx * 3 + 1}
+          count={Math.max(20, Math.floor(clip.len * 1.6))}
+        />
+      </div>
+    </div>
+  );
+};
 
 interface CompositionViewProps {
   scene: MockScene;
@@ -19,7 +96,38 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   scene, scenes, tracks, assets, onSwitchScene, onOpenPyramid, onUpdateScene,
 }) => {
   const [selected, setSelected] = useState<string | null>(null);
-  const playheadSec = 72;
+  // Local clip start positions — index matches tracks[ti].clips[ci].start, overrides on drag
+  const [clipStarts, setClipStarts] = useState<number[][]>(() =>
+    tracks.map((t) => t.clips.map((c) => c.start))
+  );
+
+  // Reset clip positions when scene/tracks change
+  useEffect(() => {
+    setClipStarts(tracks.map((t) => t.clips.map((c) => c.start)));
+  }, [scene.no]);
+
+  const handleClipMove = (ti: number, ci: number, newStartSec: number) => {
+    setClipStarts((prev) => prev.map((row, i) =>
+      i === ti ? row.map((s, j) => j === ci ? newStartSec : s) : row
+    ));
+    // Write-back to script CSV when real project is open and clip has row info
+    // (mock clips don't carry row_index; this fires when real tracks are wired)
+    if (realProjectId && activeSceneSlug) {
+      const rowIndex = (tracks[ti]?.clips[ci] as { row_index?: number }).row_index;
+      if (rowIndex != null) {
+        updateScriptRow({
+          projectId: realProjectId,
+          sceneSlug: activeSceneSlug,
+          rowIndex,
+          fields: { start_ms: String(Math.round(newStartSec * 1000)) },
+        }).catch(console.error);
+      }
+    }
+  };
+
+  const staticPlayheadSec = 72;
+  const { playing, position } = useAudioStore();
+  const playheadSec = playing ? position : staticPlayheadSec;
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(scene.title);
   const [desc, setDesc] = useState(scene.desc);
@@ -27,6 +135,12 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [dropTarget, setDropTarget] = useState<number | null>(null);
   const [showAssets, setShowAssets] = useState(true);
   const [wide, setWide] = useState(window.innerWidth >= 1180);
+  const [showScript, setShowScript] = useState(false);
+  const [scriptRows, setScriptRows] = useState<ScriptRow[]>([]);
+  const [editingRow, setEditingRow] = useState<number | null>(null);
+  const [editingPrompt, setEditingPrompt] = useState("");
+  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const { realProjectId, activeSceneSlug } = useProjectStore();
 
   useEffect(() => {
     setTitle(scene.title);
@@ -39,6 +153,32 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
+
+  // Load script rows from Tauri when real project is available
+  useEffect(() => {
+    if (!realProjectId || !activeSceneSlug) return;
+    readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug })
+      .then(setScriptRows)
+      .catch(() => setScriptRows([]));
+  }, [realProjectId, activeSceneSlug, scene.no]);
+
+  const commitRowEdit = (rowIndex: number, prompt: string) => {
+    setScriptRows((rows) => rows.map((r, i) => i === rowIndex ? { ...r, prompt } : r));
+    if (!realProjectId || !activeSceneSlug) return;
+    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
+    saveTimerRef.current = setTimeout(() => {
+      updateScriptRow({ projectId: realProjectId, sceneSlug: activeSceneSlug, rowIndex, fields: { prompt } })
+        .catch(console.error);
+    }, 5000); // 5s debounce per architecture spec
+  };
+
+  const TYPE_COLOR: Record<string, string> = {
+    DIALOGUE: "var(--tts)",
+    SFX: "var(--sfx)",
+    BED: "var(--sfx)",
+    MUSIC: "var(--music)",
+    DIRECTION: "var(--fg-3)",
+  };
 
   const sidebarVisible = wide && showAssets;
 
@@ -66,7 +206,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       style={{
         display: "grid",
         gridTemplateColumns: sidebarVisible ? "minmax(0,1fr) 280px" : "minmax(0,1fr)",
-        gridTemplateRows: "auto auto auto 1fr",
+        gridTemplateRows: "auto auto auto auto 1fr",
       }}
     >
       {/* Header */}
@@ -105,6 +245,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                 </button>
               )}
               <button className="btn" onClick={() => setEditing(true)}>Edit story</button>
+              <button className="btn" onClick={() => setShowScript((v) => !v)}>
+                {showScript ? "Hide script" : "Script"}
+                {scriptRows.length > 0 && <span style={{ marginLeft: 5, fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-3)" }}>{scriptRows.length}</span>}
+              </button>
               <button className="btn"><Icon name="sparkle" style={{ width: 14, height: 14 }} /> Agent assist</button>
               <button className="btn btn-primary"><Icon name="download" style={{ width: 14, height: 14 }} /> Render scene</button>
             </>
@@ -149,6 +293,79 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         </div>
       )}
 
+      {/* Script CSV panel */}
+      {showScript && (
+        <div style={{
+          gridColumn: "1 / -1",
+          borderBottom: "1px solid var(--line-1)",
+          background: "var(--bg-1)",
+          maxHeight: 240, overflow: "auto",
+        }}>
+          <div style={{
+            display: "grid",
+            gridTemplateColumns: "70px 80px 100px 1fr 80px 80px",
+            padding: "6px 16px",
+            borderBottom: "1px solid var(--line-1)",
+            fontFamily: "var(--font-mono)", fontSize: 9,
+            letterSpacing: "0.08em", textTransform: "uppercase", color: "var(--fg-4)",
+            background: "var(--bg-2)", position: "sticky", top: 0,
+          }}>
+            <span>Track</span><span>Type</span><span>Character</span><span>Prompt</span>
+            <span>Start</span><span>Duration</span>
+          </div>
+          {scriptRows.length === 0 && (
+            <div style={{ padding: "20px 16px", fontSize: 11, color: "var(--fg-4)", textAlign: "center" }}>
+              {realProjectId ? "No script rows yet. Generate audio from the Voice/SFX/Music panels." : "Script CSV available when a real project is open."}
+            </div>
+          )}
+          {scriptRows.map((row, i) => (
+            <div
+              key={i}
+              style={{
+                display: "grid",
+                gridTemplateColumns: "70px 80px 100px 1fr 80px 80px",
+                padding: "5px 16px",
+                borderBottom: "1px solid var(--line-1)",
+                alignItems: "center",
+                background: editingRow === i ? "var(--bg-2)" : "transparent",
+              }}
+            >
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)" }}>{row.track}</span>
+              <span style={{
+                fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.06em",
+                padding: "1px 5px", borderRadius: 2,
+                background: `color-mix(in oklch, ${TYPE_COLOR[row.type] ?? "var(--fg-4)"} 15%, transparent)`,
+                color: TYPE_COLOR[row.type] ?? "var(--fg-4)",
+                width: "fit-content",
+              }}>{row.type}</span>
+              <span style={{ fontSize: 11, color: "var(--fg-2)" }}>{row.character || "—"}</span>
+              {editingRow === i ? (
+                <input
+                  className="input"
+                  style={{ fontSize: 11, padding: "2px 6px" }}
+                  value={editingPrompt}
+                  onChange={(e) => setEditingPrompt(e.target.value)}
+                  onBlur={() => { commitRowEdit(i, editingPrompt); setEditingRow(null); }}
+                  autoFocus
+                />
+              ) : (
+                <span
+                  style={{ fontSize: 11, color: "var(--fg-1)", cursor: "text", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  onClick={() => { setEditingRow(i); setEditingPrompt(row.prompt); }}
+                  title={row.prompt}
+                >{row.prompt || <span style={{ color: "var(--fg-4)" }}>—</span>}</span>
+              )}
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: row.start_ms ? "var(--fg-2)" : "var(--fg-4)" }}>
+                {row.start_ms ? `${(Number(row.start_ms) / 1000).toFixed(1)}s` : "—"}
+              </span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: row.file ? "var(--st-rendered)" : "var(--fg-4)" }}>
+                {row.duration_ms ? `${(Number(row.duration_ms) / 1000).toFixed(1)}s` : row.file ? "✓" : "—"}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Timeline */}
       <div className="timeline" style={{ gridColumn: 1 }}>
         <div className="tracks-head">
@@ -177,22 +394,17 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                 style={dropTarget === ti ? { boxShadow: "inset 0 0 0 1px var(--fg-0)" } : {}}
               >
                 {t.clips.map((c, ci) => (
-                  <div
+                  <DraggableClip
                     key={ci}
-                    className={`clip ${t.kind} ${selected === `${ti}-${ci}` ? "selected" : ""}`}
-                    style={{ left: c.start * PX_PER_SEC, width: c.len * PX_PER_SEC }}
-                    onClick={(e) => { e.stopPropagation(); setSelected(`${ti}-${ci}`); }}
-                  >
-                    <div className="clip-label">{c.label}</div>
-                    <div className="clip-wave">
-                      <Wave
-                        width={c.len * PX_PER_SEC}
-                        height={28}
-                        seed={ti * 7 + ci * 3 + 1}
-                        count={Math.max(20, Math.floor(c.len * 1.6))}
-                      />
-                    </div>
-                  </div>
+                    clip={c}
+                    startSec={clipStarts[ti]?.[ci] ?? c.start}
+                    trackIdx={ti}
+                    clipIdx={ci}
+                    trackKind={t.kind}
+                    isSelected={selected === `${ti}-${ci}`}
+                    onSelect={() => setSelected(`${ti}-${ci}`)}
+                    onMove={handleClipMove}
+                  />
                 ))}
               </div>
             ))}

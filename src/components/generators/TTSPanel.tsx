@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Icon, Wave } from "../shared/atoms";
 import { RichDirector, SceneRouter } from "./RichDirector";
+import { useGenerateJob } from "../../hooks/useGenerateJob";
 import type { MockCastMember, MockScene } from "../../lib/types";
 
 const TTS_TAGS = [
@@ -31,6 +32,27 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ cast, scenes, defaultScene }
     "[voice: VERA · elv·burnish-04]\n[delivery: half-whispered, looking up; the lamp is the only light]\n[acoustic: salt chamber, 2.4s tail, no music bed]\n\n(she swallows)\nIt can't go this deep. The geological survey said sixty meters — we've been descending for twenty minutes.\n\n[breath · 0.4s]\n\n(barely audible)\nAbel? Is that you down there?"
   );
   const [pace, setPace] = useState(0.92);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const { submitTts } = useGenerateJob();
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      await submitTts({
+        text: value,
+        speaker,
+        instruct: tags.join(", "),
+        seed: Math.floor(Math.random() * 99999),
+        temperature: pace,
+      });
+    } catch (e) {
+      setGenError(String(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
     <div className="panel-view">
@@ -44,9 +66,13 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ cast, scenes, defaultScene }
               Chip tags, inline cues, and stage directions all interpreted by the model.
             </span>
           </div>
-          <button className="btn btn-tts">
-            <Icon name="sparkle" style={{ width: 14, height: 14 }} /> Generate take
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <button className="btn btn-tts" onClick={handleGenerate} disabled={generating}>
+              <Icon name="sparkle" style={{ width: 14, height: 14 }} />
+              {generating ? "Submitting…" : "Generate take"}
+            </button>
+            {genError && <span style={{ fontSize: 10, color: "var(--sfx)", maxWidth: 200, textAlign: "right" }}>{genError}</span>}
+          </div>
         </div>
 
         <SceneRouter scenes={scenes} scene={scene} setScene={setScene} accent="var(--tts)" onSend={() => {}} />

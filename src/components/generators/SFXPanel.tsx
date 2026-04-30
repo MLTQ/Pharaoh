@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { Icon, Wave } from "../shared/atoms";
 import { RichDirector, SceneRouter } from "./RichDirector";
+import { useGenerateJob } from "../../hooks/useGenerateJob";
 import type { MockScene } from "../../lib/types";
 
 const SFX_TAGS = ["wet salt", "cavern · 2.4s tail", "doubled rhythm", "sub rumble", "foley", "exterior"];
@@ -30,6 +31,22 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
   const [value, setValue] = useState(
     "[surface: wet salt floor, fine grit underfoot]\n[space: salt chamber, 2.4s reverb tail, low rumble bed]\n[rhythm: slow walk · 52 bpm · doubled half-beat behind]\n\nFootsteps approach from camera, deliberate and measured. A second pair, half a beat behind, echoing back from the tunnel — same gait, same weight. The doubling tightens through the middle, then drifts ahead of the original."
   );
+  const [duration] = useState(3.0);
+  const [generating, setGenerating] = useState(false);
+  const [genError, setGenError] = useState<string | null>(null);
+  const { submitSfx } = useGenerateJob();
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    setGenError(null);
+    try {
+      await submitSfx({ prompt: value, durationSeconds: duration });
+    } catch (e) {
+      setGenError(String(e));
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   return (
     <div className="panel-view">
@@ -43,9 +60,18 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
               Length-locked to selection on the timeline.
             </span>
           </div>
-          <button className="btn" style={{ borderColor: "var(--sfx-d)", color: "var(--sfx)", background: "color-mix(in oklch, var(--sfx) 10%, transparent)" }}>
-            <Icon name="sparkle" style={{ width: 14, height: 14 }} /> Generate · 4 variations
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
+            <button
+              className="btn"
+              style={{ borderColor: "var(--sfx-d)", color: "var(--sfx)", background: "color-mix(in oklch, var(--sfx) 10%, transparent)" }}
+              onClick={handleGenerate}
+              disabled={generating}
+            >
+              <Icon name="sparkle" style={{ width: 14, height: 14 }} />
+              {generating ? "Submitting…" : "Generate · 4 variations"}
+            </button>
+            {genError && <span style={{ fontSize: 10, color: "var(--sfx)", maxWidth: 200, textAlign: "right" }}>{genError}</span>}
+          </div>
         </div>
 
         <SceneRouter scenes={scenes} scene={scene} setScene={setScene} accent="var(--sfx)" onSend={() => {}} />
