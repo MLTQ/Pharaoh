@@ -3,10 +3,84 @@ import { Icon, Wave } from "../shared/atoms";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { readScript, updateScriptRow } from "../../lib/tauriCommands";
-import type { MockScene, MockTrack, MockAssets, AssetItem, ScriptRow } from "../../lib/types";
+import type { MockScene, MockTrack, MockTrackClip, MockAssets, AssetItem, ScriptRow } from "../../lib/types";
 
 const PX_PER_SEC = 4;
 const TOTAL_SEC = 200;
+const SNAP_SEC = 0.5; // snap to 0.5s grid when dragging
+
+// ── Draggable clip ───────────────────────────────────────────────────────────
+
+interface DraggableClipProps {
+  clip: MockTrackClip;
+  startSec: number;    // current start (may differ from clip.start after moves)
+  trackIdx: number;
+  clipIdx: number;
+  trackKind: string;
+  isSelected: boolean;
+  onSelect: () => void;
+  onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
+}
+
+const DraggableClip: React.FC<DraggableClipProps> = ({
+  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove,
+}) => {
+  const pointerStartX = useRef(0);
+  const [dragOffsetPx, setDragOffsetPx] = useState(0);
+  const [dragging, setDragging] = useState(false);
+
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartX.current = e.clientX;
+    setDragOffsetPx(0);
+    setDragging(true);
+    onSelect();
+  };
+
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!dragging) return;
+    setDragOffsetPx(e.clientX - pointerStartX.current);
+  };
+
+  const handlePointerUp = () => {
+    if (!dragging) return;
+    setDragging(false);
+    const rawSec = startSec + dragOffsetPx / PX_PER_SEC;
+    const snapped = Math.max(0, Math.round(rawSec / SNAP_SEC) * SNAP_SEC);
+    onMove(trackIdx, clipIdx, snapped);
+    setDragOffsetPx(0);
+  };
+
+  const effectiveLeft = (startSec * PX_PER_SEC) + dragOffsetPx;
+
+  return (
+    <div
+      className={`clip ${trackKind}${isSelected ? " selected" : ""}${dragging ? " dragging" : ""}`}
+      style={{
+        left: effectiveLeft,
+        width: clip.len * PX_PER_SEC,
+        cursor: dragging ? "grabbing" : "grab",
+        opacity: dragging ? 0.85 : 1,
+        zIndex: dragging ? 10 : undefined,
+        userSelect: "none",
+      }}
+      onPointerDown={handlePointerDown}
+      onPointerMove={handlePointerMove}
+      onPointerUp={handlePointerUp}
+    >
+      <div className="clip-label">{clip.label}</div>
+      <div className="clip-wave">
+        <Wave
+          width={clip.len * PX_PER_SEC}
+          height={28}
+          seed={trackIdx * 7 + clipIdx * 3 + 1}
+          count={Math.max(20, Math.floor(clip.len * 1.6))}
+        />
+      </div>
+    </div>
+  );
+};
 
 interface CompositionViewProps {
   scene: MockScene;
@@ -22,6 +96,35 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   scene, scenes, tracks, assets, onSwitchScene, onOpenPyramid, onUpdateScene,
 }) => {
   const [selected, setSelected] = useState<string | null>(null);
+  // Local clip start positions — index matches tracks[ti].clips[ci].start, overrides on drag
+  const [clipStarts, setClipStarts] = useState<number[][]>(() =>
+    tracks.map((t) => t.clips.map((c) => c.start))
+  );
+
+  // Reset clip positions when scene/tracks change
+  useEffect(() => {
+    setClipStarts(tracks.map((t) => t.clips.map((c) => c.start)));
+  }, [scene.no]);
+
+  const handleClipMove = (ti: number, ci: number, newStartSec: number) => {
+    setClipStarts((prev) => prev.map((row, i) =>
+      i === ti ? row.map((s, j) => j === ci ? newStartSec : s) : row
+    ));
+    // Write-back to script CSV when real project is open and clip has row info
+    // (mock clips don't carry row_index; this fires when real tracks are wired)
+    if (realProjectId && activeSceneSlug) {
+      const rowIndex = (tracks[ti]?.clips[ci] as { row_index?: number }).row_index;
+      if (rowIndex != null) {
+        updateScriptRow({
+          projectId: realProjectId,
+          sceneSlug: activeSceneSlug,
+          rowIndex,
+          fields: { start_ms: String(Math.round(newStartSec * 1000)) },
+        }).catch(console.error);
+      }
+    }
+  };
+
   const staticPlayheadSec = 72;
   const { playing, position } = useAudioStore();
   const playheadSec = playing ? position : staticPlayheadSec;
@@ -291,22 +394,17 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                 style={dropTarget === ti ? { boxShadow: "inset 0 0 0 1px var(--fg-0)" } : {}}
               >
                 {t.clips.map((c, ci) => (
-                  <div
+                  <DraggableClip
                     key={ci}
-                    className={`clip ${t.kind} ${selected === `${ti}-${ci}` ? "selected" : ""}`}
-                    style={{ left: c.start * PX_PER_SEC, width: c.len * PX_PER_SEC }}
-                    onClick={(e) => { e.stopPropagation(); setSelected(`${ti}-${ci}`); }}
-                  >
-                    <div className="clip-label">{c.label}</div>
-                    <div className="clip-wave">
-                      <Wave
-                        width={c.len * PX_PER_SEC}
-                        height={28}
-                        seed={ti * 7 + ci * 3 + 1}
-                        count={Math.max(20, Math.floor(c.len * 1.6))}
-                      />
-                    </div>
-                  </div>
+                    clip={c}
+                    startSec={clipStarts[ti]?.[ci] ?? c.start}
+                    trackIdx={ti}
+                    clipIdx={ci}
+                    trackKind={t.kind}
+                    isSelected={selected === `${ti}-${ci}`}
+                    onSelect={() => setSelected(`${ti}-${ci}`)}
+                    onMove={handleClipMove}
+                  />
                 ))}
               </div>
             ))}
