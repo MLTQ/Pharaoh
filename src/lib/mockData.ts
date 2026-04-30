@@ -1,7 +1,70 @@
 import type {
   MockProject, MockCastMember, MockScene, MockTrack,
-  MockAssets, AgentLogEntry, Job
+  MockAssets, AgentLogEntry, Job, Character
 } from "./types";
+
+export const MOCK_CHARACTERS: Character[] = [
+  {
+    id: "VERA",
+    name: "Vera Halloran",
+    description: "Forensic linguist, 38. Driven and attentive; understates fear.",
+    voice_assignment: {
+      model: "Clone",
+      speaker: null,
+      instruct_default: "Burnished alto. Forensic, attentive. Understates fear.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "ABEL",
+    name: "Abel Reese",
+    description: "Vera's missing brother. Heard only in recordings and memory.",
+    voice_assignment: {
+      model: "VoiceDesign",
+      speaker: null,
+      instruct_default: "Lower, hoarser. Long breaths between phrases.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "CONST",
+    name: "Constance Mire",
+    description: "Diner keeper, 60s. Professionally distant — knows more than she says.",
+    voice_assignment: {
+      model: "CustomVoice",
+      speaker: "Vivian",
+      instruct_default: "Warm but professionally distant. Measured cadence.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "RADIO",
+    name: "Voice on the Radio",
+    description: "Disembodied. Counts backward in Dutch.",
+    voice_assignment: {
+      model: "CustomVoice",
+      speaker: "Magnus",
+      instruct_default: "Slightly distorted, as if through AM static. Dutch counting cadence.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "NARR",
+    name: "Narrator",
+    description: "Third-person omniscient. Patinated, unhurried.",
+    voice_assignment: {
+      model: "VoiceDesign",
+      speaker: null,
+      instruct_default: "Patinated, third-person. Unhurried, authoritative.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+];
 
 export const MOCK_PROJECT: MockProject = {
   title: "The Salt Path",

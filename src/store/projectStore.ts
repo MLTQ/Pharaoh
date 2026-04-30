@@ -1,6 +1,6 @@
 import { create } from "zustand";
-import type { MockProject, MockScene, MockCastMember, MockAssets, Project } from "../lib/types";
-import { MOCK_PROJECT, MOCK_SCENES, MOCK_CAST, MOCK_ASSETS } from "../lib/mockData";
+import type { MockProject, MockScene, MockCastMember, MockAssets, Project, Character } from "../lib/types";
+import { MOCK_PROJECT, MOCK_SCENES, MOCK_CAST, MOCK_ASSETS, MOCK_CHARACTERS } from "../lib/mockData";
 
 interface ProjectState {
   // UI / mock data (always present, used for rendering)
@@ -9,6 +9,13 @@ interface ProjectState {
   cast: MockCastMember[];
   assets: MockAssets;
   activeSceneNo: string;
+
+  // Character designer
+  characters: Character[];
+  selectedCharId: string | null;
+  setSelectedChar: (id: string) => void;
+  updateCharacter: (id: string, patch: Partial<Character>) => void;
+  updateVoiceAssignment: (id: string, patch: Partial<Character["voice_assignment"]>) => void;
 
   // Real Tauri-backed project data (null = demo/browser mode)
   realProjectId: string | null;
@@ -34,6 +41,23 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   cast: MOCK_CAST,
   assets: MOCK_ASSETS,
   activeSceneNo: "S04",
+
+  characters: MOCK_CHARACTERS,
+  selectedCharId: MOCK_CHARACTERS[0]?.id ?? null,
+
+  setSelectedChar: (id) => set({ selectedCharId: id }),
+
+  updateCharacter: (id, patch) =>
+    set((state) => ({
+      characters: state.characters.map((c) => (c.id === id ? { ...c, ...patch } : c)),
+    })),
+
+  updateVoiceAssignment: (id, patch) =>
+    set((state) => ({
+      characters: state.characters.map((c) =>
+        c.id === id ? { ...c, voice_assignment: { ...c.voice_assignment, ...patch } } : c
+      ),
+    })),
 
   realProjectId: null,
   projectsDir: null,

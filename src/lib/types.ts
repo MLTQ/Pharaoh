@@ -141,7 +141,7 @@ export interface AssetItem {
 
 // ── UI state ────────────────────────────────────────────────────────────────
 
-export type ViewId = "pyramid" | "composition" | "bible" | "tts" | "sfx" | "music";
+export type ViewId = "pyramid" | "composition" | "bible" | "characters" | "tts" | "sfx" | "music";
 export type RightTab = "agent" | "assets" | "jobs";
 export type ColorTemp = "forest" | "warm" | "neutral";
 export type Density = "comfortable" | "compact";

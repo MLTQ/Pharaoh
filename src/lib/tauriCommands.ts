@@ -103,6 +103,23 @@ export const submitTtsCustomVoice = (args: {
   };
 }): Promise<string> => invoke("submit_tts_custom_voice", args);
 
+export const submitTtsVoiceClone = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    text: string;
+    ref_audio_path: string;
+    ref_transcript: string;
+    language: string;
+    icl_mode: boolean;
+    seed: number;
+    temperature: number;
+    top_p: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_tts_voice_clone", args);
+
 export const submitTtsVoiceDesign = (args: {
   projectId: string;
   sceneSlug: string;

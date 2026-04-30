@@ -7,7 +7,7 @@ type IconName =
   | "folder" | "queue" | "settings" | "play" | "pause" | "skip_back"
   | "skip_fwd" | "record" | "plus" | "minus" | "fit" | "search"
   | "chevron_right" | "chevron_down" | "sparkle" | "history"
-  | "download" | "eye";
+  | "download" | "eye" | "person";
 
 const ICON_PATHS: Record<IconName, React.ReactNode> = {
   pyramid:       <><path d="M12 3 L21 20 H3 Z" /><path d="M12 3 L12 20" /><path d="M7.5 11.5 H16.5" /></>,
@@ -34,6 +34,7 @@ const ICON_PATHS: Record<IconName, React.ReactNode> = {
   history:       <><path d="M3 12 a9 9 0 1 0 3 -6.7" /><path d="M3 4 V9 H8" /><path d="M12 7 V12 L15 14" /></>,
   download:      <><path d="M12 4 V16" /><path d="M6 11 L12 17 L18 11" /><path d="M4 20 H20" /></>,
   eye:           <><path d="M2 12 s4 -7 10 -7 s10 7 10 7 s-4 7 -10 7 s-10 -7 -10 -7 Z" /><circle cx="12" cy="12" r="3" /></>,
+  person:        <><circle cx="12" cy="8" r="4" /><path d="M4 20 a8 8 0 0 1 16 0" /></>,
 };
 
 interface IconProps extends React.SVGProps<SVGSVGElement> {

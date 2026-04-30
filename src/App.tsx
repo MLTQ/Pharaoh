@@ -2,6 +2,7 @@ import React, { useEffect, useState } from "react";
 import { Icon, Wave } from "./components/shared/atoms";
 import { PyramidView } from "./components/pyramid/PyramidView";
 import { StoryBibleView } from "./components/pyramid/StoryBibleView";
+import { CharacterDesignerView } from "./components/characters/CharacterDesignerView";
 import { CompositionView } from "./components/timeline/CompositionView";
 import { TTSPanel } from "./components/generators/TTSPanel";
 import { SFXPanel } from "./components/generators/SFXPanel";
@@ -24,6 +25,7 @@ const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label:
   { id: "pyramid",     icon: "pyramid",   label: "Pyramid" },
   { id: "composition", icon: "timeline",  label: "Composition" },
   { id: "bible",       icon: "book",      label: "Story Bible" },
+  { id: "characters",  icon: "person",    label: "Cast & Voices" },
   { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
   { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
@@ -69,6 +71,7 @@ export default function App() {
   const breadcrumb = (() => {
     if (view === "pyramid")     return [{ k: "Project", v: project.title, active: true }];
     if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
+    if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
     if (view === "composition") return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
     if (view === "tts")         return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Dialogue", active: true }];
     if (view === "sfx")         return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Sound design", active: true }];
@@ -80,6 +83,7 @@ export default function App() {
     pyramid:     { eyebrow: "Workspace", title: "Pyramid" },
     composition: { eyebrow: "Workspace", title: "Composition" },
     bible:       { eyebrow: "Workspace", title: "Story Bible" },
+    characters:  { eyebrow: "Tier I", title: "Cast & Voices" },
     tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
     sfx:         { eyebrow: "Generation", title: "Sound design" },
     music:       { eyebrow: "Generation", title: "Score" },
@@ -208,6 +212,11 @@ export default function App() {
             <span>Story Bible</span>
             <span className="num">{project.revision}</span>
           </div>
+          <div className={`side-item ${view === "characters" ? "active" : ""}`} onClick={() => setView("characters")}>
+            <span className="ico" style={{ color: "var(--tts)" }}><Icon name="person" style={{ width: 14, height: 14 }} /></span>
+            <span>Cast & Voices</span>
+            <span className="num">{cast.length}</span>
+          </div>
 
           <div className="side-section">Tier II · Scenes</div>
           {scenes.map((s) => (
@@ -292,7 +301,8 @@ export default function App() {
             onUpdateScene={updateScene}
           />
         )}
-        {view === "bible" && <StoryBibleView project={project} cast={cast} />}
+        {view === "bible"       && <StoryBibleView project={project} cast={cast} />}
+        {view === "characters"  && <CharacterDesignerView />}
         {view === "tts"   && <TTSPanel cast={cast} scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "sfx"   && <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "music" && <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />}
