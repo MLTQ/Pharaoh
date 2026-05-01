@@ -1,6 +1,8 @@
 import React, { useState, useEffect } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useModelStore } from "../../store/modelStore";
+import type { AppConfig } from "../../lib/types";
 
 // ── Hardware detection ────────────────────────────────────────────────────────
 
@@ -364,9 +366,30 @@ export const SettingsView: React.FC = () => {
     music: `http://127.0.0.1:18003`,
   });
 
+  const [wooshDir, setWooshDir] = useState("");
+
+  // Load persisted config on mount
+  useEffect(() => {
+    invoke<AppConfig>("get_app_config").then((cfg) => {
+      setUrls({ tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url });
+      setWooshDir(cfg.woosh_dir ?? "");
+    }).catch(() => {});
+  }, []);
+
   const handleUrlBlur = async (kind: "tts" | "sfx" | "music") => {
     await updateServerConfig({ [`${kind}_url`]: urls[kind] });
   };
+
+  const handleBrowseWoosh = async () => {
+    const selected = await openDialog({ directory: true, title: "Select Woosh directory" });
+    if (selected && typeof selected === "string") {
+      setWooshDir(selected);
+      const cfg = await invoke<AppConfig>("get_app_config");
+      await invoke("save_app_config", { config: { ...cfg, woosh_dir: selected } });
+    }
+  };
+
+  const sfxHealth = healthMap.sfx as (typeof healthMap.sfx & { woosh_ready?: boolean; woosh_error?: string; woosh_dir?: string }) | null;
 
   return (
     <div className="panel-view" style={{ overflowY: "auto" }}>
@@ -465,6 +488,57 @@ export const SettingsView: React.FC = () => {
                     </span>
                   </div>
                 </div>
+
+                {/* Woosh directory (SFX only) */}
+                {m.kind === "sfx" && (
+                  <div>
+                    <Label>Woosh directory</Label>
+                    <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+                      <input
+                        type="text"
+                        value={wooshDir}
+                        onChange={(e) => setWooshDir(e.target.value)}
+                        onBlur={async () => {
+                          const cfg = await invoke<AppConfig>("get_app_config");
+                          await invoke("save_app_config", { config: { ...cfg, woosh_dir: wooshDir } });
+                        }}
+                        placeholder="~/Code/Woosh"
+                        style={{
+                          flex: 1, fontFamily: "var(--font-mono)", fontSize: 11,
+                          background: "var(--bg-0)", border: "1px solid var(--line-1)",
+                          borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
+                        }}
+                      />
+                      <button
+                        onClick={handleBrowseWoosh}
+                        style={{
+                          fontFamily: "var(--font-mono)", fontSize: 10,
+                          padding: "4px 10px", background: "var(--bg-0)",
+                          border: "1px solid var(--line-1)", borderRadius: 2,
+                          color: "var(--fg-3)", cursor: "pointer", flexShrink: 0,
+                        }}
+                      >
+                        browse
+                      </button>
+                    </div>
+                    {sfxHealth && !sfxHealth.woosh_ready && sfxHealth.woosh_error && (
+                      <div style={{
+                        marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10,
+                        color: "var(--sfx)", lineHeight: 1.5,
+                      }}>
+                        ⚠ {sfxHealth.woosh_error}
+                      </div>
+                    )}
+                    {sfxHealth?.woosh_ready && (
+                      <div style={{
+                        marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10,
+                        color: "var(--st-rendered)",
+                      }}>
+                        ✓ checkpoints found
+                      </div>
+                    )}
+                  </div>
+                )}
 
                 {/* Active variant (TTS only) */}
                 {m.kind === "tts" && h?.model_variant && (

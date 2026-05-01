@@ -132,6 +132,9 @@ pub struct AppConfig {
     pub music_public: bool,
     pub projects_dir: String,
     pub models_dir: String,
+    /// Path to the cloned Woosh repo (https://github.com/SonyResearch/Woosh)
+    #[serde(default)]
+    pub woosh_dir: String,
 }
 
 impl AppConfig {
@@ -145,6 +148,7 @@ impl AppConfig {
             music_public: false,
             projects_dir: home.join("pharaoh-projects").to_string_lossy().into_owned(),
             models_dir: home.join("pharaoh-models").to_string_lossy().into_owned(),
+            woosh_dir: home.join("Code").join("Woosh").to_string_lossy().into_owned(),
         }
     }
 }

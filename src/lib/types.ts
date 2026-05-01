@@ -44,6 +44,7 @@ export interface AppConfig {
   music_public: boolean;
   projects_dir: string;
   models_dir: string;
+  woosh_dir: string;
 }
 
 export interface AllServerHealth {

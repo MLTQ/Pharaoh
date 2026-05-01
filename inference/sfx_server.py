@@ -16,11 +16,23 @@ from _common import JobStore, new_job_id, write_wav_stub
 PORT = int(os.environ.get("PHARAOH_SFX_PORT", 18002))
 REAL = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
 MODEL_VARIANT = os.environ.get("PHARAOH_SFX_VARIANT", "Woosh-DFlow")
+WOOSH_DIR = Path(os.environ.get("PHARAOH_WOOSH_DIR", "")).expanduser()
 
 app = FastAPI(title="Pharaoh SFX Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 jobs = JobStore()
 _model_loaded = False
+
+
+def _woosh_status() -> dict:
+    """Return a dict describing whether WOOSH_DIR looks usable."""
+    if not WOOSH_DIR or not WOOSH_DIR.is_dir():
+        return {"ok": False, "reason": f"PHARAOH_WOOSH_DIR not set or not found: '{WOOSH_DIR}'"}
+    required = ["checkpoints/Woosh-AE", "checkpoints/TextConditionerA", f"checkpoints/{MODEL_VARIANT}"]
+    missing = [r for r in required if not (WOOSH_DIR / r).exists()]
+    if missing:
+        return {"ok": False, "reason": f"Missing checkpoints: {', '.join(missing)}"}
+    return {"ok": True, "reason": ""}
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -81,12 +93,16 @@ def _submit(params: dict) -> dict:
 
 @app.get("/health")
 async def health() -> dict:
+    ws = _woosh_status()
     return {
         "status": "ok",
         "model_loaded": _model_loaded,
         "model_variant": MODEL_VARIANT,
         "vram_mb": 2048 if _model_loaded else 0,
         "stub": not REAL,
+        "woosh_dir": str(WOOSH_DIR),
+        "woosh_ready": ws["ok"],
+        "woosh_error": ws["reason"],
     }
 
 
@@ -111,8 +127,11 @@ async def get_job(job_id: str) -> dict:
 @app.post("/load")
 async def load() -> dict:
     global _model_loaded
+    ws = _woosh_status()
+    if REAL and not ws["ok"]:
+        return {"status": "error", "error": ws["reason"]}
     _model_loaded = True
-    return {"status": "loaded"}
+    return {"status": "loaded", "woosh_dir": str(WOOSH_DIR)}
 
 
 @app.post("/unload")

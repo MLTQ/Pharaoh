@@ -1,5 +1,7 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useModelStore } from "../../store/modelStore";
+import type { AppConfig } from "../../lib/types";
 
 const TTS_VARIANTS = [
   { id: "CustomVoice-1.7B", desc: "9 preset voices + instruction control" },
@@ -28,7 +30,12 @@ export const ModelsView: React.FC = () => {
   const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music };
 
   const [ttsVariant, setTtsVariant] = useState("CustomVoice-1.7B");
+  const [wooshDir, setWooshDir] = useState("");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    invoke<AppConfig>("get_app_config").then((cfg) => setWooshDir(cfg.woosh_dir ?? "")).catch(() => {});
+  }, []);
 
   const doLoad = async (kind: "tts" | "sfx" | "music", variant?: string) => {
     setBusy((b) => ({ ...b, [kind]: true }));
@@ -165,7 +172,12 @@ export const ModelsView: React.FC = () => {
 
                 {status === "offline" && (
                   <div style={{ fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
-                    Server offline — start it with <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>python inference/{s.kind}_server.py</code>
+                    Server offline — start it with:{" "}
+                    <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontStyle: "normal" }}>
+                      {s.kind === "sfx" && wooshDir
+                        ? `PHARAOH_WOOSH_DIR="${wooshDir}" python inference/sfx_server.py`
+                        : `python inference/${s.kind}_server.py`}
+                    </code>
                   </div>
                 )}
               </div>
