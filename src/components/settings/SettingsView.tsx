@@ -167,6 +167,98 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Woosh checkpoint breakdown ────────────────────────────────────────────────
+
+const WOOSH_CHECKPOINTS = [
+  {
+    name: "Woosh-AE",
+    role: "required",
+    desc: "Audio encoder/decoder — compresses waveforms to latents and reconstructs audio from them. Every generative model depends on this.",
+  },
+  {
+    name: "Woosh-CLAP",
+    role: "required",
+    desc: "Text-audio alignment model — turns your text prompt into token latents that condition the diffusion model. Required for text-to-audio.",
+  },
+  {
+    name: "Woosh-DFlow",
+    role: "recommended",
+    desc: "Distilled flow-matching generator — produces SFX from text in ~4 steps. This is the model Pharaoh calls for foley generation.",
+  },
+  {
+    name: "Woosh-Flow",
+    role: "optional",
+    desc: "Non-distilled generator — same quality ceiling as DFlow but requires more diffusion steps. Use if DFlow artefacts are audible.",
+  },
+  {
+    name: "Woosh-VFlow",
+    role: "skip",
+    desc: "Video-conditioned generator — synthesises audio from a video clip. Not used by Pharaoh.",
+  },
+  {
+    name: "Woosh-DVFlow",
+    role: "skip",
+    desc: "Distilled VFlow. Also video-to-audio; not used by Pharaoh.",
+  },
+];
+
+const ROLE_COLOR: Record<string, string> = {
+  required:    "var(--st-rendered)",
+  recommended: "var(--tts)",
+  optional:    "var(--fg-3)",
+  skip:        "var(--fg-4)",
+};
+
+function WooshCheckpoints() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 10.5, color: "var(--fg-3)", marginBottom: 2 }}>
+        Download from{" "}
+        <a
+          href="https://github.com/SonyResearch/Woosh/releases"
+          target="_blank"
+          rel="noreferrer"
+          style={{ color: "var(--sfx)", textDecoration: "none", fontFamily: "var(--font-mono)", fontSize: 10.5 }}
+        >
+          github.com/SonyResearch/Woosh/releases
+        </a>
+        {" "}— each checkpoint ships as a .zip that extracts into the Woosh root directory.
+      </div>
+      {WOOSH_CHECKPOINTS.map((c) => (
+        <div
+          key={c.name}
+          style={{
+            display: "flex", gap: 10, alignItems: "flex-start",
+            opacity: c.role === "skip" ? 0.45 : 1,
+          }}
+        >
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.07em",
+            textTransform: "uppercase", color: ROLE_COLOR[c.role],
+            flexShrink: 0, paddingTop: 1, minWidth: 74,
+          }}>
+            {c.role}
+          </span>
+          <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-1)" }}>
+              {c.name}
+            </span>
+            <span style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.5 }}>
+              {c.desc}
+            </span>
+          </div>
+        </div>
+      ))}
+      <div style={{ marginTop: 4 }}>
+        <div style={{ fontSize: 10.5, color: "var(--fg-3)", marginBottom: 4 }}>
+          After downloading, extract all zips inside your Woosh clone:
+        </div>
+        <Code>{`cd ~/path/to/Woosh\nunzip ~/Downloads/Woosh-AE.zip\nunzip ~/Downloads/Woosh-CLAP.zip\nunzip ~/Downloads/Woosh-DFlow.zip`}</Code>
+      </div>
+    </div>
+  );
+}
+
 // ── Woosh install helper ──────────────────────────────────────────────────────
 
 function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
@@ -371,12 +463,7 @@ export const SettingsView: React.FC = () => {
                       ))}
                     </div>
                   ) : m.kind === "sfx" ? (
-                    <div>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 6 }}>
-                        Woosh checkpoints are distributed via GitHub releases (not HuggingFace).
-                      </div>
-                      <Code>{`mkdir -p ~/pharaoh-models/sfx/checkpoints\n# Place Woosh-DFlow/ under ~/pharaoh-models/sfx/checkpoints/\n# https://github.com/SonyResearch/Woosh/releases`}</Code>
-                    </div>
+                    <WooshCheckpoints />
                   ) : (
                     <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
                   )}
