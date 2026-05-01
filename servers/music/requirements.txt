@@ -1,0 +1,2 @@
+flask>=3.0
+# ACE-Step must be installed via: cd <ace-step-dir> && pip install -e .

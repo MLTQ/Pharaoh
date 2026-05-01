@@ -1,0 +1,11 @@
+# TTS
+qwen-tts
+soundfile
+
+# SFX (Woosh) — requires separate setup, see servers/sfx/README note
+# uv sync in Woosh clone directory
+
+# Music (ACE-Step) — pip install -e . in ACE-Step clone
+
+# flask is required by all servers
+flask>=3.0
