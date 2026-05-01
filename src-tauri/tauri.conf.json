@@ -41,11 +41,6 @@
   "plugins": {
     "shell": {
       "open": true
-    },
-    "fs": {
-      "scope": {
-        "allow": ["$HOME/pharaoh-projects/**", "$APPDATA/pharaoh/**", "$APPLOCALDATA/pharaoh/**"]
-      }
     }
   }
 }
