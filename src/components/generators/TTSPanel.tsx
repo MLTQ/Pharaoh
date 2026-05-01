@@ -5,20 +5,6 @@ import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useProjectStore } from "../../store/projectStore";
 import type { MockScene } from "../../lib/types";
 
-const TTS_TAGS = [
-  "whispered", "intimate close mic", "weary", "weatherworn",
-  "low register", "trailing breath", "slight bronchial catch",
-  "deliberate cadence", "Dutch loanwords", "subvocal",
-];
-
-const TTS_PRESETS = [
-  { label: "breath",          insert: "\n[breath · 0.3s]\n" },
-  { label: "stage direction", insert: "\n(beat, looking away)\n" },
-  { label: "voice override",  insert: "\n[voice: NARR · third-person, patinated]\n" },
-  { label: "acoustic",        insert: "\n[acoustic: dry close mic, no reverb]\n" },
-  { label: "emphasis",        insert: " *emphasis*" },
-];
-
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
 
 const MODEL_BADGE: Record<string, string> = {
@@ -37,7 +23,6 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const { characters } = useProjectStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
-  const [tags, setTags]           = useState(["intimate close mic", "weary", "trailing breath"]);
   const [value, setValue]         = useState(
     "[voice: VERA · elv·burnish-04]\n[delivery: half-whispered, looking up; the lamp is the only light]\n[acoustic: salt chamber, 2.4s tail, no music bed]\n\n(she swallows)\nIt can't go this deep. The geological survey said sixty meters — we've been descending for twenty minutes.\n\n[breath · 0.4s]\n\n(barely audible)\nAbel? Is that you down there?"
   );
@@ -50,17 +35,6 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
 
   const handleSelectSpeaker = (id: string) => {
     setSpeakerId(id);
-    // Pre-fill instruct tags from the character's voice instructions
-    const char = characters.find((c) => c.id === id);
-    const instruct = char?.voice_assignment.instruct_default ?? "";
-    if (instruct) {
-      // Split on sentence/clause boundaries into short tags
-      const derived = instruct
-        .split(/[.,;]/)
-        .map((s) => s.trim().toLowerCase())
-        .filter((s) => s.length > 2 && s.length < 40);
-      if (derived.length > 0) setTags(derived.slice(0, 4));
-    }
   };
 
   const handleGenerate = async () => {
@@ -71,7 +45,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         text: value,
         speaker: speakerId,
         character: selectedChar,
-        instruct: tags.join(", "),
+        instruct: selectedChar?.voice_assignment.instruct_default ?? "",
         seed: Math.floor(Math.random() * 99999),
         temperature: pace,
       });
@@ -155,13 +129,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         </div>
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · rich text</div>
-        <RichDirector
-          tags={tags} setTags={setTags}
-          value={value} setValue={setValue}
-          accent="var(--tts)"
-          allTags={TTS_TAGS}
-          presets={TTS_PRESETS}
-        />
+        <RichDirector value={value} setValue={setValue} accent="var(--tts)" />
 
         <div className="field-row" style={{ marginTop: 18 }}>
           <div className="field">

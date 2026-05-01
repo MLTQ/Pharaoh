@@ -54,6 +54,58 @@ pub async fn update_server_config(
 }
 
 
+// ── Model load / unload ──────────────────────────────────────────────────
+
+#[tauri::command]
+pub async fn load_model(
+    app: AppHandle,
+    model: String,
+    variant: Option<String>,
+) -> Result<()> {
+    let state = app.state::<AppState>();
+    let url = {
+        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        match model.as_str() {
+            "tts"   => format!("{}/load", cfg.tts_url),
+            "sfx"   => format!("{}/load", cfg.sfx_url),
+            "music" => format!("{}/load", cfg.music_url),
+            other   => return Err(Error::Other(format!("unknown model: {}", other))),
+        }
+    };
+    let mut req = state.http.post(&url);
+    if let Some(v) = variant {
+        req = req.json(&serde_json::json!({ "variant": v }));
+    }
+    req.timeout(std::time::Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("load request failed: {}", e)))?;
+    Ok(())
+}
+
+#[tauri::command]
+pub async fn unload_model(
+    app: AppHandle,
+    model: String,
+) -> Result<()> {
+    let state = app.state::<AppState>();
+    let url = {
+        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        match model.as_str() {
+            "tts"   => format!("{}/unload", cfg.tts_url),
+            "sfx"   => format!("{}/unload", cfg.sfx_url),
+            "music" => format!("{}/unload", cfg.music_url),
+            other   => return Err(Error::Other(format!("unknown model: {}", other))),
+        }
+    };
+    state.http.post(&url)
+        .timeout(std::time::Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("unload request failed: {}", e)))?;
+    Ok(())
+}
+
 // ── Background polling ───────────────────────────────────────────────────
 
 async fn poll_until_done(

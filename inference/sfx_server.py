@@ -108,6 +108,13 @@ async def get_job(job_id: str) -> dict:
     return jobs.response(job_id)
 
 
+@app.post("/load")
+async def load() -> dict:
+    global _model_loaded
+    _model_loaded = True
+    return {"status": "loaded"}
+
+
 @app.post("/unload")
 async def unload() -> dict:
     global _model_loaded

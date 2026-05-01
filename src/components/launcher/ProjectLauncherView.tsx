@@ -206,7 +206,7 @@ export const ProjectLauncherView: React.FC = () => {
     <div style={{
       position: "absolute", inset: 0, overflow: "auto",
       background: "var(--bg-0)", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "flex-start", paddingTop: 80,
+      alignItems: "center", justifyContent: "center",
     }}>
       <div style={{ width: "100%", maxWidth: 560, padding: "0 24px" }}>
 

@@ -4,15 +4,6 @@ import { RichDirector, SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import type { MockScene } from "../../lib/types";
 
-const SFX_TAGS = ["wet salt", "cavern · 2.4s tail", "doubled rhythm", "sub rumble", "foley", "exterior"];
-
-const SFX_PRESETS = [
-  { label: "surface", insert: "\n[surface: gravel slope, dry]\n" },
-  { label: "space",   insert: "\n[space: cavern · 2.4s tail]\n" },
-  { label: "rhythm",  insert: "\n[rhythm: 52 bpm · sparse]\n" },
-  { label: "layer",   insert: "\n[layer: distant generator, sub 60Hz]\n" },
-];
-
 const VARIATIONS = [
   { v: "A", seed: 1188, sel: false, note: "doubled · half-beat" },
   { v: "B", seed: 1189, sel: true,  note: "doubled · in rhythm" },
@@ -27,7 +18,6 @@ interface SFXPanelProps {
 
 export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
   const [scene, setScene] = useState(defaultScene);
-  const [tags, setTags] = useState(["wet salt", "cavern · 2.4s tail", "doubled rhythm"]);
   const [value, setValue] = useState(
     "[surface: wet salt floor, fine grit underfoot]\n[space: salt chamber, 2.4s reverb tail, low rumble bed]\n[rhythm: slow walk · 52 bpm · doubled half-beat behind]\n\nFootsteps approach from camera, deliberate and measured. A second pair, half a beat behind, echoing back from the tunnel — same gait, same weight. The doubling tightens through the middle, then drifts ahead of the original."
   );
@@ -77,13 +67,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
         <SceneRouter scenes={scenes} scene={scene} setScene={setScene} accent="var(--sfx)" onSend={() => {}} />
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · rich text</div>
-        <RichDirector
-          tags={tags} setTags={setTags}
-          value={value} setValue={setValue}
-          accent="var(--sfx)"
-          allTags={SFX_TAGS}
-          presets={SFX_PRESETS}
-        />
+        <RichDirector value={value} setValue={setValue} accent="var(--sfx)" />
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Variations · 4</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>

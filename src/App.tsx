@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useState } from "react";
 import { Icon, Wave } from "./components/shared/atoms";
 import { PyramidView } from "./components/pyramid/PyramidView";
 import { StoryBibleView } from "./components/pyramid/StoryBibleView";
@@ -11,6 +11,7 @@ import { AgentFeed } from "./components/shared/AgentFeed";
 import { AssetBrowser } from "./components/shared/AssetBrowser";
 import { JobQueue } from "./components/shared/JobQueue";
 import { SettingsView } from "./components/settings/SettingsView";
+import { ModelsView } from "./components/models/ModelsView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
@@ -27,6 +28,7 @@ const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label:
   { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
   { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
+  { id: "models",      icon: "settings",  label: "Models" },
 ];
 
 const STATUS_COLOR: Record<string, string> = {
@@ -42,9 +44,19 @@ export default function App() {
     setActiveScene, updateScene, characters, realProjectId,
   } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
-  const { view, rightTab, colorTemp, density, setView, setRightTab } = useUiStore();
+  const { view, rightTab, colorTemp, density, setView, setRightTab, agentActiveUntil } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
   const { tts, sfx, music, pollHealth } = useModelStore();
+
+  const [_tick, setTick] = useState(0);
+  useEffect(() => {
+    if (!agentActiveUntil) return;
+    const remaining = agentActiveUntil - Date.now();
+    if (remaining <= 0) return;
+    const id = setTimeout(() => setTick((t) => t + 1), remaining + 50);
+    return () => clearTimeout(id);
+  }, [agentActiveUntil]);
+  const agentActive = agentActiveUntil !== null && Date.now() < agentActiveUntil;
 
   const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
 
@@ -105,6 +117,7 @@ export default function App() {
     if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
     if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
     if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
+    if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
     if (view === "composition" && scene) {
       return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
     }
@@ -123,6 +136,7 @@ export default function App() {
     sfx:         { eyebrow: "Generation", title: "Sound design" },
     music:       { eyebrow: "Generation", title: "Score" },
     settings:    { eyebrow: "App",        title: "Settings" },
+    models:      { eyebrow: "App",        title: "Models" },
   };
   const sidebar = sidebarTitle[view] ?? { eyebrow: "Workspace", title: "" };
 
@@ -184,10 +198,12 @@ export default function App() {
             <span className="status-pill"><span className="dot warn" /> {runningJobs} job{runningJobs !== 1 ? "s" : ""} running</span>
           )}
         </div>
-        <div className="agent-pill">
-          <span className="pulse" /> Agents · 4 active
-          <button>Take over</button>
-        </div>
+        {agentActive && (
+          <div className="agent-pill">
+            <span className="pulse" /> Agent active
+            <button>Take over</button>
+          </div>
+        )}
       </div>
 
       {/* ── RAIL ────────────────────────────────────────────────────────── */}
@@ -308,6 +324,7 @@ export default function App() {
       {/* ── CANVAS ──────────────────────────────────────────────────────── */}
       <div className="canvas">
         {view === "settings" && <SettingsView />}
+        {view === "models"   && <ModelsView />}
         {view === "pyramid" && (
           <PyramidView
             project={project}

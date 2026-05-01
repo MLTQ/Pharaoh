@@ -19,27 +19,22 @@ const MODELS = [
     port: 18001,
     variants: TTS_VARIANTS,
     install: "pip install qwen-tts soundfile",
-    extra_flag: "--model-variant CustomVoice-1.7B",
   },
   {
     kind: "sfx" as const,
     label: "Woosh (Sony Research)",
-    hf_id: null as null,   // GitHub release only
     description: "Sound design — fixed ~5s clips · 48 kHz",
     port: 18002,
     variants: null as null,
     install: "git clone https://github.com/SonyResearch/Woosh && cd Woosh && uv sync --extra cuda",
-    extra_flag: "--woosh-dir ~/path/to/Woosh",
   },
   {
     kind: "music" as const,
     label: "ACE-Step v1 (3.5B)",
-    hf_id: "ACE-Step/ACE-Step-v1-3.5B",
     description: "Music generation — lyrics + caption · 48 kHz",
     port: 18003,
     variants: null as null,
     install: "git clone https://github.com/ACE-Step/ACE-Step && cd ACE-Step && pip install -e .",
-    extra_flag: "--ace-step-dir ~/path/to/ACE-Step",
   },
 ];
 
@@ -59,6 +54,56 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 // ── Sub-components ────────────────────────────────────────────────────────────
+
+function CopyableCommand({ command }: { command: string }) {
+  const [copied, setCopied] = useState(false);
+
+  const handleCopy = () => {
+    navigator.clipboard.writeText(command).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  };
+
+  return (
+    <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
+      <code style={{
+        flex: 1,
+        display: "block",
+        fontFamily: "var(--font-mono)",
+        fontSize: 11,
+        background: "var(--bg-1)",
+        border: "1px solid var(--line-1)",
+        borderRadius: 2,
+        padding: "6px 10px",
+        color: "var(--fg-1)",
+        userSelect: "text",
+        whiteSpace: "pre-wrap",
+        wordBreak: "break-all",
+        lineHeight: 1.6,
+      }}>
+        {command}
+      </code>
+      <button
+        onClick={handleCopy}
+        style={{
+          fontFamily: "var(--font-mono)",
+          fontSize: 10,
+          padding: "4px 10px",
+          background: copied ? "var(--st-rendered)" : "var(--bg-0)",
+          border: `1px solid ${copied ? "var(--st-rendered)" : "var(--line-1)"}`,
+          borderRadius: 2,
+          color: copied ? "var(--bg-0)" : "var(--fg-3)",
+          cursor: "pointer",
+          flexShrink: 0,
+          alignSelf: "stretch",
+        }}
+      >
+        {copied ? "copied" : "copy"}
+      </button>
+    </div>
+  );
+}
 
 function Code({ children }: { children: string }) {
   return (
@@ -110,12 +155,6 @@ export const SettingsView: React.FC = () => {
     music: `http://127.0.0.1:18003`,
   });
 
-  const [publicFlags, setPublicFlags] = useState({
-    tts:   false,
-    sfx:   false,
-    music: false,
-  });
-
   const handleUrlBlur = async (kind: "tts" | "sfx" | "music") => {
     await updateServerConfig({ [`${kind}_url`]: urls[kind] });
   };
@@ -127,7 +166,7 @@ export const SettingsView: React.FC = () => {
           <div className="eyebrow" style={{ marginBottom: 4 }}>Pharaoh</div>
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, lineHeight: 1.2 }}>Settings</h1>
           <div style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 6 }}>
-            Inference servers, model variants, and server URLs.
+            Inference server URLs and model downloads. Use the <strong>Models</strong> tab to load and unload models.
           </div>
         </div>
 
@@ -179,7 +218,7 @@ export const SettingsView: React.FC = () => {
 
               {/* Body */}
               <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-                {/* URL + health + public toggle */}
+                {/* URL + health */}
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}>
                     <Label>Server URL</Label>
@@ -216,24 +255,6 @@ export const SettingsView: React.FC = () => {
                       {h?.vram_mb ? ` · ${h.vram_mb} MB` : ""}
                     </span>
                   </div>
-                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                    <Label>Public</Label>
-                    <button
-                      onClick={() => setPublicFlags((prev) => ({ ...prev, [m.kind]: !prev[m.kind] }))}
-                      style={{
-                        fontFamily: "var(--font-mono)",
-                        fontSize: 10,
-                        padding: "4px 10px",
-                        background: publicFlags[m.kind] ? accent : "var(--bg-0)",
-                        border: `1px solid ${publicFlags[m.kind] ? accent : "var(--line-1)"}`,
-                        borderRadius: 2,
-                        color: publicFlags[m.kind] ? "var(--bg-0)" : "var(--fg-3)",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {publicFlags[m.kind] ? "on" : "off"}
-                    </button>
-                  </div>
                 </div>
 
                 {/* Active variant (TTS only) */}
@@ -252,68 +273,33 @@ export const SettingsView: React.FC = () => {
                 <div>
                   <Label>Model downloads</Label>
                   {m.kind === "tts" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                       {TTS_VARIANTS.map((v) => (
                         <div key={v.id}>
-                          <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 3 }}>
+                          <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
                             <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>{v.id}</span>
                             {" — "}{v.desc}
                           </div>
-                          <Code>{`huggingface-cli download ${v.hf_id} --local-dir ~/pharaoh-models/tts`}</Code>
+                          <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts`} />
                         </div>
                       ))}
                     </div>
                   ) : m.kind === "sfx" ? (
                     <div>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 6 }}>
                         Woosh checkpoints are distributed via GitHub releases (not HuggingFace).
                       </div>
-                      <Code>{`# Download Woosh-DFlow checkpoint from GitHub Releases:\n# https://github.com/SonyResearch/Woosh/releases\nmkdir -p ~/pharaoh-models/sfx/checkpoints\n# Place Woosh-DFlow/ or Woosh-Flow/ under ~/pharaoh-models/sfx/checkpoints/`}</Code>
+                      <Code>{`mkdir -p ~/pharaoh-models/sfx/checkpoints\n# Place Woosh-DFlow/ under ~/pharaoh-models/sfx/checkpoints/\n# https://github.com/SonyResearch/Woosh/releases`}</Code>
                     </div>
                   ) : (
-                    <Code>{`huggingface-cli download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`}</Code>
+                    <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
                   )}
-                </div>
-
-                {/* Server startup */}
-                <div>
-                  <Label>Server startup</Label>
-                  {m.kind === "tts" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
-                        Stub mode (no GPU required — starts instantly):
-                      </div>
-                      <Code>{`cd inference && python tts_server.py`}</Code>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginTop: 2 }}>
-                        Real inference (choose a variant):
-                      </div>
-                      <Code>{`PHARAOH_REAL_MODELS=1 PHARAOH_TTS_VARIANT=Qwen3-TTS-12Hz-1.7B-CustomVoice \\\n  python inference/tts_server.py`}</Code>
-                    </div>
-                  ) : m.kind === "sfx" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <Code>{`cd inference && python sfx_server.py`}</Code>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
-                        Real inference requires Woosh clone — see servers/sfx/run.py
-                      </div>
-                    </div>
-                  ) : (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                      <Code>{`cd inference && python music_server.py`}</Code>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
-                        Real inference requires ACE-Step clone — see servers/music/run.py
-                      </div>
-                    </div>
-                  )}
-                  <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}>
-                    Start all three at once (stub mode):
-                  </div>
-                  <Code>{`./inference/start_servers.sh`}</Code>
                 </div>
 
                 {/* Install */}
                 <div>
                   <Label>Install</Label>
-                  <Code>{m.install}</Code>
+                  <CopyableCommand command={m.install} />
                 </div>
               </div>
             </div>

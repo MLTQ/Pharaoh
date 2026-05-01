@@ -4,15 +4,6 @@ import { RichDirector, SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import type { MockScene } from "../../lib/types";
 
-const MUSIC_TAGS = ["Am", "64 bpm", "textless voice", "low strings", "metronome", "sparse", "modal"];
-
-const MUSIC_PRESETS = [
-  { label: "key",      insert: "\n[key: Am]\n" },
-  { label: "tempo",    insert: "\n[tempo: 64 bpm]\n" },
-  { label: "ensemble", insert: "\n[ensemble: low strings, voice]\n" },
-  { label: "hit",      insert: "\n[hit: 0:42 — moment]\n" },
-];
-
 const HIT_LIST = [
   { t: "0:00", n: "Cue start · solo voice enters" },
   { t: "0:18", n: "Strings join · sub on Db" },
@@ -28,7 +19,6 @@ interface MusicPanelProps {
 
 export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) => {
   const [scene, setScene] = useState(defaultScene);
-  const [tags, setTags] = useState(["Am", "64 bpm", "textless voice", "low strings", "metronome"]);
   const [value, setValue] = useState(
     "[key: Am · tempo: 64 bpm · meter: 4/4]\n[ensemble: textless female voice, low strings, hand percussion, metronome that drifts -3% by 1:04]\n[arc: salt hymn dissolving into arithmetic]\n[hits: 0:42 — Vera reaches chamber floor; 1:28 — final line, cut to silence]\n\nA salt hymn dissolving into arithmetic. Begin sparse on solo voice. Strings join at 0:18 with a sub on Db. The metronome, once steady, gradually loses time. Resolves on Vera's last line."
   );
@@ -76,13 +66,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
         <SceneRouter scenes={scenes} scene={scene} setScene={setScene} accent="var(--music)" onSend={() => {}} />
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · rich text</div>
-        <RichDirector
-          tags={tags} setTags={setTags}
-          value={value} setValue={setValue}
-          accent="var(--music)"
-          allTags={MUSIC_TAGS}
-          presets={MUSIC_PRESETS}
-        />
+        <RichDirector value={value} setValue={setValue} accent="var(--music)" />
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Hit list · 1:36</div>
         <div style={{ border: "1px solid var(--line-1)", background: "var(--bg-2)", borderRadius: 2 }}>

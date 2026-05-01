@@ -1,5 +1,6 @@
 import { useProjectStore, deriveSlug } from "../store/projectStore";
 import { useJobStore } from "../store/jobStore";
+import { useUiStore } from "../store/uiStore";
 import {
   submitTtsCustomVoice,
   submitTtsVoiceDesign,
@@ -24,6 +25,7 @@ interface SubmitResult {
 export function useGenerateJob() {
   const { realProjectId, projectsDir, activeSceneNo, activeSceneSlug, scenes } = useProjectStore();
   const { addJob } = useJobStore();
+  const { triggerAgentActive } = useUiStore();
 
   function resolveContext(): { projectId: string; sceneSlug: string; pDir: string } {
     const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
@@ -114,6 +116,7 @@ export function useGenerateJob() {
       error: null,
     };
     addJob(job);
+    triggerAgentActive();
     return { jobId };
   }
 
@@ -148,6 +151,7 @@ export function useGenerateJob() {
       output_path: null, peaks: null, qa_status: "unreviewed", error: null,
     };
     addJob(job);
+    triggerAgentActive();
     return { jobId };
   }
 
@@ -190,6 +194,7 @@ export function useGenerateJob() {
       output_path: null, peaks: null, qa_status: "unreviewed", error: null,
     };
     addJob(job);
+    triggerAgentActive();
     return { jobId };
   }
 

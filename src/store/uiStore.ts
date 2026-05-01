@@ -6,11 +6,13 @@ interface UiState {
   rightTab: RightTab;
   colorTemp: ColorTemp;
   density: Density;
+  agentActiveUntil: number | null;
 
   setView: (view: ViewId) => void;
   setRightTab: (tab: RightTab) => void;
   setColorTemp: (temp: ColorTemp) => void;
   setDensity: (density: Density) => void;
+  triggerAgentActive: () => void;
 }
 
 export const useUiStore = create<UiState>((set) => ({
@@ -18,9 +20,11 @@ export const useUiStore = create<UiState>((set) => ({
   rightTab: "agent",
   colorTemp: "forest",
   density: "comfortable",
+  agentActiveUntil: null,
 
   setView: (view) => set({ view }),
   setRightTab: (rightTab) => set({ rightTab }),
   setColorTemp: (colorTemp) => set({ colorTemp }),
   setDensity: (density) => set({ density }),
+  triggerAgentActive: () => set({ agentActiveUntil: Date.now() + 10_000 }),
 }));

@@ -61,6 +61,8 @@ pub fn run() {
             // Inference / job submission
             commands::inference::check_server_health,
             commands::inference::update_server_config,
+            commands::inference::load_model,
+            commands::inference::unload_model,
             commands::inference::submit_tts_custom_voice,
             commands::inference::submit_tts_voice_design,
             commands::inference::submit_tts_voice_clone,

@@ -161,6 +161,18 @@ async def get_job(job_id: str) -> dict:
     return jobs.response(job_id)
 
 
+class LoadRequest(BaseModel):
+    variant: str = MODEL_VARIANT
+
+
+@app.post("/load")
+async def load(req: LoadRequest = LoadRequest()) -> dict:
+    global _model_loaded, MODEL_VARIANT
+    MODEL_VARIANT = req.variant
+    _model_loaded = True
+    return {"status": "loaded", "variant": MODEL_VARIANT}
+
+
 @app.post("/unload")
 async def unload() -> dict:
     global _model_loaded
