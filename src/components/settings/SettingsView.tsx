@@ -172,33 +172,59 @@ function Label({ children }: { children: React.ReactNode }) {
 const WOOSH_CHECKPOINTS = [
   {
     name: "Woosh-AE",
+    zip: "Woosh-AE.zip",
+    size: "0.8 GB",
     role: "required",
-    desc: "Audio encoder/decoder — compresses waveforms to latents and reconstructs audio from them. Every generative model depends on this.",
+    desc: "Audio encoder/decoder — compresses waveforms to latents and back. Every generative model depends on this.",
   },
   {
-    name: "Woosh-CLAP",
+    name: "TextConditionerA",
+    zip: "TextConditionerA.zip",
+    size: "1.2 GB",
     role: "required",
-    desc: "Text-audio alignment model — turns your text prompt into token latents that condition the diffusion model. Required for text-to-audio.",
+    desc: "Text encoder for audio models — conditions DFlow and Flow on your text prompt. Required for text-to-audio.",
   },
   {
     name: "Woosh-DFlow",
+    zip: "Woosh-DFlow.zip",
+    size: "1.2 GB",
     role: "recommended",
-    desc: "Distilled flow-matching generator — produces SFX from text in ~4 steps. This is the model Pharaoh calls for foley generation.",
+    desc: "Distilled flow-matching generator, ~4 steps. This is the model Pharaoh calls for foley generation (~5 s clips).",
   },
   {
     name: "Woosh-Flow",
+    zip: "Woosh-Flow.zip",
+    size: "1.2 GB",
     role: "optional",
-    desc: "Non-distilled generator — same quality ceiling as DFlow but requires more diffusion steps. Use if DFlow artefacts are audible.",
+    desc: "Non-distilled generator — same quality ceiling as DFlow but more NFE steps. Use if DFlow artefacts are audible.",
   },
   {
-    name: "Woosh-VFlow",
-    role: "skip",
-    desc: "Video-conditioned generator — synthesises audio from a video clip. Not used by Pharaoh.",
+    name: "Woosh-CLAP",
+    zip: "Woosh-CLAP.zip",
+    size: "1.5 GB",
+    role: "optional",
+    desc: "Audio-language model for CLAP scoring (ranking generated clips by prompt alignment). Not required for generation.",
   },
   {
-    name: "Woosh-DVFlow",
+    name: "TextConditionerV",
+    zip: "TextConditionerV.zip",
+    size: "1.2 GB",
     role: "skip",
-    desc: "Distilled VFlow. Also video-to-audio; not used by Pharaoh.",
+    desc: "Text encoder for video-conditioned models (VFlow/DVFlow). Not needed if you skip video-to-audio.",
+  },
+  {
+    name: "Woosh-VFlow-8s",
+    zip: "Woosh-VFlow-8s.zip",
+    size: "1.5 GB",
+    role: "skip",
+    desc: "Video-conditioned generator (8 s). Takes a video clip as input. Not used by Pharaoh.",
+  },
+  {
+    name: "Woosh-DVFlow-8s",
+    zip: "Woosh-DVFlow-8s.zip",
+    size: "1.5 GB",
+    role: "skip",
+    desc: "Distilled video-conditioned generator (8 s). Also video-to-audio; not used by Pharaoh.",
   },
 ];
 
@@ -240,9 +266,14 @@ function WooshCheckpoints() {
             {c.role}
           </span>
           <div style={{ display: "flex", flexDirection: "column", gap: 2, flex: 1 }}>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-1)" }}>
-              {c.name}
-            </span>
+            <div style={{ display: "flex", alignItems: "baseline", gap: 8 }}>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-1)" }}>
+                {c.name}
+              </span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)" }}>
+                {c.size}
+              </span>
+            </div>
             <span style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.5 }}>
               {c.desc}
             </span>
@@ -253,7 +284,7 @@ function WooshCheckpoints() {
         <div style={{ fontSize: 10.5, color: "var(--fg-3)", marginBottom: 4 }}>
           After downloading, extract all zips inside your Woosh clone:
         </div>
-        <Code>{`cd ~/path/to/Woosh\nunzip ~/Downloads/Woosh-AE.zip\nunzip ~/Downloads/Woosh-CLAP.zip\nunzip ~/Downloads/Woosh-DFlow.zip`}</Code>
+        <Code>{`cd ~/path/to/Woosh\nunzip ~/Downloads/Woosh-AE.zip\nunzip ~/Downloads/TextConditionerA.zip\nunzip ~/Downloads/Woosh-DFlow.zip`}</Code>
       </div>
     </div>
   );
