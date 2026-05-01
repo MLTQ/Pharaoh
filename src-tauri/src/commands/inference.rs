@@ -1,6 +1,44 @@
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
 use crate::error::{Error, Result};
+
+// ── Hardware detection ────────────────────────────────────────────────────
+
+#[derive(serde::Serialize)]
+pub struct HardwareProfile {
+    pub os: String,      // "macos" | "linux" | "windows"
+    pub arch: String,    // "aarch64" | "x86_64" | other
+    pub gpu: String,     // "cuda" | "mps" | "cpu"
+    pub gpu_name: String, // e.g. "NVIDIA GeForce RTX 4090" or ""
+}
+
+#[tauri::command]
+pub async fn detect_hardware() -> HardwareProfile {
+    let os = if cfg!(target_os = "macos") { "macos" }
+             else if cfg!(target_os = "linux") { "linux" }
+             else { "windows" }.to_string();
+
+    let arch = if cfg!(target_arch = "aarch64") { "aarch64" }
+               else { "x86_64" }.to_string();
+
+    // Apple Silicon → MPS
+    if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
+        return HardwareProfile { os, arch, gpu: "mps".into(), gpu_name: "Apple Silicon".into() };
+    }
+
+    // Try nvidia-smi for CUDA
+    if let Ok(out) = std::process::Command::new("nvidia-smi")
+        .args(["--query-gpu=name", "--format=csv,noheader"])
+        .output()
+    {
+        if out.status.success() {
+            let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+            return HardwareProfile { os, arch, gpu: "cuda".into(), gpu_name: name };
+        }
+    }
+
+    HardwareProfile { os, arch, gpu: "cpu".into(), gpu_name: String::new() }
+}
 use crate::models::{
     AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus,
     MusicText2MusicRequest, ServerHealth, SfxT2ARequest, SidecarMeta,

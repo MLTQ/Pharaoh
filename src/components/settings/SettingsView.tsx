@@ -1,5 +1,31 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
+import { invoke } from "@tauri-apps/api/core";
 import { useModelStore } from "../../store/modelStore";
+
+// ── Hardware detection ────────────────────────────────────────────────────────
+
+interface HardwareProfile {
+  os: string;
+  arch: string;
+  gpu: "cuda" | "mps" | "cpu";
+  gpu_name: string;
+}
+
+function useHardwareProfile(): HardwareProfile | null {
+  const [hw, setHw] = useState<HardwareProfile | null>(null);
+  useEffect(() => {
+    invoke<HardwareProfile>("detect_hardware").then(setHw).catch(() => null);
+  }, []);
+  return hw;
+}
+
+// Woosh install commands per GPU backend
+const WOOSH_CLONE = "git clone https://github.com/SonyResearch/Woosh && cd Woosh";
+const WOOSH_VARIANTS: Record<string, { label: string; cmd: string }> = {
+  cuda: { label: "NVIDIA CUDA",      cmd: `${WOOSH_CLONE} && uv sync --extra cuda` },
+  mps:  { label: "Apple Silicon MPS", cmd: `${WOOSH_CLONE} && uv sync` },
+  cpu:  { label: "CPU only",          cmd: `${WOOSH_CLONE} && uv sync --extra cpu` },
+};
 
 // ── Model definitions ─────────────────────────────────────────────────────────
 
@@ -26,7 +52,7 @@ const MODELS = [
     description: "Sound design — fixed ~5s clips · 48 kHz",
     port: 18002,
     variants: null as null,
-    install: "git clone https://github.com/SonyResearch/Woosh && cd Woosh && uv sync --extra cuda",
+    install: null as null, // determined at runtime by hardware detection
   },
   {
     kind: "music" as const,
@@ -141,9 +167,69 @@ function Label({ children }: { children: React.ReactNode }) {
   );
 }
 
+// ── Woosh install helper ──────────────────────────────────────────────────────
+
+function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
+  const [showAll, setShowAll] = useState(false);
+
+  const detected = hw ? WOOSH_VARIANTS[hw.gpu] : null;
+  const others = Object.entries(WOOSH_VARIANTS).filter(([k]) => k !== hw?.gpu);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+      {/* Detected / primary */}
+      <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 2 }}>
+        <span style={{
+          fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.06em",
+          textTransform: "uppercase",
+          color: hw ? "var(--st-rendered)" : "var(--fg-4)",
+          whiteSpace: "nowrap",
+        }}>
+          {hw ? `Detected: ${detected?.label ?? hw.gpu}${hw.gpu_name ? ` · ${hw.gpu_name}` : ""}` : "Detecting…"}
+        </span>
+      </div>
+
+      {detected ? (
+        <CopyableCommand command={detected.cmd} />
+      ) : (
+        <div style={{
+          fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-4)",
+          padding: "6px 10px", border: "1px solid var(--line-1)", borderRadius: 2,
+        }}>
+          Detecting hardware…
+        </div>
+      )}
+
+      {/* Other variants toggle */}
+      <button
+        onClick={() => setShowAll((s) => !s)}
+        style={{
+          alignSelf: "flex-start",
+          fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.05em",
+          color: "var(--fg-4)", background: "none", border: "none",
+          cursor: "pointer", padding: 0, marginTop: 2,
+        }}
+      >
+        {showAll ? "▾ hide other variants" : "▸ other hardware"}
+      </button>
+
+      {showAll && others.map(([, v]) => (
+        <div key={v.label} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 9.5,
+            color: "var(--fg-4)", letterSpacing: "0.05em",
+          }}>{v.label}</span>
+          <CopyableCommand command={v.cmd} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 // ── Main component ────────────────────────────────────────────────────────────
 
 export const SettingsView: React.FC = () => {
+  const hw = useHardwareProfile();
   const { tts, sfx, music, health, updateServerConfig } = useModelStore();
 
   const statusMap = { tts, sfx, music };
@@ -299,7 +385,11 @@ export const SettingsView: React.FC = () => {
                 {/* Install */}
                 <div>
                   <Label>Install</Label>
-                  <CopyableCommand command={m.install} />
+                  {m.kind === "sfx" ? (
+                    <WooshInstall hw={hw} />
+                  ) : (
+                    <CopyableCommand command={m.install!} />
+                  )}
                 </div>
               </div>
             </div>

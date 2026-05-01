@@ -59,6 +59,7 @@ pub fn run() {
             commands::script::write_script,
             commands::script::update_script_row,
             // Inference / job submission
+            commands::inference::detect_hardware,
             commands::inference::check_server_health,
             commands::inference::update_server_config,
             commands::inference::load_model,
