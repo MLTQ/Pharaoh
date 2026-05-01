@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Project, Scene, ScriptRow } from "./types";
+import type { Project, Scene, ScriptRow, AppConfig, AllServerHealth } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
@@ -76,6 +76,15 @@ export interface ServerHealth {
   vram_mb: number;
   stub: boolean;
 }
+
+export const getAppConfig = (): Promise<AppConfig> =>
+  invoke("get_app_config");
+
+export const saveAppConfig = (config: AppConfig): Promise<void> =>
+  invoke("save_app_config", { config });
+
+export const getServerHealthAll = (): Promise<AllServerHealth> =>
+  invoke("get_server_health_all");
 
 export const checkServerHealth = (model: "tts" | "sfx" | "music"): Promise<ServerHealth> =>
   invoke("check_server_health", { model });

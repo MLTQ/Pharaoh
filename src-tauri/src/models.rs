@@ -31,6 +31,8 @@ pub struct Project {
     pub id: String,
     pub title: String,
     pub logline: String,
+    #[serde(default)]
+    pub synopsis: String,
     pub tone: String,
     pub global_audio_notes: String,
     pub target_duration_minutes: u32,
@@ -110,23 +112,69 @@ pub struct ServerConfig {
 impl Default for ServerConfig {
     fn default() -> Self {
         Self {
-            tts_url: "http://localhost:18001".to_string(),
-            sfx_url: "http://localhost:18002".to_string(),
-            music_url: "http://localhost:18003".to_string(),
+            tts_url: "http://127.0.0.1:18001".to_string(),
+            sfx_url: "http://127.0.0.1:18002".to_string(),
+            music_url: "http://127.0.0.1:18003".to_string(),
         }
     }
+}
+
+// ── Persistent app config ────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AppConfig {
+    pub tts_url: String,
+    pub sfx_url: String,
+    pub music_url: String,
+    /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
+    pub tts_public: bool,
+    pub sfx_public: bool,
+    pub music_public: bool,
+    pub projects_dir: String,
+    pub models_dir: String,
+}
+
+impl AppConfig {
+    pub fn with_home(home: &std::path::Path) -> Self {
+        Self {
+            tts_url: "http://127.0.0.1:18001".to_string(),
+            sfx_url: "http://127.0.0.1:18002".to_string(),
+            music_url: "http://127.0.0.1:18003".to_string(),
+            tts_public: false,
+            sfx_public: false,
+            music_public: false,
+            projects_dir: home.join("pharaoh-projects").to_string_lossy().into_owned(),
+            models_dir: home.join("pharaoh-models").to_string_lossy().into_owned(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct AllServerHealth {
+    pub tts: Option<ServerHealth>,
+    pub sfx: Option<ServerHealth>,
+    pub music: Option<ServerHealth>,
 }
 
 pub struct AppState {
     pub http: reqwest::Client,
     pub server_config: RwLock<ServerConfig>,
+    pub app_config: RwLock<AppConfig>,
+    pub config_path: std::path::PathBuf,
 }
 
 impl AppState {
-    pub fn new() -> Self {
+    pub fn new(config_path: std::path::PathBuf, app_config: AppConfig) -> Self {
+        let server_config = ServerConfig {
+            tts_url: app_config.tts_url.clone(),
+            sfx_url: app_config.sfx_url.clone(),
+            music_url: app_config.music_url.clone(),
+        };
         Self {
             http: reqwest::Client::new(),
-            server_config: RwLock::new(ServerConfig::default()),
+            server_config: RwLock::new(server_config),
+            app_config: RwLock::new(app_config),
+            config_path,
         }
     }
 }

@@ -5,7 +5,6 @@ import { ScriptCanvas } from "./ScriptCanvas";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { readScript, updateScriptRow, renderScene } from "../../lib/tauriCommands";
-import { MOCK_SCENE_SCRIPTS } from "../../lib/mockData";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow } from "../../lib/types";
 
 const PX_PER_SEC = 4;
@@ -116,14 +115,13 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
   // ── Script rows ──────────────────────────────────────────────────────────
 
-  // Load from Tauri (real project) or MOCK_SCENE_SCRIPTS (demo mode)
   useEffect(() => {
     if (realProjectId && activeSceneSlug) {
       readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug })
         .then(setScriptRows)
         .catch(() => setScriptRows([]));
     } else {
-      setScriptRows(MOCK_SCENE_SCRIPTS[scene.no] ?? []);
+      setScriptRows([]);
     }
   }, [realProjectId, activeSceneSlug, scene.no]);
 

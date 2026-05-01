@@ -1,6 +1,5 @@
 import { create } from "zustand";
 import type { Job, QaJobStatus } from "../lib/types";
-import { MOCK_JOBS } from "../lib/mockData";
 
 interface JobProgressEvent {
   job_id: string;
@@ -42,7 +41,7 @@ interface JobState {
 }
 
 export const useJobStore = create<JobState>((set, get) => ({
-  jobs: MOCK_JOBS,
+  jobs: [],
   activeTakes: {},
 
   addJob: (job) =>
