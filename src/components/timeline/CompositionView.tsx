@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Icon, Wave } from "../shared/atoms";
-import { PlayButton } from "../shared/PlayButton";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { readScript, updateScriptRow, renderScene } from "../../lib/tauriCommands";
@@ -177,7 +176,8 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     }
   };
 
-  const { playing, position } = useAudioStore();
+  const audioStore = useAudioStore();
+  const { playing, position } = audioStore;
   const playheadSec = playing ? position : 72;
 
   useEffect(() => {
@@ -292,7 +292,13 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
               {renderState === "done" && renderPath ? (
                 <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
                   <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--st-rendered)" }}>render.wav</span>
-                  <PlayButton path={renderPath} size={13} />
+                  <button
+                    className="btn btn-primary"
+                    onClick={() => audioStore.playing === renderPath ? audioStore.stop() : audioStore.play(renderPath)}
+                    title={audioStore.playing === renderPath ? "Stop" : "Play render"}
+                  >
+                    {audioStore.playing === renderPath ? "■ Stop" : "▶ Play render"}
+                  </button>
                   <button className="btn btn-primary" onClick={handleRender}>
                     <Icon name="download" style={{ width: 14, height: 14 }} /> Re-render
                   </button>

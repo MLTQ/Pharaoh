@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import type { MockProject, MockScene, MockCastMember, MockAssets, Project } from "../lib/types";
+import type { MockProject, MockScene, MockCastMember, MockAssets, Project, Scene } from "../lib/types";
 import { MOCK_PROJECT, MOCK_SCENES, MOCK_CAST, MOCK_ASSETS } from "../lib/mockData";
 
 interface ProjectState {
@@ -19,6 +19,7 @@ interface ProjectState {
   updateScene: (no: string, patch: Partial<MockScene>) => void;
   loadRealProject: (project: Project, projectsDir: string) => void;
   setActiveSceneSlug: (slug: string | null) => void;
+  addScene: (scene: Scene) => void;
 }
 
 /** Derive a slug from a mock scene (e.g. "S04" + "The Vault Beneath" → "04_the_vault_beneath") */
@@ -26,6 +27,21 @@ export function deriveSlug(no: string, title: string): string {
   const index = no.replace(/\D/g, "").padStart(2, "0");
   const slug = title.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "");
   return `${index}_${slug}`;
+}
+
+/** Convert a real Scene (from Tauri) into a MockScene suitable for UI rendering */
+export function realSceneToMock(scene: Scene): MockScene {
+  const no = `S${String(scene.index + 1).padStart(2, "0")}`;
+  return {
+    no,
+    rev: "01",
+    title: scene.title,
+    desc: scene.description,
+    script: "",
+    status: "draft",
+    duration: "0:00",
+    nodes: [],
+  };
 }
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
@@ -65,4 +81,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setActiveSceneSlug: (slug) => set({ activeSceneSlug: slug }),
+
+  addScene: (scene) =>
+    set((state) => {
+      const mockScene = realSceneToMock(scene);
+      const newScenes = [...state.scenes, mockScene];
+      const isFirst = state.scenes.length === 0;
+      const slug = deriveSlug(mockScene.no, mockScene.title);
+      return {
+        scenes: newScenes,
+        ...(isFirst ? { activeSceneNo: mockScene.no, activeSceneSlug: slug } : {}),
+      };
+    }),
 }));
