@@ -1,345 +1,306 @@
-import React, { useState, useEffect, useCallback } from "react";
-import { getAppConfig, saveAppConfig, getServerHealthAll } from "../../lib/tauriCommands";
-import type { AppConfig, AllServerHealth } from "../../lib/types";
+import React, { useState } from "react";
+import { useModelStore } from "../../store/modelStore";
 
-// ── Model info ────────────────────────────────────────────────────────────────
+// ── Model definitions ─────────────────────────────────────────────────────────
+
+const TTS_VARIANTS = [
+  { id: "CustomVoice-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", desc: "9 preset voices + instruction control" },
+  { id: "VoiceDesign-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", desc: "Free-form voice description via natural language" },
+  { id: "Base-1.7B",        hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-Base",        desc: "3-second voice cloning" },
+  { id: "CustomVoice-0.6B", hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", desc: "Preset voices, lightweight (0.6B)" },
+  { id: "Base-0.6B",        hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-Base",        desc: "Voice cloning, lightweight (0.6B)" },
+];
 
 const MODELS = [
   {
     kind: "tts" as const,
     label: "Qwen3-TTS",
-    hf_id: "Qwen/Qwen3-TTS-1.7B",
-    subdir: "tts",
-    description: "Voice synthesis — 1.7B, 24 kHz",
+    description: "Voice synthesis — 24 kHz · 5 variants",
     port: 18001,
+    variants: TTS_VARIANTS,
+    install: "pip install qwen-tts soundfile",
+    extra_flag: "--model-variant CustomVoice-1.7B",
   },
   {
     kind: "sfx" as const,
-    label: "Woosh SFX",
-    hf_id: "woosh-audio/woosh-sfx-v3",
-    subdir: "sfx",
-    description: "Sound design — text-to-audio, 48 kHz",
+    label: "Woosh (Sony Research)",
+    hf_id: null as null,   // GitHub release only
+    description: "Sound design — fixed ~5s clips · 48 kHz",
     port: 18002,
+    variants: null as null,
+    install: "git clone https://github.com/SonyResearch/Woosh && cd Woosh && uv sync --extra cuda",
+    extra_flag: "--woosh-dir ~/path/to/Woosh",
   },
   {
     kind: "music" as const,
-    label: "ACE-Step",
-    hf_id: "ACE-step/ACE-Step-v1",
-    subdir: "music",
-    description: "Music generation — lyrics + caption, 44.1 kHz",
+    label: "ACE-Step v1 (3.5B)",
+    hf_id: "ACE-Step/ACE-Step-v1-3.5B",
+    description: "Music generation — lyrics + caption · 48 kHz",
     port: 18003,
+    variants: null as null,
+    install: "git clone https://github.com/ACE-Step/ACE-Step && cd ACE-Step && pip install -e .",
+    extra_flag: "--ace-step-dir ~/path/to/ACE-Step",
   },
 ];
 
-// ── Health dot ────────────────────────────────────────────────────────────────
+// ── Colours ───────────────────────────────────────────────────────────────────
 
-const HealthDot: React.FC<{ health: AllServerHealth[keyof AllServerHealth]; loading: boolean }> = ({ health, loading }) => {
-  if (loading) return (
-    <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)" }}>…</span>
-  );
-  if (!health) return (
-    <span style={{
-      display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-      background: "var(--sfx)", flexShrink: 0,
-    }} title="Server unreachable" />
-  );
-  const color = health.model_loaded ? "var(--st-rendered)" : "var(--st-gen)";
-  return (
-    <span style={{
-      display: "inline-block", width: 8, height: 8, borderRadius: "50%",
-      background: color, flexShrink: 0,
-    }} title={`${health.status} · ${health.model_variant} · ${health.vram_mb} MB VRAM`} />
-  );
+const KIND_COLOR: Record<string, string> = {
+  tts:   "var(--tts)",
+  sfx:   "var(--sfx)",
+  music: "var(--music)",
 };
 
-// ── CopyField ─────────────────────────────────────────────────────────────────
+const STATUS_COLOR: Record<string, string> = {
+  online:  "var(--st-rendered)",
+  offline: "var(--sfx)",
+  loading: "var(--st-gen)",
+  unknown: "var(--fg-4)",
+};
 
-const CopyField: React.FC<{ value: string; label?: string }> = ({ value, label }) => {
-  const [copied, setCopied] = useState(false);
-  const copy = () => {
-    navigator.clipboard.writeText(value).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 1800);
-    });
-  };
+// ── Sub-components ────────────────────────────────────────────────────────────
+
+function Code({ children }: { children: string }) {
   return (
-    <div style={{ marginBottom: 6 }}>
-      {label && <div style={labelStyle}>{label}</div>}
-      <div style={{
-        display: "flex", alignItems: "stretch", gap: 0,
-        border: "1px solid var(--line-1)", borderRadius: 2, overflow: "hidden",
-      }}>
-        <code style={{
-          flex: 1, padding: "6px 10px", fontSize: 10.5,
-          fontFamily: "var(--font-mono)", color: "var(--fg-2)",
-          background: "var(--bg-2)", overflowX: "auto", whiteSpace: "nowrap",
-          lineHeight: 1.5,
-        }}>
-          {value}
-        </code>
-        <button
-          onClick={copy}
-          style={{
-            padding: "0 12px", background: copied ? "var(--st-rendered)" : "var(--bg-3)",
-            border: "none", borderLeft: "1px solid var(--line-1)", cursor: "pointer",
-            fontFamily: "var(--font-mono)", fontSize: 9, color: copied ? "var(--bg-0)" : "var(--fg-3)",
-            letterSpacing: "0.06em", flexShrink: 0, transition: "background 0.15s, color 0.15s",
-          }}
-        >
-          {copied ? "COPIED" : "COPY"}
-        </button>
-      </div>
+    <code style={{
+      display: "block",
+      fontFamily: "var(--font-mono)",
+      fontSize: 11,
+      background: "var(--bg-1)",
+      border: "1px solid var(--line-1)",
+      borderRadius: 2,
+      padding: "6px 10px",
+      color: "var(--fg-1)",
+      userSelect: "text",
+      whiteSpace: "pre-wrap",
+      wordBreak: "break-all",
+      lineHeight: 1.6,
+    }}>
+      {children}
+    </code>
+  );
+}
+
+function Label({ children }: { children: React.ReactNode }) {
+  return (
+    <div style={{
+      fontFamily: "var(--font-mono)",
+      fontSize: 9.5,
+      letterSpacing: "0.08em",
+      textTransform: "uppercase",
+      color: "var(--fg-3)",
+      marginBottom: 4,
+    }}>
+      {children}
     </div>
   );
-};
+}
 
-// ── Section wrapper ───────────────────────────────────────────────────────────
-
-const Section: React.FC<{ title: string; children: React.ReactNode }> = ({ title, children }) => (
-  <div style={{ marginBottom: 32 }}>
-    <h2 style={{
-      fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.1em",
-      textTransform: "uppercase", color: "var(--fg-3)", marginBottom: 14,
-      borderBottom: "1px solid var(--line-1)", paddingBottom: 8,
-    }}>
-      {title}
-    </h2>
-    {children}
-  </div>
-);
-
-// ── Main view ─────────────────────────────────────────────────────────────────
+// ── Main component ────────────────────────────────────────────────────────────
 
 export const SettingsView: React.FC = () => {
-  const [config, setConfig]   = useState<AppConfig | null>(null);
-  const [health, setHealth]   = useState<AllServerHealth | null>(null);
-  const [healthLoading, setHealthLoading] = useState(false);
-  const [saving, setSaving]   = useState(false);
-  const [saved, setSaved]     = useState(false);
-  const [error, setError]     = useState<string | null>(null);
+  const { tts, sfx, music, health, updateServerConfig } = useModelStore();
 
-  useEffect(() => {
-    getAppConfig()
-      .then(setConfig)
-      .catch((e) => setError(String(e)));
-  }, []);
+  const statusMap = { tts, sfx, music };
+  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music };
 
-  const refreshHealth = useCallback(() => {
-    setHealthLoading(true);
-    getServerHealthAll()
-      .then(setHealth)
-      .catch(() => setHealth({ tts: null, sfx: null, music: null }))
-      .finally(() => setHealthLoading(false));
-  }, []);
+  const [urls, setUrls] = useState({
+    tts:   `http://127.0.0.1:18001`,
+    sfx:   `http://127.0.0.1:18002`,
+    music: `http://127.0.0.1:18003`,
+  });
 
-  useEffect(() => { refreshHealth(); }, [refreshHealth]);
+  const [publicFlags, setPublicFlags] = useState({
+    tts:   false,
+    sfx:   false,
+    music: false,
+  });
 
-  const handleSave = async () => {
-    if (!config) return;
-    setSaving(true); setError(null);
-    try {
-      await saveAppConfig(config);
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2000);
-    } catch (e) {
-      setError(String(e));
-    } finally {
-      setSaving(false);
-    }
+  const handleUrlBlur = async (kind: "tts" | "sfx" | "music") => {
+    await updateServerConfig({ [`${kind}_url`]: urls[kind] });
   };
 
-  const patch = (p: Partial<AppConfig>) => setConfig((c) => c ? { ...c, ...p } : c);
-
-  if (!config) {
-    return (
-      <div style={{ padding: 40, color: "var(--fg-3)", fontSize: 12 }}>
-        {error ? `Error: ${error}` : "Loading config…"}
-      </div>
-    );
-  }
-
   return (
-    <div style={{ position: "absolute", inset: 0, overflow: "auto", background: "var(--bg-1)" }}>
-      <div className="grain" />
-      <div className="doc" style={{ maxWidth: 680 }}>
-
-        <div style={{ borderBottom: "1px solid var(--line-1)", paddingBottom: 20, marginBottom: 28 }}>
-          <div className="kicker">Pharaoh · Settings</div>
-          <h1 style={{ fontSize: 26, fontWeight: 600, letterSpacing: "-0.015em", color: "var(--fg-0)", margin: "8px 0 0" }}>
-            Configuration
-          </h1>
+    <div className="panel-view" style={{ overflowY: "auto" }}>
+      <div style={{ maxWidth: 780, padding: "28px 32px" }}>
+        <div style={{ marginBottom: 28 }}>
+          <div className="eyebrow" style={{ marginBottom: 4 }}>Pharaoh</div>
+          <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, lineHeight: 1.2 }}>Settings</h1>
+          <div style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 6 }}>
+            Inference servers, model variants, and server URLs.
+          </div>
         </div>
 
-        {/* ── Inference servers ── */}
-        <Section title="Inference servers">
-          <p style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.6, marginBottom: 16 }}>
-            Pharaoh connects to three external Python inference servers over HTTP.
-            Start them manually or point Pharaoh at remote machines.
-          </p>
+        {/* ── Server cards ─────────────────────────────────────────────── */}
+        <div style={{ marginBottom: 8 }}>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Inference servers</div>
+        </div>
 
-          {MODELS.map((m) => {
-            const urlKey = `${m.kind}_url` as keyof AppConfig;
-            const pubKey = `${m.kind}_public` as keyof AppConfig;
-            const h = health?.[m.kind];
-            const host = config[pubKey] ? "0.0.0.0" : "127.0.0.1";
-            return (
-              <div key={m.kind} style={{
-                marginBottom: 16, padding: "14px 16px",
-                border: "1px solid var(--line-1)", borderRadius: 3,
-                background: "var(--bg-2)",
+        {MODELS.map((m) => {
+          const status = statusMap[m.kind];
+          const h = healthMap[m.kind];
+          const accent = KIND_COLOR[m.kind];
+
+          return (
+            <div
+              key={m.kind}
+              style={{
+                border: "1px solid var(--line-1)",
+                background: "var(--bg-1)",
+                borderRadius: 3,
+                marginBottom: 14,
+                overflow: "hidden",
+              }}
+            >
+              {/* Header */}
+              <div style={{
+                borderBottom: "1px solid var(--line-1)",
+                padding: "12px 16px",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
               }}>
-                <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
-                  <HealthDot health={h ?? null} loading={healthLoading} />
-                  <span style={{ fontWeight: 500, fontSize: 13, color: "var(--fg-0)" }}>{m.label}</span>
-                  <span style={{ fontSize: 11, color: "var(--fg-4)" }}>{m.description}</span>
-                  {h && (
+                <span style={{
+                  width: 8, height: 8, borderRadius: "50%",
+                  background: STATUS_COLOR[status] ?? "var(--fg-4)",
+                  boxShadow: status === "online" ? `0 0 5px ${STATUS_COLOR[status]}` : "none",
+                  flexShrink: 0,
+                }} />
+                <span style={{ fontWeight: 600, fontSize: 13 }}>{m.label}</span>
+                <span style={{
+                  fontFamily: "var(--font-mono)",
+                  fontSize: 9.5,
+                  color: "var(--fg-3)",
+                  marginLeft: 2,
+                }}>:{m.port}</span>
+                <span style={{ flex: 1 }} />
+                <span style={{ fontSize: 11, color: "var(--fg-3)" }}>{m.description}</span>
+              </div>
+
+              {/* Body */}
+              <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
+                {/* URL + health + public toggle */}
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                  <div style={{ flex: 1 }}>
+                    <Label>Server URL</Label>
+                    <input
+                      type="text"
+                      value={urls[m.kind]}
+                      onChange={(e) => setUrls((prev) => ({ ...prev, [m.kind]: e.target.value }))}
+                      onBlur={() => handleUrlBlur(m.kind)}
+                      style={{
+                        width: "100%",
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 11,
+                        background: "var(--bg-0)",
+                        border: "1px solid var(--line-1)",
+                        borderRadius: 2,
+                        padding: "5px 8px",
+                        color: "var(--fg-1)",
+                        boxSizing: "border-box",
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <Label>Health</Label>
                     <span style={{
-                      marginLeft: "auto", fontFamily: "var(--font-mono)", fontSize: 9,
-                      color: h.model_loaded ? "var(--st-rendered)" : "var(--st-gen)",
-                      letterSpacing: "0.05em",
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10,
+                      padding: "4px 10px",
+                      background: "var(--bg-0)",
+                      border: "1px solid var(--line-1)",
+                      borderRadius: 2,
+                      color: STATUS_COLOR[status] ?? "var(--fg-4)",
                     }}>
-                      {h.model_loaded ? `${h.model_variant} · ${h.vram_mb} MB` : h.status}
+                      {status}
+                      {h?.vram_mb ? ` · ${h.vram_mb} MB` : ""}
                     </span>
+                  </div>
+                  <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                    <Label>Public</Label>
+                    <button
+                      onClick={() => setPublicFlags((prev) => ({ ...prev, [m.kind]: !prev[m.kind] }))}
+                      style={{
+                        fontFamily: "var(--font-mono)",
+                        fontSize: 10,
+                        padding: "4px 10px",
+                        background: publicFlags[m.kind] ? accent : "var(--bg-0)",
+                        border: `1px solid ${publicFlags[m.kind] ? accent : "var(--line-1)"}`,
+                        borderRadius: 2,
+                        color: publicFlags[m.kind] ? "var(--bg-0)" : "var(--fg-3)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {publicFlags[m.kind] ? "on" : "off"}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Active variant (TTS only) */}
+                {m.kind === "tts" && h?.model_variant && (
+                  <div>
+                    <Label>Active variant</Label>
+                    <span style={{
+                      fontFamily: "var(--font-mono)",
+                      fontSize: 10.5,
+                      color: accent,
+                    }}>{h.model_variant}</span>
+                  </div>
+                )}
+
+                {/* Model downloads */}
+                <div>
+                  <Label>Model downloads</Label>
+                  {m.kind === "tts" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      {TTS_VARIANTS.map((v) => (
+                        <div key={v.id}>
+                          <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 3 }}>
+                            <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>{v.id}</span>
+                            {" — "}{v.desc}
+                          </div>
+                          <Code>{`huggingface-cli download ${v.hf_id} --local-dir ~/pharaoh-models/tts`}</Code>
+                        </div>
+                      ))}
+                    </div>
+                  ) : m.kind === "sfx" ? (
+                    <div>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+                        Woosh checkpoints are distributed via GitHub releases (not HuggingFace).
+                      </div>
+                      <Code>{`# Download Woosh-DFlow checkpoint from GitHub Releases:\n# https://github.com/SonyResearch/Woosh/releases\nmkdir -p ~/pharaoh-models/sfx/checkpoints\n# Place Woosh-DFlow/ or Woosh-Flow/ under ~/pharaoh-models/sfx/checkpoints/`}</Code>
+                    </div>
+                  ) : (
+                    <Code>{`huggingface-cli download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`}</Code>
                   )}
                 </div>
 
-                <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 8 }}>
-                  <label style={{ ...labelStyle, marginBottom: 0, flexShrink: 0 }}>URL</label>
-                  <input
-                    className="input"
-                    value={config[urlKey] as string}
-                    onChange={(e) => patch({ [urlKey]: e.target.value })}
-                    style={{ flex: 1, fontSize: 11.5, fontFamily: "var(--font-mono)" }}
-                    placeholder={`http://127.0.0.1:${m.port}`}
-                  />
+                {/* Server startup */}
+                <div>
+                  <Label>Server startup</Label>
+                  {m.kind === "tts" ? (
+                    <div>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+                        {"--model-variant options: "}
+                        {TTS_VARIANTS.map((v) => v.id).join(" | ")}
+                      </div>
+                      <Code>{`python servers/tts/run.py --host 127.0.0.1 --port ${m.port} \\\n  --model-dir ~/pharaoh-models/tts \\\n  ${m.extra_flag}`}</Code>
+                    </div>
+                  ) : (
+                    <Code>{`python servers/${m.kind}/run.py --host 127.0.0.1 --port ${m.port} \\\n  --model-dir ~/pharaoh-models/${m.kind} \\\n  ${m.extra_flag}`}</Code>
+                  )}
                 </div>
 
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                  <label style={{
-                    display: "flex", alignItems: "center", gap: 6, cursor: "pointer",
-                    fontSize: 11, color: "var(--fg-3)",
-                  }}>
-                    <input
-                      type="checkbox"
-                      checked={config[pubKey] as boolean}
-                      onChange={(e) => patch({ [pubKey]: e.target.checked })}
-                      style={{ accentColor: "var(--tts)" }}
-                    />
-                    Expose to local network (bind {host}:{m.port})
-                  </label>
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)" }}>port {m.port}</span>
+                {/* Install */}
+                <div>
+                  <Label>Install</Label>
+                  <Code>{m.install}</Code>
                 </div>
               </div>
-            );
-          })}
-
-          <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
-            <button className="btn" onClick={refreshHealth} disabled={healthLoading} style={{ fontSize: 11 }}>
-              {healthLoading ? "Checking…" : "↻ Check health"}
-            </button>
-          </div>
-        </Section>
-
-        {/* ── Storage ── */}
-        <Section title="Storage">
-          <div style={{ marginBottom: 12 }}>
-            <label style={labelStyle}>Projects directory</label>
-            <input
-              className="input"
-              value={config.projects_dir}
-              onChange={(e) => patch({ projects_dir: e.target.value })}
-              style={{ width: "100%", fontSize: 12, fontFamily: "var(--font-mono)" }}
-              placeholder="~/pharaoh-projects"
-            />
-            <div style={{ fontSize: 10.5, color: "var(--fg-4)", marginTop: 4 }}>
-              Each project is a subdirectory with project.json, storyboard.json, and per-scene CSV + audio assets.
             </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Models directory</label>
-            <input
-              className="input"
-              value={config.models_dir}
-              onChange={(e) => patch({ models_dir: e.target.value })}
-              style={{ width: "100%", fontSize: 12, fontFamily: "var(--font-mono)" }}
-              placeholder="~/pharaoh-models"
-            />
-            <div style={{ fontSize: 10.5, color: "var(--fg-4)", marginTop: 4 }}>
-              Downloaded model weights. Each inference server expects its weights in a subdirectory.
-            </div>
-          </div>
-        </Section>
-
-        {/* ── Model downloads ── */}
-        <Section title="Model downloads">
-          <p style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.6, marginBottom: 16 }}>
-            Run these commands to download model weights via{" "}
-            <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>huggingface-cli</code>
-            {" "}(<code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5 }}>pip install huggingface-hub</code>).
-            Weights download to your configured models directory.
-          </p>
-
-          {MODELS.map((m) => (
-            <div key={m.kind} style={{ marginBottom: 14 }}>
-              <div style={{ fontWeight: 500, fontSize: 12, color: "var(--fg-1)", marginBottom: 6 }}>
-                {m.label}
-              </div>
-              <CopyField
-                value={`huggingface-cli download ${m.hf_id} --local-dir "${config.models_dir}/${m.subdir}"`}
-              />
-            </div>
-          ))}
-        </Section>
-
-        {/* ── Server startup commands ── */}
-        <Section title="Server startup">
-          <p style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.6, marginBottom: 16 }}>
-            Start each inference server from the Pharaoh server scripts directory.
-            The host changes based on the network exposure toggle above.
-          </p>
-
-          {MODELS.map((m) => {
-            const pubKey = `${m.kind}_public` as keyof AppConfig;
-            const host = config[pubKey] ? "0.0.0.0" : "127.0.0.1";
-            return (
-              <div key={m.kind} style={{ marginBottom: 14 }}>
-                <div style={{ fontWeight: 500, fontSize: 12, color: "var(--fg-1)", marginBottom: 6 }}>
-                  {m.label} · port {m.port}
-                </div>
-                <CopyField
-                  value={`python3 servers/${m.kind}/run.py --host ${host} --port ${m.port} --model-dir "${config.models_dir}/${m.subdir}"`}
-                />
-              </div>
-            );
-          })}
-        </Section>
-
-        {/* ── Save bar ── */}
-        <div style={{
-          position: "sticky", bottom: 0, padding: "14px 0",
-          background: "var(--bg-1)", borderTop: "1px solid var(--line-1)",
-          display: "flex", alignItems: "center", gap: 12,
-        }}>
-          <button
-            className="btn btn-primary"
-            onClick={handleSave}
-            disabled={saving}
-            style={{ minWidth: 110 }}
-          >
-            {saving ? "Saving…" : saved ? "Saved ✓" : "Save settings"}
-          </button>
-          {error && (
-            <span style={{ fontSize: 11, color: "var(--sfx)" }}>{error}</span>
-          )}
-        </div>
-
+          );
+        })}
       </div>
     </div>
   );
-};
-
-const labelStyle: React.CSSProperties = {
-  fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em",
-  color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4,
 };

@@ -1,0 +1,3 @@
+qwen-tts
+soundfile
+flask>=3.0
