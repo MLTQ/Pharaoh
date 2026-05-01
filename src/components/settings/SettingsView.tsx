@@ -279,16 +279,35 @@ export const SettingsView: React.FC = () => {
                 <div>
                   <Label>Server startup</Label>
                   {m.kind === "tts" ? (
-                    <div>
-                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
-                        {"--model-variant options: "}
-                        {TTS_VARIANTS.map((v) => v.id).join(" | ")}
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
+                        Stub mode (no GPU required — starts instantly):
                       </div>
-                      <Code>{`python servers/tts/run.py --host 127.0.0.1 --port ${m.port} \\\n  --model-dir ~/pharaoh-models/tts \\\n  ${m.extra_flag}`}</Code>
+                      <Code>{`cd inference && python tts_server.py`}</Code>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginTop: 2 }}>
+                        Real inference (choose a variant):
+                      </div>
+                      <Code>{`PHARAOH_REAL_MODELS=1 PHARAOH_TTS_VARIANT=Qwen3-TTS-12Hz-1.7B-CustomVoice \\\n  python inference/tts_server.py`}</Code>
+                    </div>
+                  ) : m.kind === "sfx" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <Code>{`cd inference && python sfx_server.py`}</Code>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
+                        Real inference requires Woosh clone — see servers/sfx/run.py
+                      </div>
                     </div>
                   ) : (
-                    <Code>{`python servers/${m.kind}/run.py --host 127.0.0.1 --port ${m.port} \\\n  --model-dir ~/pharaoh-models/${m.kind} \\\n  ${m.extra_flag}`}</Code>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                      <Code>{`cd inference && python music_server.py`}</Code>
+                      <div style={{ fontSize: 10.5, color: "var(--fg-2)" }}>
+                        Real inference requires ACE-Step clone — see servers/music/run.py
+                      </div>
+                    </div>
                   )}
+                  <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}>
+                    Start all three at once (stub mode):
+                  </div>
+                  <Code>{`./inference/start_servers.sh`}</Code>
                 </div>
 
                 {/* Install */}
