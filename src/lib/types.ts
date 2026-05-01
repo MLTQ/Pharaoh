@@ -25,6 +25,7 @@ export interface Project {
   id: string;
   title: string;
   logline: string;
+  synopsis: string;
   tone: string;
   global_audio_notes: string;
   target_duration_minutes: number;
@@ -32,6 +33,31 @@ export interface Project {
   updated_at: string;
   characters: Character[];
   llm_config: LlmConfig;
+}
+
+export interface AppConfig {
+  tts_url: string;
+  sfx_url: string;
+  music_url: string;
+  tts_public: boolean;
+  sfx_public: boolean;
+  music_public: boolean;
+  projects_dir: string;
+  models_dir: string;
+}
+
+export interface AllServerHealth {
+  tts: ServerHealth | null;
+  sfx: ServerHealth | null;
+  music: ServerHealth | null;
+}
+
+export interface ServerHealth {
+  status: string;
+  model_loaded: boolean;
+  model_variant: string;
+  vram_mb: number;
+  stub: boolean;
 }
 
 // ── Storyboard ──────────────────────────────────────────────────────────────
@@ -141,7 +167,7 @@ export interface AssetItem {
 
 // ── UI state ────────────────────────────────────────────────────────────────
 
-export type ViewId = "pyramid" | "composition" | "bible" | "tts" | "sfx" | "music";
+export type ViewId = "pyramid" | "composition" | "bible" | "characters" | "tts" | "sfx" | "music" | "settings";
 export type RightTab = "agent" | "assets" | "jobs";
 export type ColorTemp = "forest" | "warm" | "neutral";
 export type Density = "comfortable" | "compact";
@@ -183,6 +209,7 @@ export interface MockScene {
   status: "rendered" | "ready" | "gen" | "draft";
   duration: string;
   nodes: MockSceneNode[];
+  slug?: string; // real slug from Rust, overrides deriveSlug when present
 }
 
 export interface MockCastMember {
@@ -196,6 +223,7 @@ export interface MockProject {
   title: string;
   subtitle: string;
   logline: string;
+  synopsis: string;
   season: string;
   episode: string;
   runtime: string;

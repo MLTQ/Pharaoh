@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Project, Scene, ScriptRow } from "./types";
+import type { Project, Scene, ScriptRow, AppConfig, AllServerHealth } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
@@ -77,6 +77,15 @@ export interface ServerHealth {
   stub: boolean;
 }
 
+export const getAppConfig = (): Promise<AppConfig> =>
+  invoke("get_app_config");
+
+export const saveAppConfig = (config: AppConfig): Promise<void> =>
+  invoke("save_app_config", { config });
+
+export const getServerHealthAll = (): Promise<AllServerHealth> =>
+  invoke("get_server_health_all");
+
 export const checkServerHealth = (model: "tts" | "sfx" | "music"): Promise<ServerHealth> =>
   invoke("check_server_health", { model });
 
@@ -102,6 +111,23 @@ export const submitTtsCustomVoice = (args: {
     output_path: string;
   };
 }): Promise<string> => invoke("submit_tts_custom_voice", args);
+
+export const submitTtsVoiceClone = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    text: string;
+    ref_audio_path: string;
+    ref_transcript: string;
+    language: string;
+    icl_mode: boolean;
+    seed: number;
+    temperature: number;
+    top_p: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_tts_voice_clone", args);
 
 export const submitTtsVoiceDesign = (args: {
   projectId: string;

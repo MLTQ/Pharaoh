@@ -3,23 +3,43 @@ mod error;
 mod models;
 
 use tauri::Manager;
-use models::AppState;
+use models::{AppConfig, AppState};
 
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .manage(AppState::new())
         .setup(|app| {
-            let projects_dir = app
+            // Resolve config path: ~/Library/Application Support/ai.aureum.pharaoh/config.json
+            let config_dir = app
                 .path()
-                .home_dir()
-                .expect("could not resolve home dir")
-                .join("pharaoh-projects");
+                .app_config_dir()
+                .expect("could not resolve app config dir");
+            let config_path = config_dir.join("config.json");
+
+            // Load or build default AppConfig
+            let home = app.path().home_dir().expect("could not resolve home dir");
+            let app_config: AppConfig = if config_path.exists() {
+                std::fs::read_to_string(&config_path)
+                    .ok()
+                    .and_then(|s| serde_json::from_str(&s).ok())
+                    .unwrap_or_else(|| AppConfig::with_home(&home))
+            } else {
+                AppConfig::with_home(&home)
+            };
+
+            // Ensure projects and models directories exist
+            let projects_dir = std::path::PathBuf::from(&app_config.projects_dir);
             if !projects_dir.exists() {
                 std::fs::create_dir_all(&projects_dir)?;
             }
+            let models_dir = std::path::PathBuf::from(&app_config.models_dir);
+            if !models_dir.exists() {
+                std::fs::create_dir_all(&models_dir)?;
+            }
+
+            app.manage(AppState::new(config_path, app_config));
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -46,6 +66,10 @@ pub fn run() {
             commands::inference::submit_tts_voice_clone,
             commands::inference::submit_sfx_t2a,
             commands::inference::submit_music_text2music,
+            // Settings / config
+            commands::settings::get_app_config,
+            commands::settings::save_app_config,
+            commands::settings::get_server_health_all,
             // Sidecar
             commands::sidecar::write_sidecar,
             commands::sidecar::read_sidecar,

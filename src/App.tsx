@@ -1,7 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect } from "react";
 import { Icon, Wave } from "./components/shared/atoms";
 import { PyramidView } from "./components/pyramid/PyramidView";
 import { StoryBibleView } from "./components/pyramid/StoryBibleView";
+import { CharacterDesignerView } from "./components/characters/CharacterDesignerView";
 import { CompositionView } from "./components/timeline/CompositionView";
 import { TTSPanel } from "./components/generators/TTSPanel";
 import { SFXPanel } from "./components/generators/SFXPanel";
@@ -9,21 +10,20 @@ import { MusicPanel } from "./components/generators/MusicPanel";
 import { AgentFeed } from "./components/shared/AgentFeed";
 import { AssetBrowser } from "./components/shared/AssetBrowser";
 import { JobQueue } from "./components/shared/JobQueue";
-import { ProjectPicker } from "./components/project/ProjectPicker";
+import { SettingsView } from "./components/settings/SettingsView";
+import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
-import { getProjectsDir } from "./lib/tauriCommands";
-import type { Project } from "./lib/types";
-import { MOCK_AGENT_LOG, MOCK_TRACKS } from "./lib/mockData";
 import type { ViewId, RightTab } from "./lib/types";
 
 const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label: string; model?: string }[] = [
   { id: "pyramid",     icon: "pyramid",   label: "Pyramid" },
   { id: "composition", icon: "timeline",  label: "Composition" },
   { id: "bible",       icon: "book",      label: "Story Bible" },
+  { id: "characters",  icon: "person",    label: "Cast & Voices" },
   { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
   { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
@@ -37,53 +37,33 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export default function App() {
-  const { project, scenes, cast, assets, activeSceneNo, setActiveScene, updateScene, loadRealProject } = useProjectStore();
+  const {
+    project, scenes, assets, activeSceneNo,
+    setActiveScene, updateScene, characters, realProjectId,
+  } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setRightTab } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
   const { tts, sfx, music, pollHealth } = useModelStore();
-  const [showProjectPicker, setShowProjectPicker] = useState(false);
 
   const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
 
-  // Apply theme to root
   useEffect(() => {
     document.documentElement.dataset.colorTemp = colorTemp === "forest" ? "" : colorTemp;
     document.documentElement.dataset.density   = density === "compact" ? "compact" : "";
   }, [colorTemp, density]);
 
-  // Wire Tauri job events
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     initListeners().then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
 
-  // Poll server health on mount and every 30s
   useEffect(() => {
     pollHealth();
     const id = setInterval(pollHealth, 30_000);
     return () => clearInterval(id);
   }, []);
-
-  const breadcrumb = (() => {
-    if (view === "pyramid")     return [{ k: "Project", v: project.title, active: true }];
-    if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
-    if (view === "composition") return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
-    if (view === "tts")         return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Dialogue", active: true }];
-    if (view === "sfx")         return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Sound design", active: true }];
-    if (view === "music")       return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Score", active: true }];
-    return [];
-  })();
-
-  const sidebarTitle: Record<ViewId, { eyebrow: string; title: string }> = {
-    pyramid:     { eyebrow: "Workspace", title: "Pyramid" },
-    composition: { eyebrow: "Workspace", title: "Composition" },
-    bible:       { eyebrow: "Workspace", title: "Story Bible" },
-    tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
-    sfx:         { eyebrow: "Generation", title: "Sound design" },
-    music:       { eyebrow: "Generation", title: "Score" },
-  };
 
   const runningJobs = jobs.filter((j) => j.status === "running").length;
 
@@ -94,26 +74,61 @@ export default function App() {
     return `${m}:${s}`;
   };
 
-  if (showProjectPicker) {
+  // ── No project: launcher shell ───────────────────────────────────────────
+  if (!realProjectId) {
     return (
-      <ProjectPicker
-        onOpen={async (p: Project) => {
-          try {
-            const pDir = await getProjectsDir();
-            loadRealProject(p, pDir);
-          } catch {
-            // Running in browser — still close picker
-          }
-          setShowProjectPicker(false);
-          setView("pyramid");
-        }}
-      />
+      <div className="app" style={{ gridTemplateColumns: "var(--rail-w) 1fr", gridTemplateRows: "1fr" }}>
+        {/* Minimal rail */}
+        <div className="rail" style={{ gridRow: "1" }}>
+          <div className="rail-spacer" />
+          <button
+            className={`rail-btn ${view === "settings" ? "active" : ""}`}
+            title="Settings"
+            onClick={() => setView("settings")}
+          >
+            <Icon name="settings" style={{ width: 18, height: 18 }} />
+          </button>
+        </div>
+
+        {/* Full-area content */}
+        <div style={{ gridColumn: 2, gridRow: 1, position: "relative" }}>
+          {view === "settings" ? <SettingsView /> : <ProjectLauncherView />}
+        </div>
+      </div>
     );
   }
 
+  // ── Project open: full layout ─────────────────────────────────────────────
+
+  const breadcrumb = (() => {
+    if (view === "pyramid")     return [{ k: "Project", v: project.title, active: true }];
+    if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
+    if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
+    if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
+    if (view === "composition" && scene) {
+      return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
+    }
+    if (view === "tts" && scene)   return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Dialogue", active: true }];
+    if (view === "sfx" && scene)   return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Sound design", active: true }];
+    if (view === "music" && scene) return [{ k: "Project", v: project.title }, { k: scene.no, v: scene.title }, { k: "Generate", v: "Score", active: true }];
+    return [{ k: "Project", v: project.title, active: true }];
+  })();
+
+  const sidebarTitle: Partial<Record<ViewId, { eyebrow: string; title: string }>> = {
+    pyramid:     { eyebrow: "Workspace",  title: "Pyramid" },
+    composition: { eyebrow: "Workspace",  title: "Composition" },
+    bible:       { eyebrow: "Workspace",  title: "Story Bible" },
+    characters:  { eyebrow: "Tier I",     title: "Cast & Voices" },
+    tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
+    sfx:         { eyebrow: "Generation", title: "Sound design" },
+    music:       { eyebrow: "Generation", title: "Score" },
+    settings:    { eyebrow: "App",        title: "Settings" },
+  };
+  const sidebar = sidebarTitle[view] ?? { eyebrow: "Workspace", title: "" };
+
   return (
     <div className="app">
-      {/* ── TOPBAR ─────────────────────────────────────────────────────── */}
+      {/* ── TOPBAR ──────────────────────────────────────────────────────── */}
       <div className="topbar">
         <div className="brand">
           <div className="brand-mark">
@@ -162,7 +177,9 @@ export default function App() {
         </div>
 
         <div className="status-pills">
-          <span className="status-pill"><span className="dot" /> autosaved {project.lastSync.split(" ")[1]}</span>
+          {project.lastSync && (
+            <span className="status-pill"><span className="dot" /> autosaved {project.lastSync.split(" ")[1]}</span>
+          )}
           {runningJobs > 0 && (
             <span className="status-pill"><span className="dot warn" /> {runningJobs} job{runningJobs !== 1 ? "s" : ""} running</span>
           )}
@@ -173,7 +190,7 @@ export default function App() {
         </div>
       </div>
 
-      {/* ── RAIL ───────────────────────────────────────────────────────── */}
+      {/* ── RAIL ────────────────────────────────────────────────────────── */}
       <div className="rail">
         {RAIL_ITEMS.map((r) => (
           <button
@@ -189,17 +206,27 @@ export default function App() {
           </button>
         ))}
         <div className="rail-spacer" />
-        <button className="rail-btn" title="Switch project" onClick={() => setShowProjectPicker(true)}>
+        <button
+          className={`rail-btn ${view === "settings" ? "active" : ""}`}
+          title="Settings"
+          onClick={() => setView("settings")}
+        >
+          <Icon name="settings" style={{ width: 18, height: 18 }} />
+        </button>
+        <button
+          className="rail-btn"
+          title="Switch project"
+          onClick={() => { /* clear project to show launcher */ useProjectStore.setState({ realProjectId: null, scenes: [], characters: [] }); setView("pyramid"); }}
+        >
           <Icon name="folder" style={{ width: 18, height: 18 }} />
         </button>
-        <button className="rail-btn"><Icon name="settings" style={{ width: 18, height: 18 }} /></button>
       </div>
 
-      {/* ── SIDEBAR ────────────────────────────────────────────────────── */}
+      {/* ── SIDEBAR ─────────────────────────────────────────────────────── */}
       <div className="sidebar">
         <div className="sidebar-head">
-          <span className="eyebrow">{sidebarTitle[view].eyebrow}</span>
-          <span className="title">{sidebarTitle[view].title}</span>
+          <span className="eyebrow">{sidebar.eyebrow}</span>
+          <span className="title">{sidebar.title}</span>
         </div>
         <div className="sidebar-body">
           <div className="side-section">Tier I · Story</div>
@@ -208,8 +235,18 @@ export default function App() {
             <span>Story Bible</span>
             <span className="num">{project.revision}</span>
           </div>
+          <div className={`side-item ${view === "characters" ? "active" : ""}`} onClick={() => setView("characters")}>
+            <span className="ico" style={{ color: "var(--tts)" }}><Icon name="person" style={{ width: 14, height: 14 }} /></span>
+            <span>Cast & Voices</span>
+            <span className="num">{characters.length}</span>
+          </div>
 
           <div className="side-section">Tier II · Scenes</div>
+          {scenes.length === 0 && (
+            <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
+              No scenes yet
+            </div>
+          )}
           {scenes.map((s) => (
             <div
               key={s.no}
@@ -220,8 +257,8 @@ export default function App() {
                 display: "inline-block", width: 9, height: 9, borderRadius: "50%",
                 border: `1.5px solid ${
                   s.status === "rendered" ? "var(--st-rendered)" :
-                  s.status === "gen" ? "var(--st-gen)" :
-                  s.status === "ready" ? "var(--st-ready)" : "var(--st-draft)"
+                  s.status === "gen"      ? "var(--st-gen)"      :
+                  s.status === "ready"    ? "var(--st-ready)"    : "var(--st-draft)"
                 }`,
                 background: s.status === "rendered" ? "var(--st-rendered)" : "transparent",
                 flexShrink: 0,
@@ -239,66 +276,72 @@ export default function App() {
           <div className={`side-item ${view === "tts" ? "active" : ""}`} onClick={() => setView("tts")}>
             <span className="ico" style={{ color: "var(--tts)" }}><Icon name="mic" style={{ width: 14, height: 14 }} /></span>
             <span>Voice · Dialogue</span>
-            <span className="num">2</span>
+            <span className="num">{jobs.filter(j => j.model === "tts" && j.status === "running").length || ""}</span>
           </div>
           <div className={`side-item ${view === "sfx" ? "active" : ""}`} onClick={() => setView("sfx")}>
             <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="waves" style={{ width: 14, height: 14 }} /></span>
             <span>Sound design</span>
-            <span className="num">1</span>
+            <span className="num">{jobs.filter(j => j.model === "sfx" && j.status === "running").length || ""}</span>
           </div>
           <div className={`side-item ${view === "music" ? "active" : ""}`} onClick={() => setView("music")}>
             <span className="ico" style={{ color: "var(--music)" }}><Icon name="music" style={{ width: 14, height: 14 }} /></span>
             <span>Score</span>
-            <span className="num">1</span>
+            <span className="num">{jobs.filter(j => j.model === "music" && j.status === "running").length || ""}</span>
           </div>
 
-          <div className="side-section">Cast · {cast.length}</div>
-          {cast.map((c) => (
-            <div key={c.id} className="side-item">
+          <div className="side-section">Cast · {characters.length}</div>
+          {characters.map((c) => (
+            <div key={c.id} className="side-item" onClick={() => { setView("characters"); }}>
               <span className="ico">
                 <span style={{
                   display: "inline-block", width: 10, height: 10, borderRadius: "50%",
-                  background: `oklch(0.7 0.06 ${(c.id.charCodeAt(0) * 13) % 360})`,
+                  background: `oklch(0.7 0.12 ${(c.id.charCodeAt(0) * 13) % 360})`,
                   border: "1px solid var(--line-2)",
                 }} />
               </span>
               <span>{c.name}</span>
-              <span className="num">{c.scenes}</span>
             </div>
           ))}
         </div>
       </div>
 
-      {/* ── CANVAS ─────────────────────────────────────────────────────── */}
+      {/* ── CANVAS ──────────────────────────────────────────────────────── */}
       <div className="canvas">
+        {view === "settings" && <SettingsView />}
         {view === "pyramid" && (
           <PyramidView
             project={project}
             scenes={scenes}
-            cast={cast}
+            cast={[]}
             activeSceneNo={activeSceneNo}
             onOpenScene={(no) => { setActiveScene(no); setView("composition"); }}
             onOpenBible={() => setView("bible")}
           />
         )}
-        {view === "composition" && (
+        {view === "composition" && scene && (
           <CompositionView
             scene={scene}
             scenes={scenes}
-            tracks={MOCK_TRACKS}
+            tracks={[]}
             assets={assets}
             onSwitchScene={(no) => setActiveScene(no)}
             onOpenPyramid={() => setView("pyramid")}
             onUpdateScene={updateScene}
           />
         )}
-        {view === "bible" && <StoryBibleView project={project} cast={cast} />}
-        {view === "tts"   && <TTSPanel cast={cast} scenes={scenes} defaultScene={activeSceneNo} />}
+        {view === "composition" && !scene && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--fg-4)", fontSize: 13 }}>
+            No scenes yet — create one in the Pyramid.
+          </div>
+        )}
+        {view === "bible"      && <StoryBibleView />}
+        {view === "characters" && <CharacterDesignerView />}
+        {view === "tts"   && <TTSPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "sfx"   && <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "music" && <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />}
       </div>
 
-      {/* ── RIGHT RAIL ─────────────────────────────────────────────────── */}
+      {/* ── RIGHT RAIL ──────────────────────────────────────────────────── */}
       <div className="right">
         <div className="right-tabs">
           {(["agent", "assets", "jobs"] as RightTab[]).map((tab) => (
@@ -312,20 +355,17 @@ export default function App() {
           ))}
         </div>
         <div className="right-body">
-          {rightTab === "agent"  && <AgentFeed log={MOCK_AGENT_LOG} />}
+          {rightTab === "agent"  && <AgentFeed log={[]} />}
           {rightTab === "assets" && <AssetBrowser assets={assets} />}
           {rightTab === "jobs"   && <JobQueue jobs={jobs} />}
         </div>
       </div>
 
-      {/* ── TRANSPORT ──────────────────────────────────────────────────── */}
+      {/* ── TRANSPORT ───────────────────────────────────────────────────── */}
       <div className="transport">
         <div className="tp-controls">
           <button className="tp-btn"><Icon name="skip_back" style={{ width: 14, height: 14 }} /></button>
-          <button
-            className="tp-btn play"
-            onClick={() => isPlaying ? pause() : play()}
-          >
+          <button className="tp-btn play" onClick={() => isPlaying ? pause() : play()}>
             <Icon name={isPlaying ? "pause" : "play"} style={{ width: 12, height: 12 }} />
           </button>
           <button className="tp-btn"><Icon name="skip_fwd" style={{ width: 14, height: 14 }} /></button>
@@ -333,15 +373,17 @@ export default function App() {
             <Icon name="record" style={{ width: 14, height: 14 }} />
           </button>
           <span style={{ marginLeft: 12, fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-1)" }}>
-            {formatMs(positionMs)} / {scene.duration}
+            {formatMs(positionMs)} / {scene?.duration ?? "—"}
           </span>
         </div>
         <div className="tp-mini">
-          <span className="tp-mini-label">{scene.no} · {scene.title}</span>
-          <div className="tp-wave">
-            <Wave width={500} height={24} seed={scene.no.charCodeAt(2)} count={140} color="var(--fg-2)" opacity={0.65} />
-          </div>
-          <span className="tp-time">−{scene.duration}</span>
+          <span className="tp-mini-label">{scene ? `${scene.no} · ${scene.title}` : "No scene"}</span>
+          {scene && (
+            <div className="tp-wave">
+              <Wave width={500} height={24} seed={scene.no.charCodeAt(2)} count={140} color="var(--fg-2)" opacity={0.65} />
+            </div>
+          )}
+          <span className="tp-time">{scene ? `−${scene.duration}` : ""}</span>
         </div>
         <div className="tp-meta">
           <div>−14.2 LU · −1.8 dB TP</div>

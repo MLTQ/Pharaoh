@@ -2,14 +2,13 @@ use std::path::PathBuf;
 use tauri::{AppHandle, Manager};
 use uuid::Uuid;
 use chrono::Utc;
-use crate::models::{Project, Scene, Storyboard, LlmConfig, SceneStatus};
+use crate::models::{AppState, Project, Scene, Storyboard, LlmConfig, SceneStatus};
 use crate::error::{Error, Result};
 
 fn projects_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .home_dir()
-        .expect("no home dir")
-        .join("pharaoh-projects")
+    let state = app.state::<AppState>();
+    let cfg = state.app_config.read().expect("app_config lock poisoned");
+    PathBuf::from(&cfg.projects_dir)
 }
 
 fn project_dir(app: &AppHandle, project_id: &str) -> PathBuf {
@@ -49,6 +48,7 @@ pub fn create_project(
         id: id.clone(),
         title,
         logline: logline.unwrap_or_default(),
+        synopsis: String::new(),
         tone: tone.unwrap_or_default(),
         global_audio_notes: String::new(),
         target_duration_minutes: 30,

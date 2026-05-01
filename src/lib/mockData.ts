@@ -1,12 +1,76 @@
 import type {
   MockProject, MockCastMember, MockScene, MockTrack,
-  MockAssets, AgentLogEntry, Job
+  MockAssets, AgentLogEntry, Job, Character
 } from "./types";
+
+export const MOCK_CHARACTERS: Character[] = [
+  {
+    id: "VERA",
+    name: "Vera Halloran",
+    description: "Forensic linguist, 38. Driven and attentive; understates fear.",
+    voice_assignment: {
+      model: "Clone",
+      speaker: null,
+      instruct_default: "Burnished alto. Forensic, attentive. Understates fear.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "ABEL",
+    name: "Abel Reese",
+    description: "Vera's missing brother. Heard only in recordings and memory.",
+    voice_assignment: {
+      model: "VoiceDesign",
+      speaker: null,
+      instruct_default: "Lower, hoarser. Long breaths between phrases.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "CONST",
+    name: "Constance Mire",
+    description: "Diner keeper, 60s. Professionally distant — knows more than she says.",
+    voice_assignment: {
+      model: "CustomVoice",
+      speaker: "Vivian",
+      instruct_default: "Warm but professionally distant. Measured cadence.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "RADIO",
+    name: "Voice on the Radio",
+    description: "Disembodied. Counts backward in Dutch.",
+    voice_assignment: {
+      model: "CustomVoice",
+      speaker: "Magnus",
+      instruct_default: "Slightly distorted, as if through AM static. Dutch counting cadence.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+  {
+    id: "NARR",
+    name: "Narrator",
+    description: "Third-person omniscient. Patinated, unhurried.",
+    voice_assignment: {
+      model: "VoiceDesign",
+      speaker: null,
+      instruct_default: "Patinated, third-person. Unhurried, authoritative.",
+      ref_audio_path: null,
+      ref_transcript: null,
+    },
+  },
+];
 
 export const MOCK_PROJECT: MockProject = {
   title: "The Salt Path",
   subtitle: "Episode 03 · The Vault Beneath",
   logline: "After her brother's disappearance in the salt flats, a forensic linguist follows a trail of broken radio signals into a town that doesn't appear on any map.",
+  synopsis: "Vera Halloran has spent three winters cataloguing the disappearing dialects of the salt belt. When her brother Abel sends a final transmission consisting only of a hymn and a man counting backward in Dutch, Vera drives north toward a town called Sluis that no satellite has ever photographed.\n\nWhat she finds beneath the salt is older than the mine. The voice on the radio has been speaking for forty-one years. It knows her name.",
   season: "S01",
   episode: "E03",
   runtime: "32:14",
@@ -126,6 +190,41 @@ export const MOCK_JOBS: Job[] = [
   { id: "j4", model: "tts",   description: "ABEL · S05 · \"Forty-one years\" — take 1",          status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "05_counting_backward",  row_index: 0, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
   { id: "j5", model: "sfx",   description: "wind · salt flat · 0:42",                            status: "pending",  progress: 0,   eta: "queued", started_at: "—",     scene_id: null, scene_slug: "06_surface_dawn",       row_index: 1, output_path: null, peaks: null, qa_status: "unreviewed", error: null },
 ];
+
+const blankRow = (override: Partial<import("./types").ScriptRow>): import("./types").ScriptRow => ({
+  scene: "", track: "", type: "DIALOGUE", character: "", prompt: "",
+  file: "", start_ms: "", duration_ms: "", loop: "", pan: "", gain_db: "",
+  instruct: "", fade_in_ms: "", fade_out_ms: "", reverb_send: "", notes: "",
+  ...override,
+});
+
+export const MOCK_SCENE_SCRIPTS: Record<string, import("./types").ScriptRow[]> = {
+  S04: [
+    blankRow({ scene: "S04", track: "NARR",  type: "DIRECTION", prompt: "INT. SALT MINE — DESCENDING. Vera's lamp finds carved walls. Footsteps double back." }),
+    blankRow({ scene: "S04", track: "FOLEY", type: "SFX",      prompt: "footsteps · gravel slope · descending rhythm", file: "s04_foley_01.wav", start_ms: "0",    duration_ms: "18000" }),
+    blankRow({ scene: "S04", track: "BED",   type: "BED",      prompt: "salt mine room tone · low hum · 2s fade in",   file: "s04_bed_01.wav",   start_ms: "0",    duration_ms: "90000" }),
+    blankRow({ scene: "S04", track: "VERA",  type: "DIALOGUE", character: "VERA",  prompt: "It can't go this deep. The geological survey said sixty meters — we've been descending for twenty minutes.", file: "s04_vera_01.wav", start_ms: "4000",  duration_ms: "12000" }),
+    blankRow({ scene: "S04", track: "FOLEY", type: "SFX",      prompt: "lamp click · metal housing · single",          file: "s04_foley_02.wav", start_ms: "22000", duration_ms: "2000"  }),
+    blankRow({ scene: "S04", track: "VERA",  type: "DIRECTION", prompt: "(she raises the lamp; carved figures emerge from the wall)" }),
+    blankRow({ scene: "S04", track: "VERA",  type: "DIALOGUE", character: "VERA",  prompt: "Who carved this?",          file: "s04_vera_02.wav", start_ms: "64000", duration_ms: "5000"  }),
+    blankRow({ scene: "S04", track: "ABEL",  type: "DIALOGUE", character: "ABEL",  prompt: "Don't say my name down here.", file: "s04_abel_01.wav", start_ms: "88000", duration_ms: "8000"  }),
+    blankRow({ scene: "S04", track: "MUSIC", type: "MUSIC",    prompt: "Cue 4A · Descent · Dm · sparse strings · no pulse", file: "s04_music_01.wav", start_ms: "0", duration_ms: "64000" }),
+    blankRow({ scene: "S04", track: "VERA",  type: "DIALOGUE", character: "VERA",  prompt: "Abel? Is that you down there?" }),
+  ],
+  S01: [
+    blankRow({ scene: "S01", track: "NARR",  type: "DIRECTION", prompt: "INT. CAR — DUSK. Vera drives. Headlights find the fog and stop." }),
+    blankRow({ scene: "S01", track: "BED",   type: "BED",       prompt: "car interior · engine hum · road texture",     file: "s01_bed_01.wav",   start_ms: "0",    duration_ms: "192000" }),
+    blankRow({ scene: "S01", track: "VERA",  type: "DIALOGUE",  character: "VERA",  prompt: "Thirty-six switchbacks. Abel said thirty-six.", file: "s01_vera_01.wav", start_ms: "8000", duration_ms: "9000" }),
+    blankRow({ scene: "S01", track: "RADIO", type: "DIALOGUE",  character: "RADIO", prompt: "…drie-en-veertig… twee-en-veertig…",             file: "s01_radio_01.wav", start_ms: "24000", duration_ms: "14000" }),
+    blankRow({ scene: "S01", track: "MUSIC", type: "MUSIC",     prompt: "Cue 1A · Switchback · Dm · hymn fragment · distant" }),
+  ],
+  S05: [
+    blankRow({ scene: "S05", track: "NARR",  type: "DIRECTION", prompt: "INT. CHAMBER. A figure at a desk, microphone, candle." }),
+    blankRow({ scene: "S05", track: "ABEL",  type: "DIALOGUE",  character: "ABEL",  prompt: "Forty-one years. They count the salt." }),
+    blankRow({ scene: "S05", track: "VERA",  type: "DIALOGUE",  character: "VERA",  prompt: "Abel — I heard you on the radio. I drove here. I drove here." }),
+    blankRow({ scene: "S05", track: "MUSIC", type: "MUSIC",     prompt: "Cue 5A · Recognition · Am · slow resolve" }),
+  ],
+};
 
 export const MOCK_AGENT_LOG: AgentLogEntry[] = [
   { who: "Pharaoh · Mixer",      body: "Auto-balanced VERA dialogue against AMBIENT bed in S04 (−3.2 LU). Two clips clipping; applied soft limiter.", t: "14:21" },
