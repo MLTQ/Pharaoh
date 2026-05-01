@@ -17,8 +17,8 @@ interface PlaybackState {
 export const usePlaybackStore = create<PlaybackState>((set) => ({
   isPlaying: false,
   context: "scene",
-  contextId: "S04",
-  positionMs: 72000,
+  contextId: null,
+  positionMs: 0,
 
   play: (context, contextId) =>
     set((state) => ({

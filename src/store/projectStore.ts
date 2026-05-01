@@ -80,9 +80,25 @@ interface ProjectState {
   updateScene: (no: string, patch: Partial<MockScene>) => void;
   loadRealProject: (project: Project, projectsDir: string, scenes: Scene[]) => void;
   setActiveSceneSlug: (slug: string | null) => void;
+  addScene: (scene: Scene) => void;
 }
 
 // ── Store ────────────────────────────────────────────────────────────────────
+
+/** Convert a real Scene (from Tauri) into a MockScene suitable for UI rendering */
+export function realSceneToMock(scene: Scene): MockScene {
+  const no = `S${String(scene.index + 1).padStart(2, "0")}`;
+  return {
+    no,
+    rev: "01",
+    title: scene.title,
+    desc: scene.description,
+    script: "",
+    status: "draft",
+    duration: "0:00",
+    nodes: [],
+  };
+}
 
 export const useProjectStore = create<ProjectState>((set, get) => ({
   project: EMPTY_PROJECT,
@@ -169,4 +185,16 @@ export const useProjectStore = create<ProjectState>((set, get) => ({
   },
 
   setActiveSceneSlug: (slug) => set({ activeSceneSlug: slug }),
+
+  addScene: (scene) =>
+    set((state) => {
+      const mockScene = realSceneToMock(scene);
+      const newScenes = [...state.scenes, mockScene];
+      const isFirst = state.scenes.length === 0;
+      const slug = deriveSlug(mockScene.no, mockScene.title);
+      return {
+        scenes: newScenes,
+        ...(isFirst ? { activeSceneNo: mockScene.no, activeSceneSlug: slug } : {}),
+      };
+    }),
 }));

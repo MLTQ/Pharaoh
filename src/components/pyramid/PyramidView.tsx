@@ -1,6 +1,8 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Icon, StatusRing } from "../shared/atoms";
 import type { MockProject, MockCastMember, MockScene } from "../../lib/types";
+import { useProjectStore } from "../../store/projectStore";
+import { createScene } from "../../lib/tauriCommands";
 
 interface PyramidViewProps {
   project: MockProject;
@@ -11,11 +13,22 @@ interface PyramidViewProps {
   onOpenBible: () => void;
 }
 
+interface NewSceneForm {
+  title: string;
+  description: string;
+  location: string;
+}
+
 export const PyramidView: React.FC<PyramidViewProps> = ({
   project, scenes, cast, activeSceneNo, onOpenScene, onOpenBible,
 }) => {
+  const { realProjectId, addScene } = useProjectStore();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  const [showForm, setShowForm] = useState(false);
+  const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
+  const [formError, setFormError] = useState<string | null>(null);
+  const [formBusy, setFormBusy] = useState(false);
 
   useEffect(() => {
     const fit = () => {
@@ -38,7 +51,9 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
   const n = scenes.length;
   const plateGap = 22;
-  const totalPlatesW = n * PLATE_W + (n - 1) * plateGap;
+  // When computing layout include the "+ Add scene" placeholder
+  const totalCards = n + 1;
+  const totalPlatesW = totalCards * PLATE_W + (totalCards - 1) * plateGap;
   const startX = (W - totalPlatesW) / 2;
 
   const episodeTotalSec = scenes.reduce((a, s) => {
@@ -53,9 +68,122 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
     draft:    "oklch(0.45 0.01 145)",
   };
 
+  const handleOpenForm = () => {
+    setForm({ title: "", description: "", location: "" });
+    setFormError(null);
+    setShowForm(true);
+  };
+
+  const handleCancelForm = () => {
+    setShowForm(false);
+    setFormError(null);
+  };
+
+  const handleCreate = async () => {
+    if (!form.title.trim()) {
+      setFormError("Title is required.");
+      return;
+    }
+    if (!realProjectId) {
+      setFormError("Open a real project first.");
+      return;
+    }
+    setFormBusy(true);
+    setFormError(null);
+    try {
+      const scene = await createScene({
+        projectId: realProjectId,
+        title: form.title.trim(),
+        description: form.description.trim() || undefined,
+        location: form.location.trim() || undefined,
+        index: scenes.length,
+      });
+      addScene(scene);
+      setShowForm(false);
+    } catch (e) {
+      setFormError(String(e));
+    } finally {
+      setFormBusy(false);
+    }
+  };
+
   return (
     <div className="pyramid">
       <div className="grain" />
+
+      {/* Inline new-scene form (above pyramid canvas) */}
+      {showForm && (
+        <div style={{
+          position: "absolute", top: 0, left: 0, right: 0, zIndex: 20,
+          background: "var(--bg-2)",
+          borderBottom: "1px solid var(--line-1)",
+          padding: "16px 24px",
+          display: "flex", flexDirection: "column", gap: 12,
+        }}>
+          <div style={{
+            fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.18em",
+            textTransform: "uppercase", color: "var(--fg-4)", marginBottom: 4,
+          }}>
+            New Scene
+          </div>
+          <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "flex-end" }}>
+            <div className="field" style={{ marginBottom: 0, flex: "1 1 200px" }}>
+              <div className="field-label">
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-3)" }}>
+                  Title <span style={{ color: "var(--sfx)" }}>*</span>
+                </span>
+              </div>
+              <input
+                className="input"
+                placeholder="Scene title"
+                value={form.title}
+                onChange={(e) => setForm((f) => ({ ...f, title: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") handleCancelForm(); }}
+                autoFocus
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, flex: "2 1 280px" }}>
+              <div className="field-label">
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-3)" }}>
+                  Description
+                </span>
+              </div>
+              <input
+                className="input"
+                placeholder="Brief scene description"
+                value={form.description}
+                onChange={(e) => setForm((f) => ({ ...f, description: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Escape") handleCancelForm(); }}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, flex: "1 1 160px" }}>
+              <div className="field-label">
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-3)" }}>
+                  Location
+                </span>
+              </div>
+              <input
+                className="input"
+                placeholder="INT. / EXT."
+                value={form.location}
+                onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Escape") handleCancelForm(); }}
+              />
+            </div>
+            <div style={{ display: "flex", gap: 8, alignItems: "center", paddingBottom: 1 }}>
+              <button className="btn" onClick={handleCancelForm} disabled={formBusy}>Cancel</button>
+              <button className="btn btn-primary" onClick={handleCreate} disabled={formBusy}>
+                {formBusy ? "Creating…" : "Create"}
+              </button>
+            </div>
+          </div>
+          {formError && (
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--sfx)" }}>
+              {formError}
+            </div>
+          )}
+        </div>
+      )}
 
       <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
         <div style={{
@@ -202,6 +330,47 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
             );
           })}
 
+          {/* "+ Add scene" placeholder card */}
+          {(() => {
+            const addCardX = startX + n * (PLATE_W + plateGap);
+            return (
+              <div
+                onClick={handleOpenForm}
+                title="Add scene"
+                style={{
+                  position: "absolute", left: addCardX, top: BASE_Y,
+                  width: PLATE_W, height: PLATE_H,
+                  border: "1.5px dashed var(--line-1)",
+                  borderRadius: 4,
+                  background: "color-mix(in oklch, var(--bg-2) 60%, transparent)",
+                  display: "flex", flexDirection: "column",
+                  alignItems: "center", justifyContent: "center", gap: 8,
+                  cursor: "pointer",
+                  opacity: 0.7,
+                  transition: "opacity 0.15s",
+                }}
+                onMouseEnter={(e) => (e.currentTarget.style.opacity = "1")}
+                onMouseLeave={(e) => (e.currentTarget.style.opacity = "0.7")}
+              >
+                <div style={{
+                  width: 28, height: 28, borderRadius: "50%",
+                  border: "1px dashed var(--line-1)",
+                  display: "flex", alignItems: "center", justifyContent: "center",
+                  color: "var(--fg-3)",
+                }}>
+                  <Icon name="plus" style={{ width: 14, height: 14 }} />
+                </div>
+                <span style={{
+                  fontFamily: "var(--font-mono)", fontSize: 9,
+                  letterSpacing: "0.14em", textTransform: "uppercase",
+                  color: "var(--fg-4)",
+                }}>
+                  Add scene
+                </span>
+              </div>
+            );
+          })()}
+
           {/* Episode timeline bar */}
           <div style={{
             position: "absolute", left: 60, right: 60, bottom: 24,
@@ -219,8 +388,8 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                   return scenes.map((s) => {
                     const [m, sec] = s.duration.split(":").map(Number);
                     const dur = m * 60 + sec;
-                    const xx = (offset / episodeTotalSec) * 1000;
-                    const w = (dur / episodeTotalSec) * 1000;
+                    const xx = episodeTotalSec > 0 ? (offset / episodeTotalSec) * 1000 : 0;
+                    const w = episodeTotalSec > 0 ? (dur / episodeTotalSec) * 1000 : 0;
                     offset += dur;
                     return (
                       <g key={s.no}>
