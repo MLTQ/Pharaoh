@@ -4,4 +4,5 @@ pub mod inference;
 pub mod project;
 pub mod script;
 pub mod settings;
+pub mod setup;
 pub mod sidecar;

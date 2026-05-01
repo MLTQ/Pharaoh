@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useModelStore } from "../../store/modelStore";
 import type { AppConfig } from "../../lib/types";
@@ -292,6 +293,139 @@ function WooshCheckpoints() {
   );
 }
 
+// ── Woosh one-click setup ─────────────────────────────────────────────────────
+
+interface SetupProgress {
+  step: number;
+  total_steps: number;
+  label: string;
+  bytes_done: number;
+  bytes_total: number;
+  done: boolean;
+  error: string | null;
+}
+
+function formatBytes(n: number): string {
+  if (n === 0) return "";
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(0)} MB`;
+  return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
+}
+
+function WooshSetupPanel({ wooshDir, hw }: { wooshDir: string; hw: HardwareProfile | null }) {
+  const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [steps, setSteps] = useState<SetupProgress[]>([]);
+  const unlistenRef = useRef<(() => void) | null>(null);
+
+  const uvSyncCmd = hw
+    ? `cd ${wooshDir || "~/Code/Woosh"} && ${
+        hw.gpu === "cuda" ? "uv sync --extra cuda" :
+        hw.gpu === "mps"  ? "uv sync" :
+                            "uv sync --extra cpu"
+      }`
+    : `cd ${wooshDir || "~/Code/Woosh"} && uv sync`;
+
+  const start = async () => {
+    if (!wooshDir) return;
+    setPhase("running");
+    setSteps([]);
+
+    const unlisten = await listen<SetupProgress>("woosh_setup", (e) => {
+      const p = e.payload;
+      setSteps((prev) => {
+        const next = [...prev];
+        const idx = p.step - 1;
+        next[idx] = p;
+        return next;
+      });
+      if (p.done) { setPhase("done"); unlisten(); }
+      if (p.error) { setPhase("error"); unlisten(); }
+    });
+    unlistenRef.current = unlisten;
+
+    invoke("setup_woosh", { destDir: wooshDir }).catch((e: unknown) => {
+      setPhase("error");
+      setSteps((prev) => [...prev, {
+        step: -1, total_steps: 7, label: String(e),
+        bytes_done: 0, bytes_total: 0, done: false, error: String(e),
+      }]);
+    });
+  };
+
+  useEffect(() => () => { unlistenRef.current?.(); }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {phase === "idle" && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <button
+            className="btn"
+            disabled={!wooshDir}
+            onClick={start}
+            style={{ borderColor: "var(--sfx)", color: "var(--sfx)", background: "color-mix(in oklch, var(--sfx) 10%, transparent)" }}
+          >
+            Set up automatically
+          </button>
+          <span style={{ fontSize: 10.5, color: "var(--fg-4)" }}>
+            Clones repo + downloads AE, TextConditionerA, DFlow (~3.2 GB total)
+          </span>
+        </div>
+      )}
+
+      {(phase === "running" || phase === "done" || phase === "error") && (
+        <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+          {Array.from({ length: 7 }, (_, i) => {
+            const s = steps[i];
+            const isActive = s && !s.done && !s.error;
+            const isDone = s?.done || (s && !s.error && steps[i + 1] !== undefined);
+            const isErr = s?.error;
+            return (
+              <div key={i} style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  fontFamily: "var(--font-mono)", fontSize: 11, width: 14, textAlign: "center",
+                  color: isErr ? "var(--sfx)" : isDone ? "var(--st-rendered)" : isActive ? "var(--fg-1)" : "var(--fg-4)",
+                }}>
+                  {isErr ? "✕" : isDone ? "✓" : isActive ? "›" : "○"}
+                </span>
+                <div style={{ flex: 1 }}>
+                  <span style={{ fontSize: 11, color: isErr ? "var(--sfx)" : isDone ? "var(--fg-2)" : isActive ? "var(--fg-1)" : "var(--fg-4)" }}>
+                    {s?.label ?? `Step ${i + 1}`}
+                  </span>
+                  {isActive && s.bytes_total > 0 && (
+                    <div style={{ marginTop: 3 }}>
+                      <div style={{
+                        height: 3, background: "var(--line-1)", borderRadius: 2, overflow: "hidden",
+                      }}>
+                        <div style={{
+                          height: "100%",
+                          width: `${Math.min(100, (s.bytes_done / s.bytes_total) * 100).toFixed(1)}%`,
+                          background: "var(--sfx)", transition: "width 0.2s",
+                        }} />
+                      </div>
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)" }}>
+                        {formatBytes(s.bytes_done)} / {formatBytes(s.bytes_total)}
+                      </span>
+                    </div>
+                  )}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {phase === "done" && (
+        <div style={{ marginTop: 4 }}>
+          <div style={{ fontSize: 11, color: "var(--st-rendered)", marginBottom: 6 }}>
+            ✓ Woosh is ready. Run this once to install Python dependencies:
+          </div>
+          <CopyableCommand command={uvSyncCmd} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Woosh install helper ──────────────────────────────────────────────────────
 
 function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
@@ -537,6 +671,14 @@ export const SettingsView: React.FC = () => {
                         ✓ checkpoints found
                       </div>
                     )}
+                  </div>
+                )}
+
+                {/* One-click setup (SFX only, shown when checkpoints missing) */}
+                {m.kind === "sfx" && !sfxHealth?.woosh_ready && (
+                  <div>
+                    <Label>Automated setup</Label>
+                    <WooshSetupPanel wooshDir={wooshDir} hw={hw} />
                   </div>
                 )}
 

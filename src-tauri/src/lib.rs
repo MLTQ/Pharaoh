@@ -70,6 +70,7 @@ pub fn run() {
             commands::inference::submit_sfx_t2a,
             commands::inference::submit_music_text2music,
             // Settings / config
+            commands::setup::setup_woosh,
             commands::settings::get_app_config,
             commands::settings::save_app_config,
             commands::settings::get_server_health_all,
