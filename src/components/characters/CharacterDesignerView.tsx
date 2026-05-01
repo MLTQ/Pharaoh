@@ -290,10 +290,8 @@ export const CharacterDesignerView: React.FC = () => {
     removeCharacter(id);
   };
 
-  if (!char) return null;
-
-  const charColor = `oklch(0.7 0.12 ${CHAR_HUE(char.id)})`;
-  const refPath   = char.voice_assignment.ref_audio_path;
+  const charColor = char ? `oklch(0.7 0.12 ${CHAR_HUE(char.id)})` : "";
+  const refPath   = char?.voice_assignment.ref_audio_path ?? null;
 
   // ── Render ─────────────────────────────────────────────────────────────
 
@@ -403,7 +401,25 @@ export const CharacterDesignerView: React.FC = () => {
         })}
       </div>
 
-      {/* ── Detail panel ────────────────────────────────────────────────── */}
+      {/* ── Detail panel + right meta ──────────────────────────────────── */}
+      {!char ? (
+        <div style={{
+          flex: 1, display: "flex", flexDirection: "column",
+          alignItems: "center", justifyContent: "center",
+          gap: 10, color: "var(--fg-4)",
+        }}>
+          <span style={{ fontSize: 28, opacity: 0.25 }}>◎</span>
+          <span style={{ fontSize: 12 }}>No characters yet</span>
+          <button
+            className="btn btn-primary"
+            style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", marginTop: 4 }}
+            onClick={() => { setAddingChar(true); setNewName(""); }}
+          >
+            + Add character
+          </button>
+        </div>
+      ) : (
+      <div style={{ flex: 1, display: "flex", minWidth: 0, overflow: "hidden" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto", minWidth: 0 }}>
 
         {/* Character header */}
@@ -722,6 +738,8 @@ export const CharacterDesignerView: React.FC = () => {
           </div>
         </MetaSection>
       </div>
+      </div>
+      )}
 
     </div>
   );
