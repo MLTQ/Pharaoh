@@ -11,7 +11,7 @@
     "fs:allow-read-text-file",
     "fs:allow-read-file",
     "fs:scope-home-recursive",
-    "fs:scope-app-local-data-recursive",
+    "fs:scope-applocaldata-recursive",
     "fs:allow-write-text-file",
     "fs:allow-mkdir",
     "fs:allow-read-dir",
