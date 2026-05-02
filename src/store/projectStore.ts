@@ -3,7 +3,10 @@ import type {
   MockProject, MockScene, MockCastMember, MockAssets,
   Project, Scene, Character,
 } from "../lib/types";
-import { updateProject as saveProjectToTauri } from "../lib/tauriCommands";
+import {
+  updateProject as saveProjectToTauri,
+  updateScene as saveSceneToTauri,
+} from "../lib/tauriCommands";
 
 // ── Scene conversion ─────────────────────────────────────────────────────────
 
@@ -74,6 +77,7 @@ interface ProjectState {
 
   realProjectId: string | null;
   realProject: Project | null;
+  realScenes: Scene[];
   projectsDir: string | null;
   activeSceneSlug: string | null;
 
@@ -108,6 +112,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
     selectedCharId: null,
     realProjectId: null,
     realProject: null,
+    realScenes: [],
     projectsDir: null,
     activeSceneSlug: null,
 
@@ -185,10 +190,34 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set({ activeSceneNo: no, activeSceneSlug: slug });
     },
 
-    updateScene: (no, patch) =>
-      set((state) => ({
-        scenes: state.scenes.map((s) => (s.no === no ? { ...s, ...patch } : s)),
-      })),
+    updateScene: (no, patch) => {
+      set((state) => {
+        const scenes = state.scenes.map((s) => (s.no === no ? { ...s, ...patch } : s));
+        const mockScene = state.scenes.find((s) => s.no === no);
+        const realScenes = mockScene?.slug
+          ? state.realScenes.map((s) => {
+              if (s.slug !== mockScene.slug) return s;
+              return {
+                ...s,
+                ...(patch.title  !== undefined && { title:       patch.title }),
+                ...(patch.desc   !== undefined && { description: patch.desc }),
+                ...(patch.script !== undefined && { notes:       patch.script }),
+              };
+            })
+          : state.realScenes;
+        return { scenes, realScenes };
+      });
+      const { realProjectId, realScenes, scenes } = get();
+      if (realProjectId) {
+        const slug = scenes.find((s) => s.no === no)?.slug;
+        const realScene = slug ? realScenes.find((s) => s.slug === slug) : undefined;
+        if (realScene) {
+          saveSceneToTauri({ projectId: realProjectId, scene: realScene }).catch((e) =>
+            console.error("[projectStore] scene save failed:", e)
+          );
+        }
+      }
+    },
 
     loadRealProject: (project, projectsDir, scenes) => {
       const mockScenes = scenes.map(realSceneToMock);
@@ -199,6 +228,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
       set({
         realProjectId: project.id,
         realProject: project,
+        realScenes: scenes,
         projectsDir,
         activeSceneNo,
         activeSceneSlug,
@@ -231,6 +261,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const slug = deriveSlug(mockScene.no, mockScene.title);
         return {
           scenes: newScenes,
+          realScenes: [...state.realScenes, scene],
           ...(isFirst ? { activeSceneNo: mockScene.no, activeSceneSlug: slug } : {}),
         };
       }),
