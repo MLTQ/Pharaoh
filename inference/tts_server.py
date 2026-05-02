@@ -110,15 +110,29 @@ async def _ensure_model(required_type: str) -> str | None:
     Make sure the right model type is loaded.
     Returns an error string if it can't be loaded, else None.
     """
-    global _tts_model, _loaded_type
+    global _tts_model, _loaded_type, _model_loaded
 
+    # Already correct
     if _tts_model is not None and _loaded_type == required_type:
-        return None  # already correct
+        return None
 
+    # Wrong type loaded — fail immediately rather than blocking for a multi-minute reload
+    if _tts_model is not None and _loaded_type != required_type:
+        return (
+            f"Wrong model loaded: '{_loaded_type}' is active but '{required_type}' is "
+            f"required for this endpoint. Go to Models, unload it, then load the correct checkpoint. "
+            f"Or place the '{required_type}' weights in {TTS_MODEL_DIR}/{required_type}/"
+        )
+
+    # No model loaded yet — attempt auto-load under lock
     async with _load_lock:
-        # Re-check inside lock
+        # Re-check inside lock (another task may have loaded by now)
         if _tts_model is not None and _loaded_type == required_type:
             return None
+        if _tts_model is not None:
+            return (
+                f"Wrong model loaded: '{_loaded_type}' is active but '{required_type}' is required."
+            )
 
         model_dir = _resolve_model_dir(required_type)
         if model_dir is None:
@@ -128,12 +142,16 @@ async def _ensure_model(required_type: str) -> str | None:
                 f"or put a single model in {TTS_MODEL_DIR}/"
             )
         try:
-            loop = asyncio.get_event_loop()
+            loop = asyncio.get_running_loop()
             loaded = await loop.run_in_executor(None, lambda: _do_load(model_dir))
             if loaded != required_type:
+                # Loaded wrong type from flat dir — clear so server state stays clean
+                _tts_model = None
+                _loaded_type = None
+                _model_loaded = False
                 return (
                     f"Loaded model is type '{loaded}' but '{required_type}' is required. "
-                    f"Put the right model in {TTS_MODEL_DIR}/{required_type}/"
+                    f"Place the correct model weights in {TTS_MODEL_DIR}/{required_type}/"
                 )
         except Exception as exc:
             log.exception("Auto-load failed")
@@ -186,14 +204,16 @@ async def _run_tts(job_id: str, params: dict) -> None:
 
     jobs.update(job_id, status="running", progress=0.02)
 
-    # Auto-load correct model if needed
-    err = await _ensure_model(required_type)
-    if err:
-        jobs.update(job_id, status="failed", error=err)
-        return
-
-    jobs.update(job_id, progress=0.15)
     try:
+        # Auto-load correct model if needed
+        log.info(f"Job {job_id}: need '{required_type}' model (loaded: {_loaded_type!r})")
+        err = await _ensure_model(required_type)
+        if err:
+            log.warning(f"Job {job_id} failed: {err}")
+            jobs.update(job_id, status="failed", error=err)
+            return
+
+        jobs.update(job_id, progress=0.15)
         import soundfile as sf
         import torch
 
@@ -204,7 +224,7 @@ async def _run_tts(job_id: str, params: dict) -> None:
         if seed:
             torch.manual_seed(seed)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         if endpoint == "voice_design":
             wavs, sr = await loop.run_in_executor(
