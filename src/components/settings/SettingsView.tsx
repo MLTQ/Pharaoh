@@ -32,12 +32,13 @@ const WOOSH_VARIANTS: Record<string, { label: string; cmd: string }> = {
 
 // ── Model definitions ─────────────────────────────────────────────────────────
 
+// subdir must match the server's _ENDPOINT_TYPE keys: custom_voice | voice_design | base
 const TTS_VARIANTS = [
-  { id: "CustomVoice-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", desc: "9 preset voices + instruction control" },
-  { id: "VoiceDesign-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", desc: "Free-form voice description via natural language" },
-  { id: "Base-1.7B",        hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-Base",        desc: "3-second voice cloning" },
-  { id: "CustomVoice-0.6B", hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", desc: "Preset voices, lightweight (0.6B)" },
-  { id: "Base-0.6B",        hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-Base",        desc: "Voice cloning, lightweight (0.6B)" },
+  { id: "CustomVoice-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice", subdir: "custom_voice", desc: "9 preset voices + instruction control" },
+  { id: "VoiceDesign-1.7B", hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign", subdir: "voice_design", desc: "Free-form voice description via natural language" },
+  { id: "Base-1.7B",        hf_id: "Qwen/Qwen3-TTS-12Hz-1.7B-Base",        subdir: "base",         desc: "3-second voice cloning" },
+  { id: "CustomVoice-0.6B", hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-CustomVoice", subdir: "custom_voice", desc: "Preset voices, lightweight — replaces CustomVoice-1.7B" },
+  { id: "Base-0.6B",        hf_id: "Qwen/Qwen3-TTS-12Hz-0.6B-Base",        subdir: "base",         desc: "Voice cloning, lightweight — replaces Base-1.7B" },
 ];
 
 const MODELS = [
@@ -698,14 +699,24 @@ export const SettingsView: React.FC = () => {
                 <div>
                   <Label>Model downloads</Label>
                   {m.kind === "tts" ? (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <div style={{
+                        fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6,
+                        padding: "8px 10px",
+                        background: "color-mix(in oklch, var(--tts) 6%, var(--bg-2))",
+                        borderRadius: "var(--r)", border: "1px solid var(--line-2)",
+                      }}>
+                        Each TTS variant has the same filenames — download each to its own
+                        subfolder or they will overwrite each other. The server auto-routes
+                        each endpoint to the correct subfolder.
+                      </div>
                       {TTS_VARIANTS.map((v) => (
                         <div key={v.id}>
                           <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
                             <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>{v.id}</span>
                             {" — "}{v.desc}
                           </div>
-                          <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts`} />
+                          <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
                         </div>
                       ))}
                     </div>
