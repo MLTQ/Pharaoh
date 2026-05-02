@@ -1,8 +1,12 @@
 """
 Pharaoh Music Server — port 18003
 Wraps ACE-Step 1.5. Stub mode by default; set PHARAOH_REAL_MODELS=1 for real inference.
+
+Real-mode requirements:
+    pip install ace-step
 """
 import asyncio
+import logging
 import os
 from pathlib import Path
 
@@ -13,9 +17,12 @@ from pydantic import BaseModel, Field
 
 from _common import JobStore, new_job_id, write_wav_stub
 
-PORT = int(os.environ.get("PHARAOH_MUSIC_PORT", 18003))
-REAL = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
-MODEL_VARIANT = os.environ.get("PHARAOH_MUSIC_VARIANT", "ace-step-v1-5-checkpoint")
+log = logging.getLogger(__name__)
+
+PORT            = int(os.environ.get("PHARAOH_MUSIC_PORT",    18003))
+REAL            = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
+MODEL_VARIANT   = os.environ.get("PHARAOH_MUSIC_VARIANT",  "ace-step-v1-5-checkpoint")
+MUSIC_MODEL_DIR = Path(os.environ.get("PHARAOH_MUSIC_MODEL_DIR", "~/pharaoh-models/music")).expanduser()
 
 app = FastAPI(title="Pharaoh Music Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -24,6 +31,22 @@ _model_loaded = False
 
 STEMS = ["vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard",
          "percussion", "strings", "synth", "fx", "brass", "woodwinds"]
+
+# ── ACE-Step model state ─────────────────────────────────────────────────────
+
+_pipeline = None  # ACEStepPipeline instance
+
+
+def _load_music_model() -> None:
+    global _pipeline
+    from acestep.pipeline import ACEStepPipeline
+
+    if not MUSIC_MODEL_DIR.is_dir():
+        raise RuntimeError(f"Music model directory not found: {MUSIC_MODEL_DIR}")
+
+    log.info(f"Loading ACE-Step from {MUSIC_MODEL_DIR}")
+    _pipeline = ACEStepPipeline.from_pretrained(str(MUSIC_MODEL_DIR))
+    log.info("ACE-Step loaded.")
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -35,7 +58,7 @@ class Text2MusicParams(BaseModel):
     bpm: int | None = None
     key: str = ""
     language: str = "en"
-    lm_model_size: str = "1.7B"  # none | 0.6B | 1.7B | 4B
+    lm_model_size: str = "1.7B"
     diffusion_steps: int = 60
     thinking_mode: bool = False
     reference_audio_path: str = ""
@@ -86,14 +109,13 @@ class CompleteParams(BaseModel):
     output_path: str
 
 
-# ── Background worker ────────────────────────────────────────────────────────
+# ── Background workers ───────────────────────────────────────────────────────
 
 async def _run_music_stub(job_id: str, params: dict) -> None:
     """Simulate music generation: slow fake progress, write stub WAV at 44.1kHz stereo."""
     jobs.update(job_id, status="running", progress=0.0)
     duration = float(params.get("duration_seconds", 30.0))
     steps = params.get("diffusion_steps", 60)
-    # Simulate ~1 step per 80ms
     for i in range(steps):
         await asyncio.sleep(0.08)
         jobs.update(job_id, progress=(i + 1) / steps)
@@ -105,12 +127,86 @@ async def _run_music_stub(job_id: str, params: dict) -> None:
 
 
 async def _run_music_real(job_id: str, params: dict) -> None:
+    """Real ACE-Step inference via ace-step package."""
+    global _pipeline
+
+    if _pipeline is None:
+        jobs.update(job_id, status="failed", error="Music model not loaded — call /load first")
+        return
+
+    jobs.update(job_id, status="running", progress=0.05)
     try:
         import torch
-        # Real ACE-Step inference goes here
-    except ImportError:
-        pass
-    await _run_music_stub(job_id, params)
+
+        endpoint = params.get("_endpoint", "text2music")
+        out_path = params["output_path"]
+        seed     = int(params.get("seed", 0))
+        steps    = int(params.get("diffusion_steps", 60))
+        duration = float(params.get("duration_seconds", 30.0))
+
+        if seed:
+            torch.manual_seed(seed)
+
+        loop = asyncio.get_event_loop()
+        jobs.update(job_id, progress=0.10)
+
+        if endpoint == "text2music":
+            caption = params.get("caption", "")
+            lyrics  = params.get("lyrics", "")
+            bpm     = params.get("bpm")
+            key     = params.get("key", "")
+            ref     = params.get("reference_audio_path", "")
+
+            audio, sr = await loop.run_in_executor(
+                None,
+                lambda: _pipeline.generate(
+                    caption=caption,
+                    lyrics=lyrics if lyrics else None,
+                    duration=duration,
+                    bpm=bpm,
+                    key=key if key else None,
+                    reference_audio_path=ref if ref else None,
+                    num_inference_steps=steps,
+                    seed=seed,
+                ),
+            )
+        elif endpoint == "cover":
+            audio, sr = await loop.run_in_executor(
+                None,
+                lambda: _pipeline.cover(
+                    source_audio_path=params["source_audio_path"],
+                    caption=params.get("caption", ""),
+                    cover_strength=float(params.get("cover_strength", 0.5)),
+                    num_inference_steps=steps,
+                    seed=seed,
+                ),
+            )
+        elif endpoint == "repaint":
+            audio, sr = await loop.run_in_executor(
+                None,
+                lambda: _pipeline.repaint(
+                    source_audio_path=params["source_audio_path"],
+                    caption=params.get("caption", ""),
+                    start_time=params.get("start_ms", 0) / 1000.0,
+                    end_time=params.get("end_ms", 10000) / 1000.0,
+                    num_inference_steps=steps,
+                    seed=seed,
+                ),
+            )
+        else:
+            raise ValueError(f"Unsupported music endpoint: {endpoint}")
+
+        jobs.update(job_id, progress=0.90)
+
+        import soundfile as sf
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        await loop.run_in_executor(None, lambda: sf.write(out_path, audio, sr))
+
+        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
+
+    except Exception as exc:
+        log.exception("ACE-Step inference failed")
+        jobs.update(job_id, status="failed", error=str(exc))
 
 
 def _submit(params: dict, endpoint: str) -> dict:
@@ -141,32 +237,32 @@ async def stems() -> list:
 
 @app.post("/generate/text2music")
 async def generate_text2music(p: Text2MusicParams) -> dict:
-    return _submit(p.model_dump(), "text2music")
+    return _submit({**p.model_dump(), "_endpoint": "text2music"}, "text2music")
 
 
 @app.post("/generate/cover")
 async def generate_cover(p: CoverParams) -> dict:
-    return _submit(p.model_dump(), "cover")
+    return _submit({**p.model_dump(), "_endpoint": "cover"}, "cover")
 
 
 @app.post("/generate/repaint")
 async def generate_repaint(p: RepaintParams) -> dict:
-    return _submit(p.model_dump(), "repaint")
+    return _submit({**p.model_dump(), "_endpoint": "repaint"}, "repaint")
 
 
 @app.post("/generate/lego")
 async def generate_lego(p: LegoParams) -> dict:
-    return _submit(p.model_dump(), "lego")
+    return _submit({**p.model_dump(), "_endpoint": "lego"}, "lego")
 
 
 @app.post("/generate/extract")
 async def generate_extract(p: ExtractParams) -> dict:
-    return _submit(p.model_dump(), "extract")
+    return _submit({**p.model_dump(), "_endpoint": "extract"}, "extract")
 
 
 @app.post("/generate/complete")
 async def generate_complete(p: CompleteParams) -> dict:
-    return _submit(p.model_dump(), "complete")
+    return _submit({**p.model_dump(), "_endpoint": "complete"}, "complete")
 
 
 @app.get("/jobs/{job_id}")
@@ -180,16 +276,26 @@ async def get_job(job_id: str) -> dict:
 @app.post("/load")
 async def load() -> dict:
     global _model_loaded
+    if REAL:
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _load_music_model)
+        except Exception as exc:
+            log.exception("Failed to load music model")
+            return {"status": "error", "error": str(exc)}
+
     _model_loaded = True
     return {"status": "loaded"}
 
 
 @app.post("/unload")
 async def unload() -> dict:
-    global _model_loaded
+    global _model_loaded, _pipeline
     _model_loaded = False
+    _pipeline = None
     return {"status": "unloaded"}
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

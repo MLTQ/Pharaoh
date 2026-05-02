@@ -114,7 +114,8 @@ pub async fn load_model(
     if let Some(v) = variant {
         req = req.json(&serde_json::json!({ "variant": v }));
     }
-    req.timeout(std::time::Duration::from_secs(30))
+    // Real model loading can take 30-120 s on first call (weights → VRAM)
+    req.timeout(std::time::Duration::from_secs(180))
         .send()
         .await
         .map_err(|e| Error::Other(format!("load request failed: {}", e)))?;

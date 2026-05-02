@@ -1,12 +1,13 @@
 """
 Pharaoh TTS Server — port 18001
 Wraps Qwen3-TTS. Stub mode by default; set PHARAOH_REAL_MODELS=1 for real inference.
+
+Real-mode requirements:
+    pip install qwen-tts soundfile
 """
 import asyncio
-import math
+import logging
 import os
-import struct
-import time
 from pathlib import Path
 
 import uvicorn
@@ -16,9 +17,12 @@ from pydantic import BaseModel
 
 from _common import JobStore, new_job_id, write_wav_stub
 
-PORT = int(os.environ.get("PHARAOH_TTS_PORT", 18001))
-REAL = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
-MODEL_VARIANT = os.environ.get("PHARAOH_TTS_VARIANT", "Qwen3-TTS-12Hz-1.7B-CustomVoice")
+log = logging.getLogger(__name__)
+
+PORT          = int(os.environ.get("PHARAOH_TTS_PORT",    18001))
+REAL          = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
+MODEL_VARIANT = os.environ.get("PHARAOH_TTS_VARIANT",  "Qwen3-TTS-12Hz-1.7B-CustomVoice")
+TTS_MODEL_DIR = Path(os.environ.get("PHARAOH_TTS_MODEL_DIR", "~/pharaoh-models/tts")).expanduser()
 
 app = FastAPI(title="Pharaoh TTS Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -38,6 +42,44 @@ SPEAKERS = [
 ]
 
 LANGUAGES = ["en", "zh", "de", "fr", "ja", "ko", "es", "pt", "it", "nl"]
+
+# Map speaker IDs to qwen-tts voice names
+_SPEAKER_MAP = {
+    "Vivian":   "Vivian",
+    "Lili":     "Lili",
+    "Magnus":   "Magnus",
+    "Jinchen":  "Jinchen",
+    "Chengdu":  "Chengdu",
+    "Dynamic":  "Dynamic",
+    "Ryan":     "Ryan",
+    "Japanese": "Japanese",
+    "Korean":   "Korean",
+}
+
+# ── TTS model state ─────────────────────────────────────────────────────────
+
+_tts_model = None   # Qwen3TTSModel instance
+
+
+def _load_tts_model() -> None:
+    global _tts_model
+    import torch
+    from qwen_tts import Qwen3TTSModel
+
+    if not TTS_MODEL_DIR.is_dir():
+        raise RuntimeError(f"TTS model directory not found: {TTS_MODEL_DIR}")
+
+    device_map = "mps" if hasattr(torch.backends, "mps") and torch.backends.mps.is_available() \
+                else "cuda:0" if torch.cuda.is_available() else "cpu"
+    dtype = torch.bfloat16
+
+    log.info(f"Loading Qwen3-TTS from {TTS_MODEL_DIR} on {device_map}")
+    _tts_model = Qwen3TTSModel.from_pretrained(
+        str(TTS_MODEL_DIR),
+        device_map=device_map,
+        dtype=dtype,
+    )
+    log.info("Qwen3-TTS loaded.")
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -77,7 +119,7 @@ class VoiceCloneParams(BaseModel):
     output_path: str
 
 
-# ── Background worker ────────────────────────────────────────────────────────
+# ── Background workers ───────────────────────────────────────────────────────
 
 async def _run_tts_stub(job_id: str, params: dict) -> None:
     """Simulate TTS generation: fake progress over ~2 seconds, write stub WAV."""
@@ -90,21 +132,91 @@ async def _run_tts_stub(job_id: str, params: dict) -> None:
     output_path = params["output_path"]
     Path(output_path).parent.mkdir(parents=True, exist_ok=True)
     words = len(params.get("text", "").split())
-    duration = max(0.5, words * 0.35)  # ~350ms per word
+    duration = max(0.5, words * 0.35)
     await write_wav_stub(output_path, duration_seconds=duration, sample_rate=24000)
     jobs.update(job_id, status="complete", progress=1.0, output_path=output_path)
 
 
+def _lang_label(code: str) -> str:
+    _map = {"en": "English", "zh": "Chinese", "de": "German", "fr": "French",
+            "ja": "Japanese", "ko": "Korean", "es": "Spanish", "pt": "Portuguese",
+            "it": "Italian", "nl": "Dutch"}
+    return _map.get(code, "English")
+
+
 async def _run_tts_real(job_id: str, params: dict) -> None:
-    """Real Qwen3-TTS inference — only called when PHARAOH_REAL_MODELS=1."""
+    """Real Qwen3-TTS inference via qwen-tts package."""
+    global _tts_model
+
+    if _tts_model is None:
+        jobs.update(job_id, status="failed", error="TTS model not loaded — call /load first")
+        return
+
+    jobs.update(job_id, status="running", progress=0.1)
     try:
+        import soundfile as sf
         import torch
-        from transformers import Qwen3ForCausalLM, AutoTokenizer
-        # Real inference implementation goes here
-        # For now fall through to stub
-    except ImportError:
-        pass
-    await _run_tts_stub(job_id, params)
+
+        endpoint  = params.get("_endpoint", "custom_voice")
+        out_path  = params["output_path"]
+        text      = params["text"]
+        language  = _lang_label(params.get("language", "en"))
+        seed      = int(params.get("seed", 0))
+
+        if seed:
+            torch.manual_seed(seed)
+
+        loop = asyncio.get_event_loop()
+
+        if endpoint == "voice_design":
+            voice_desc = params.get("voice_description", "")
+            wavs, sr = await loop.run_in_executor(
+                None,
+                lambda: _tts_model.generate_voice_design(
+                    text=text,
+                    language=language,
+                    voice_description=voice_desc,
+                ),
+            )
+        elif endpoint == "voice_clone":
+            ref_path   = params.get("ref_audio_path", "")
+            ref_text   = params.get("ref_transcript", "")
+            wavs, sr = await loop.run_in_executor(
+                None,
+                lambda: _tts_model.generate_voice_clone(
+                    text=text,
+                    language=language,
+                    ref_audio=ref_path,
+                    ref_text=ref_text,
+                ),
+            )
+        else:
+            # custom_voice
+            speaker = _SPEAKER_MAP.get(params.get("speaker", "Vivian"), "Vivian")
+            instruct = params.get("instruct", "")
+            wavs, sr = await loop.run_in_executor(
+                None,
+                lambda: _tts_model.generate(
+                    text=text,
+                    language=language,
+                    speaker=speaker,
+                    instruct=instruct,
+                ),
+            )
+
+        jobs.update(job_id, progress=0.9)
+
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        await loop.run_in_executor(
+            None,
+            lambda: sf.write(out_path, wavs[0], sr),
+        )
+
+        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
+
+    except Exception as exc:
+        log.exception("Qwen3-TTS inference failed")
+        jobs.update(job_id, status="failed", error=str(exc))
 
 
 def _submit(params: dict) -> dict:
@@ -169,16 +281,27 @@ class LoadRequest(BaseModel):
 async def load(req: LoadRequest = LoadRequest()) -> dict:
     global _model_loaded, MODEL_VARIANT
     MODEL_VARIANT = req.variant
+
+    if REAL:
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _load_tts_model)
+        except Exception as exc:
+            log.exception("Failed to load TTS model")
+            return {"status": "error", "error": str(exc)}
+
     _model_loaded = True
     return {"status": "loaded", "variant": MODEL_VARIANT}
 
 
 @app.post("/unload")
 async def unload() -> dict:
-    global _model_loaded
+    global _model_loaded, _tts_model
     _model_loaded = False
+    _tts_model = None
     return {"status": "unloaded"}
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     uvicorn.run(app, host="0.0.0.0", port=PORT, log_level="info")

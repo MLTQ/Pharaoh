@@ -1,27 +1,22 @@
 # Pharaoh inference server dependencies
 
-# Server framework
+# ── Server framework (always required) ──────────────────────────────────────
 fastapi>=0.115.0
 uvicorn[standard]>=0.30.0
 pydantic>=2.0
 aiofiles>=24.0
 
-# Real model inference (optional — only needed when PHARAOH_REAL_MODELS=1)
-# transformers<5.0  # Pin: Qwen3-TTS incompatible with 5.0+
-# torch>=2.3
-# torchaudio>=2.3
-# accelerate>=0.30
-
-# TTS (Qwen3-TTS)
-# transformers==4.51.3  # Exact version tested with Qwen3-TTS
-# soundfile>=0.12
-
-# SFX (Woosh)
-# woosh-audio @ git+https://github.com/sony/audio-mae  # or pip install from release
-
-# Music (ACE-Step)
-# ace-step @ git+https://github.com/ace-step/ACE-Step
-
-# MLX variants (Apple Silicon — for local M1 testing)
-# mlx>=0.15
-# mlx-lm>=0.15
+# ── Real model inference (required when PHARAOH_REAL_MODELS=1) ──────────────
+#
+# TTS — Qwen3-TTS via dedicated package (NOT plain transformers)
+#   pip install qwen-tts soundfile
+#   Model dir: ~/pharaoh-models/tts   (env: PHARAOH_TTS_MODEL_DIR)
+#
+# SFX — Woosh runs from its own uv venv; start_servers.sh picks it up automatically
+#   cd ~/Code/Woosh && uv sync              # CPU / MPS
+#   cd ~/Code/Woosh && uv sync --extra cuda # NVIDIA GPU
+#   Model dir: ~/Code/Woosh/checkpoints/    (env: PHARAOH_WOOSH_DIR)
+#
+# Music — ACE-Step
+#   pip install ace-step soundfile
+#   Model dir: ~/pharaoh-models/music  (env: PHARAOH_MUSIC_MODEL_DIR)
