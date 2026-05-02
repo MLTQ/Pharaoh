@@ -1,41 +1,55 @@
 #!/usr/bin/env bash
 # Start all three Pharaoh inference servers.
 # Usage:
-#   ./inference/start_servers.sh            # stub mode (no real models)
+#   ./inference/start_servers.sh            # stub mode
 #   ./inference/start_servers.sh --real     # real model inference
 #
-# Real-mode prerequisites:
-#   TTS:   pip install qwen-tts soundfile   (set PHARAOH_TTS_MODEL_DIR=~/pharaoh-models/tts)
-#   SFX:   uv sync in $PHARAOH_WOOSH_DIR    (uses WOOSH_DIR/.venv/bin/python3 automatically)
-#   Music: pip install ace-step soundfile   (set PHARAOH_MUSIC_MODEL_DIR=~/pharaoh-models/music)
+# Python environments:
+#   TTS / Music : conda env "pharoah"  (has qwen-tts, torch, soundfile)
+#   SFX         : ~/Code/Woosh/.venv   (has woosh + torchaudio)
+#   Fallback    : system python3       (stub mode only)
+#
+# Install ace-step in pharoah to enable real music:
+#   conda activate pharoah && pip install ace-step
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REAL=${1:+1}
 export PHARAOH_REAL_MODELS=${REAL:-0}
 
-# Default model dirs (override with env vars)
+# Model directories
 export PHARAOH_TTS_MODEL_DIR="${PHARAOH_TTS_MODEL_DIR:-$HOME/pharaoh-models/tts}"
 export PHARAOH_MUSIC_MODEL_DIR="${PHARAOH_MUSIC_MODEL_DIR:-$HOME/pharaoh-models/music}"
 export PHARAOH_WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
+
+# Resolve Python interpreters
+CONDA_BASE="/opt/homebrew/Caskroom/miniforge/base"
+PHAROAH_PYTHON="${CONDA_BASE}/envs/pharoah/bin/python3"
+WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
+
+TTS_PYTHON="python3"
+SFX_PYTHON="python3"
+MUSIC_PYTHON="python3"
+
+if [ "${PHARAOH_REAL_MODELS}" = "1" ]; then
+    if [ -x "${PHAROAH_PYTHON}" ]; then
+        TTS_PYTHON="${PHAROAH_PYTHON}"
+        MUSIC_PYTHON="${PHAROAH_PYTHON}"
+        echo "  TTS / Music: using pharoah conda env"
+    fi
+    if [ -x "${WOOSH_PYTHON}" ]; then
+        SFX_PYTHON="${WOOSH_PYTHON}"
+        echo "  SFX: using Woosh venv at ${PHARAOH_WOOSH_DIR}/.venv"
+    fi
+fi
 
 cd "$SCRIPT_DIR"
 
 echo "Starting Pharaoh inference servers (REAL_MODELS=${PHARAOH_REAL_MODELS})..."
 
-# TTS server — use system python3 (install qwen-tts there)
-python3 tts_server.py &
-
-# SFX server — use Woosh venv when available (created by: cd ~/Code/Woosh && uv sync)
-SFX_PYTHON="python3"
-if [ "${PHARAOH_REAL_MODELS}" = "1" ] && [ -x "${PHARAOH_WOOSH_DIR}/.venv/bin/python3" ]; then
-    SFX_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
-    echo "  SFX: using Woosh venv at ${PHARAOH_WOOSH_DIR}/.venv"
-fi
-"${SFX_PYTHON}" sfx_server.py &
-
-# Music server — use system python3 (install ace-step there)
-python3 music_server.py &
+"${TTS_PYTHON}"   tts_server.py   &
+"${SFX_PYTHON}"   sfx_server.py   &
+"${MUSIC_PYTHON}" music_server.py &
 
 echo ""
 echo "  TTS   → http://localhost:18001/health"
