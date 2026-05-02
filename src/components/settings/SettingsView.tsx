@@ -706,9 +706,9 @@ export const SettingsView: React.FC = () => {
                         background: "color-mix(in oklch, var(--tts) 6%, var(--bg-2))",
                         borderRadius: "var(--r)", border: "1px solid var(--line-2)",
                       }}>
-                        Each TTS variant has the same filenames — download each to its own
-                        subfolder or they will overwrite each other. The server auto-routes
-                        each endpoint to the correct subfolder.
+                        Each variant ships weights only — the tokenizer is a separate repo.
+                        Download both into the same subfolder. Variants share identical
+                        filenames, so each needs its own subfolder or they overwrite each other.
                       </div>
                       {TTS_VARIANTS.map((v) => (
                         <div key={v.id}>
@@ -716,7 +716,10 @@ export const SettingsView: React.FC = () => {
                             <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>{v.id}</span>
                             {" — "}{v.desc}
                           </div>
-                          <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
+                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                            <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
+                            <CopyableCommand command={`hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
+                          </div>
                         </div>
                       ))}
                     </div>
