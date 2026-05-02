@@ -23,9 +23,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const { characters } = useProjectStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
-  const [value, setValue]         = useState(
-    "[voice: VERA · elv·burnish-04]\n[delivery: half-whispered, looking up; the lamp is the only light]\n[acoustic: salt chamber, 2.4s tail, no music bed]\n\n(she swallows)\nIt can't go this deep. The geological survey said sixty meters — we've been descending for twenty minutes.\n\n[breath · 0.4s]\n\n(barely audible)\nAbel? Is that you down there?"
-  );
+  const [value, setValue]         = useState("");
   const [pace, setPace]           = useState(0.92);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError]   = useState<string | null>(null);
@@ -157,25 +155,6 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           </div>
         </div>
 
-        <div className="field" style={{ marginTop: 14 }}>
-          <div className="field-label">
-            <span>Latest take · 0:18 · take 4</span>
-            <span className="hint">seed 4412</span>
-          </div>
-          <div style={{
-            border: "1px solid var(--line-1)", background: "var(--bg-2)",
-            padding: 14, borderRadius: 2,
-            display: "flex", alignItems: "center", gap: 14,
-          }}>
-            <button className="btn btn-icon" style={{ background: "var(--tts)", color: "var(--bg-0)", borderColor: "var(--tts)" }}>
-              <Icon name="play" style={{ width: 12, height: 12 }} />
-            </button>
-            <div style={{ flex: 1, height: 36 }}>
-              <Wave width={500} height={36} seed={42} count={120} color="var(--tts)" />
-            </div>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "var(--fg-2)" }}>0:00 / 0:18</span>
-          </div>
-        </div>
       </div>
 
       {/* ── Side panel ──────────────────────────────────────────────────── */}
@@ -230,36 +209,6 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           </>
         )}
 
-        <div className="panel-side-section">
-          <h3>Continuity check</h3>
-          {[
-            { ok: true,  t: "Pronunciation 'Constance' matches S02 take 4" },
-            { ok: true,  t: "Mic distance consistent with Vault scenes" },
-            { ok: false, t: "'salt' vowel drift — 2.1% from baseline" },
-          ].map((c, i) => (
-            <div key={i} style={{ display: "flex", gap: 8, fontSize: 11.5, lineHeight: 1.4, marginBottom: 6 }}>
-              <span style={{ color: c.ok ? "var(--st-rendered)" : "var(--st-gen)", fontFamily: "var(--font-mono)", fontSize: 10 }}>
-                {c.ok ? "✓ OK" : "△ WARN"}
-              </span>
-              <span style={{ color: "var(--fg-1)" }}>{c.t}</span>
-            </div>
-          ))}
-        </div>
-        <div className="panel-side-section">
-          <h3>Cost</h3>
-          <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, display: "flex", flexDirection: "column", gap: 6 }}>
-            {[
-              { label: "EST.",    value: "0.018 cr · 12s" },
-              { label: "EPISODE", value: "4.21 cr · 47m" },
-              { label: "BUDGET",  value: "17.79 cr", highlight: true },
-            ].map((row) => (
-              <div key={row.label} style={{ display: "flex", justifyContent: "space-between" }}>
-                <span style={{ color: "var(--fg-3)" }}>{row.label}</span>
-                <span style={row.highlight ? { color: "var(--st-rendered)" } : {}}>{row.value}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       </div>
     </div>
   );

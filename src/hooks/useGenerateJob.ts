@@ -28,12 +28,11 @@ export function useGenerateJob() {
   const { triggerAgentActive } = useUiStore();
 
   function resolveContext(): { projectId: string; sceneSlug: string; pDir: string } {
+    if (!realProjectId || !projectsDir) throw new Error("No project open — open a project first");
     const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
-    return {
-      projectId: realProjectId ?? "demo",
-      pDir: projectsDir ?? "~/pharaoh-projects",
-      sceneSlug: activeSceneSlug ?? deriveSlug(scene.no, scene.title),
-    };
+    if (!scene) throw new Error("No scenes in this project — add a scene first");
+    const sceneSlug = activeSceneSlug ?? deriveSlug(scene.no, scene.title);
+    return { projectId: realProjectId, pDir: projectsDir, sceneSlug };
   }
 
   async function submitTts(params: {

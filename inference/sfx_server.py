@@ -1,6 +1,8 @@
 """
 Pharaoh SFX Server — port 18002
-Wraps Woosh (Sony AI). Stub mode by default; set PHARAOH_REAL_MODELS=1 for real inference.
+Wraps Woosh (Sony AI). Requires: ~/Code/Woosh uv venv with woosh package.
+
+Model directory: PHARAOH_WOOSH_DIR (default ~/Code/Woosh)
 """
 import asyncio
 import logging
@@ -12,12 +14,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, write_wav_stub
+from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
 
-PORT        = int(os.environ.get("PHARAOH_SFX_PORT",     18002))
-REAL        = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
+PORT          = int(os.environ.get("PHARAOH_SFX_PORT",    18002))
 MODEL_VARIANT = os.environ.get("PHARAOH_SFX_VARIANT",  "Woosh-DFlow")
 WOOSH_DIR   = Path(os.environ.get("PHARAOH_WOOSH_DIR",  "")).expanduser()
 
@@ -100,22 +101,7 @@ class V2AParams(BaseModel):
 
 # ── Background workers ───────────────────────────────────────────────────────
 
-async def _run_sfx_stub(job_id: str, params: dict) -> None:
-    """Simulate SFX generation: fake progress, write stub WAV at 48kHz (mono)."""
-    jobs.update(job_id, status="running", progress=0.0)
-    steps = int(params.get("steps", 4)) * 2
-    for i in range(steps):
-        await asyncio.sleep(0.15)
-        jobs.update(job_id, progress=(i + 1) / steps)
-
-    output_path = params["output_path"]
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    duration = float(params.get("duration_seconds", 3.0))
-    await write_wav_stub(output_path, duration_seconds=duration, sample_rate=SAMPLE_RATE)
-    jobs.update(job_id, status="complete", progress=1.0, output_path=output_path)
-
-
-async def _run_sfx_real(job_id: str, params: dict) -> None:
+async def _run_sfx(job_id: str, params: dict) -> None:
     global _ldm, _device
 
     if _ldm is None:
@@ -196,8 +182,7 @@ async def _run_sfx_real(job_id: str, params: dict) -> None:
 def _submit(params: dict) -> dict:
     job_id = new_job_id()
     jobs.create(job_id, "sfx", params.get("_endpoint", "t2a"), params)
-    worker = _run_sfx_real if REAL else _run_sfx_stub
-    asyncio.create_task(worker(job_id, params))
+    asyncio.create_task(_run_sfx(job_id, params))
     return {"job_id": job_id}
 
 
@@ -211,7 +196,7 @@ async def health() -> dict:
         "model_loaded": _model_loaded,
         "model_variant": MODEL_VARIANT,
         "vram_mb": 2048 if _model_loaded else 0,
-        "stub": not REAL,
+        "stub": False,
         "woosh_dir": str(WOOSH_DIR),
         "woosh_ready": ws["ok"],
         "woosh_error": ws["reason"],
@@ -240,16 +225,15 @@ async def get_job(job_id: str) -> dict:
 async def load() -> dict:
     global _model_loaded
     ws = _woosh_status()
-    if REAL and not ws["ok"]:
+    if not ws["ok"]:
         return {"status": "error", "error": ws["reason"]}
 
-    if REAL:
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _load_sfx_model)
-        except Exception as exc:
-            log.exception("Failed to load Woosh model")
-            return {"status": "error", "error": str(exc)}
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _load_sfx_model)
+    except Exception as exc:
+        log.exception("Failed to load Woosh model")
+        return {"status": "error", "error": str(exc)}
 
     _model_loaded = True
     return {"status": "loaded", "woosh_dir": str(WOOSH_DIR)}

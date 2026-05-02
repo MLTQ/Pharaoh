@@ -1,9 +1,9 @@
 """
 Pharaoh Music Server — port 18003
-Wraps ACE-Step 1.5. Stub mode by default; set PHARAOH_REAL_MODELS=1 for real inference.
+Wraps ACE-Step 1.5. Requires: pip install ace-step soundfile
 
-Real-mode requirements:
-    pip install ace-step
+Model directory: PHARAOH_MUSIC_MODEL_DIR (default ~/pharaoh-models/music)
+Install: conda activate pharoah && pip install ace-step
 """
 import asyncio
 import logging
@@ -15,12 +15,11 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
-from _common import JobStore, new_job_id, write_wav_stub
+from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
 
 PORT            = int(os.environ.get("PHARAOH_MUSIC_PORT",    18003))
-REAL            = os.environ.get("PHARAOH_REAL_MODELS", "0") == "1"
 MODEL_VARIANT   = os.environ.get("PHARAOH_MUSIC_VARIANT",  "ace-step-v1-5-checkpoint")
 MUSIC_MODEL_DIR = Path(os.environ.get("PHARAOH_MUSIC_MODEL_DIR", "~/pharaoh-models/music")).expanduser()
 
@@ -31,8 +30,6 @@ _model_loaded = False
 
 STEMS = ["vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard",
          "percussion", "strings", "synth", "fx", "brass", "woodwinds"]
-
-# ── ACE-Step model state ─────────────────────────────────────────────────────
 
 _pipeline = None  # ACEStepPipeline instance
 
@@ -86,48 +83,9 @@ class RepaintParams(BaseModel):
     output_path: str
 
 
-class LegoParams(BaseModel):
-    source_audio_path: str
-    caption: str
-    track_name: str = "guitar"
-    diffusion_steps: int = 60
-    seed: int = 0
-    output_path: str
+# ── Background worker ────────────────────────────────────────────────────────
 
-
-class ExtractParams(BaseModel):
-    source_audio_path: str
-    track_class: str = "vocals"
-    output_path: str
-
-
-class CompleteParams(BaseModel):
-    source_audio_path: str
-    caption: str = ""
-    diffusion_steps: int = 60
-    seed: int = 0
-    output_path: str
-
-
-# ── Background workers ───────────────────────────────────────────────────────
-
-async def _run_music_stub(job_id: str, params: dict) -> None:
-    """Simulate music generation: slow fake progress, write stub WAV at 44.1kHz stereo."""
-    jobs.update(job_id, status="running", progress=0.0)
-    duration = float(params.get("duration_seconds", 30.0))
-    steps = params.get("diffusion_steps", 60)
-    for i in range(steps):
-        await asyncio.sleep(0.08)
-        jobs.update(job_id, progress=(i + 1) / steps)
-
-    output_path = params["output_path"]
-    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
-    await write_wav_stub(output_path, duration_seconds=min(duration, 5.0), sample_rate=44100)
-    jobs.update(job_id, status="complete", progress=1.0, output_path=output_path)
-
-
-async def _run_music_real(job_id: str, params: dict) -> None:
-    """Real ACE-Step inference via ace-step package."""
+async def _run_music(job_id: str, params: dict) -> None:
     global _pipeline
 
     if _pipeline is None:
@@ -212,8 +170,7 @@ async def _run_music_real(job_id: str, params: dict) -> None:
 def _submit(params: dict, endpoint: str) -> dict:
     job_id = new_job_id()
     jobs.create(job_id, "music", endpoint, params)
-    worker = _run_music_real if REAL else _run_music_stub
-    asyncio.create_task(worker(job_id, params))
+    asyncio.create_task(_run_music(job_id, params))
     return {"job_id": job_id}
 
 
@@ -226,7 +183,7 @@ async def health() -> dict:
         "model_loaded": _model_loaded,
         "model_variant": MODEL_VARIANT,
         "vram_mb": 8192 if _model_loaded else 0,
-        "stub": not REAL,
+        "stub": False,
     }
 
 
@@ -250,21 +207,6 @@ async def generate_repaint(p: RepaintParams) -> dict:
     return _submit({**p.model_dump(), "_endpoint": "repaint"}, "repaint")
 
 
-@app.post("/generate/lego")
-async def generate_lego(p: LegoParams) -> dict:
-    return _submit({**p.model_dump(), "_endpoint": "lego"}, "lego")
-
-
-@app.post("/generate/extract")
-async def generate_extract(p: ExtractParams) -> dict:
-    return _submit({**p.model_dump(), "_endpoint": "extract"}, "extract")
-
-
-@app.post("/generate/complete")
-async def generate_complete(p: CompleteParams) -> dict:
-    return _submit({**p.model_dump(), "_endpoint": "complete"}, "complete")
-
-
 @app.get("/jobs/{job_id}")
 async def get_job(job_id: str) -> dict:
     job = jobs.get(job_id)
@@ -276,13 +218,18 @@ async def get_job(job_id: str) -> dict:
 @app.post("/load")
 async def load() -> dict:
     global _model_loaded
-    if REAL:
-        try:
-            loop = asyncio.get_event_loop()
-            await loop.run_in_executor(None, _load_music_model)
-        except Exception as exc:
-            log.exception("Failed to load music model")
-            return {"status": "error", "error": str(exc)}
+
+    if not MUSIC_MODEL_DIR.is_dir():
+        return {"status": "error", "error": f"Model directory not found: {MUSIC_MODEL_DIR}"}
+
+    try:
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, _load_music_model)
+    except ImportError:
+        return {"status": "error", "error": "ace-step not installed — run: pip install ace-step"}
+    except Exception as exc:
+        log.exception("Failed to load music model")
+        return {"status": "error", "error": str(exc)}
 
     _model_loaded = True
     return {"status": "loaded"}

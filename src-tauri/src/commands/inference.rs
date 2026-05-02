@@ -114,11 +114,20 @@ pub async fn load_model(
     if let Some(v) = variant {
         req = req.json(&serde_json::json!({ "variant": v }));
     }
-    // Real model loading can take 30-120 s on first call (weights → VRAM)
-    req.timeout(std::time::Duration::from_secs(180))
+    // Model loading can take 30-120 s on first call (weights → VRAM)
+    let resp = req.timeout(std::time::Duration::from_secs(180))
         .send()
         .await
         .map_err(|e| Error::Other(format!("load request failed: {}", e)))?;
+
+    let body: serde_json::Value = resp.json().await
+        .map_err(|e| Error::Other(format!("load response parse error: {}", e)))?;
+
+    if body.get("status").and_then(|v| v.as_str()) == Some("error") {
+        let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+        return Err(Error::Other(format!("model load failed: {}", msg)));
+    }
+
     Ok(())
 }
 
