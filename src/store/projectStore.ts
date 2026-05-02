@@ -3,6 +3,7 @@ import type {
   MockProject, MockScene, MockCastMember, MockAssets,
   Project, Scene, Character,
 } from "../lib/types";
+import { updateProject as saveProjectToTauri } from "../lib/tauriCommands";
 
 // ── Scene conversion ─────────────────────────────────────────────────────────
 
@@ -72,6 +73,7 @@ interface ProjectState {
   updateVoiceAssignment: (id: string, patch: Partial<Character["voice_assignment"]>) => void;
 
   realProjectId: string | null;
+  realProject: Project | null;
   projectsDir: string | null;
   activeSceneSlug: string | null;
 
@@ -85,101 +87,152 @@ interface ProjectState {
 
 // ── Store ────────────────────────────────────────────────────────────────────
 
-export const useProjectStore = create<ProjectState>((set, get) => ({
-  project: EMPTY_PROJECT,
-  scenes: [],
-  cast: [],
-  assets: { dialogue: [], sfx: [], music: [] },
-  activeSceneNo: "",
+export const useProjectStore = create<ProjectState>((set, get) => {
+  /** Fire-and-forget: persist the cached realProject to disk. */
+  const persist = () => {
+    const { realProject } = get();
+    if (!realProject) return;
+    saveProjectToTauri(realProject).catch((e) =>
+      console.error("[projectStore] save failed:", e)
+    );
+  };
 
-  characters: [],
-  selectedCharId: null,
+  return {
+    project: EMPTY_PROJECT,
+    scenes: [],
+    cast: [],
+    assets: { dialogue: [], sfx: [], music: [] },
+    activeSceneNo: "",
 
-  updateProjectMeta: (patch) =>
-    set((state) => ({ project: { ...state.project, ...patch } })),
+    characters: [],
+    selectedCharId: null,
+    realProjectId: null,
+    realProject: null,
+    projectsDir: null,
+    activeSceneSlug: null,
 
-  setSelectedChar: (id) => set({ selectedCharId: id }),
+    updateProjectMeta: (patch) => {
+      set((state) => {
+        const project = { ...state.project, ...patch };
+        // Mirror editable fields into the real Project for saving
+        const realProject = state.realProject ? {
+          ...state.realProject,
+          ...(patch.title    !== undefined && { title:    patch.title }),
+          ...(patch.logline  !== undefined && { logline:  patch.logline }),
+          ...(patch.synopsis !== undefined && { synopsis: patch.synopsis }),
+          ...(patch.genre    !== undefined && { tone:     patch.genre }),
+        } : null;
+        return { project, realProject };
+      });
+      persist();
+    },
 
-  addCharacter: (c) =>
-    set((state) => ({ characters: [...state.characters, c], selectedCharId: c.id })),
+    setSelectedChar: (id) => set({ selectedCharId: id }),
 
-  removeCharacter: (id) =>
-    set((state) => {
-      const remaining = state.characters.filter((c) => c.id !== id);
-      const selectedCharId =
-        state.selectedCharId === id ? (remaining[0]?.id ?? null) : state.selectedCharId;
-      return { characters: remaining, selectedCharId };
-    }),
+    addCharacter: (c) => {
+      set((state) => {
+        const characters = [...state.characters, c];
+        return {
+          characters,
+          selectedCharId: c.id,
+          realProject: state.realProject ? { ...state.realProject, characters } : null,
+        };
+      });
+      persist();
+    },
 
-  updateCharacter: (id, patch) =>
-    set((state) => ({
-      characters: state.characters.map((c) => (c.id === id ? { ...c, ...patch } : c)),
-    })),
+    removeCharacter: (id) => {
+      set((state) => {
+        const characters = state.characters.filter((c) => c.id !== id);
+        const selectedCharId =
+          state.selectedCharId === id ? (characters[0]?.id ?? null) : state.selectedCharId;
+        return {
+          characters,
+          selectedCharId,
+          realProject: state.realProject ? { ...state.realProject, characters } : null,
+        };
+      });
+      persist();
+    },
 
-  updateVoiceAssignment: (id, patch) =>
-    set((state) => ({
-      characters: state.characters.map((c) =>
-        c.id === id ? { ...c, voice_assignment: { ...c.voice_assignment, ...patch } } : c
-      ),
-    })),
+    updateCharacter: (id, patch) => {
+      set((state) => {
+        const characters = state.characters.map((c) => (c.id === id ? { ...c, ...patch } : c));
+        return {
+          characters,
+          realProject: state.realProject ? { ...state.realProject, characters } : null,
+        };
+      });
+      persist();
+    },
 
-  realProjectId: null,
-  projectsDir: null,
-  activeSceneSlug: null,
+    updateVoiceAssignment: (id, patch) => {
+      set((state) => {
+        const characters = state.characters.map((c) =>
+          c.id === id ? { ...c, voice_assignment: { ...c.voice_assignment, ...patch } } : c
+        );
+        return {
+          characters,
+          realProject: state.realProject ? { ...state.realProject, characters } : null,
+        };
+      });
+      persist();
+    },
 
-  setActiveScene: (no) => {
-    const scene = get().scenes.find((s) => s.no === no);
-    // Prefer the real slug embedded in the scene, fall back to derivation
-    const slug = scene?.slug ?? (scene ? deriveSlug(scene.no, scene.title) : null);
-    set({ activeSceneNo: no, activeSceneSlug: slug });
-  },
+    setActiveScene: (no) => {
+      const scene = get().scenes.find((s) => s.no === no);
+      const slug = scene?.slug ?? (scene ? deriveSlug(scene.no, scene.title) : null);
+      set({ activeSceneNo: no, activeSceneSlug: slug });
+    },
 
-  updateScene: (no, patch) =>
-    set((state) => ({
-      scenes: state.scenes.map((s) => (s.no === no ? { ...s, ...patch } : s)),
-    })),
+    updateScene: (no, patch) =>
+      set((state) => ({
+        scenes: state.scenes.map((s) => (s.no === no ? { ...s, ...patch } : s)),
+      })),
 
-  loadRealProject: (project, projectsDir, scenes) => {
-    const mockScenes = scenes.map(realSceneToMock);
-    const firstScene = mockScenes[0];
-    const activeSceneNo = firstScene?.no ?? "";
-    const activeSceneSlug = firstScene?.slug ?? null;
+    loadRealProject: (project, projectsDir, scenes) => {
+      const mockScenes = scenes.map(realSceneToMock);
+      const firstScene = mockScenes[0];
+      const activeSceneNo = firstScene?.no ?? "";
+      const activeSceneSlug = firstScene?.slug ?? null;
 
-    set({
-      realProjectId: project.id,
-      projectsDir,
-      activeSceneNo,
-      activeSceneSlug,
-      scenes: mockScenes,
-      characters: project.characters,
-      selectedCharId: project.characters[0]?.id ?? null,
-      project: {
-        title: project.title,
-        subtitle: "",
-        logline: project.logline,
-        synopsis: project.synopsis,
-        season: "",
-        episode: "",
-        runtime: "—",
-        genre: project.tone,
-        creator: "",
-        revision: `v${project.updated_at.slice(0, 10)}`,
-        lastSync: new Date().toISOString().replace("T", " ").slice(0, 16),
-      },
-    });
-  },
+      set({
+        realProjectId: project.id,
+        realProject: project,
+        projectsDir,
+        activeSceneNo,
+        activeSceneSlug,
+        scenes: mockScenes,
+        characters: project.characters,
+        selectedCharId: project.characters[0]?.id ?? null,
+        project: {
+          title: project.title,
+          subtitle: "",
+          logline: project.logline,
+          synopsis: project.synopsis,
+          season: "",
+          episode: "",
+          runtime: "—",
+          genre: project.tone,
+          creator: "",
+          revision: `v${project.updated_at.slice(0, 10)}`,
+          lastSync: new Date().toISOString().replace("T", " ").slice(0, 16),
+        },
+      });
+    },
 
-  setActiveSceneSlug: (slug) => set({ activeSceneSlug: slug }),
+    setActiveSceneSlug: (slug) => set({ activeSceneSlug: slug }),
 
-  addScene: (scene) =>
-    set((state) => {
-      const mockScene = realSceneToMock(scene);
-      const newScenes = [...state.scenes, mockScene];
-      const isFirst = state.scenes.length === 0;
-      const slug = deriveSlug(mockScene.no, mockScene.title);
-      return {
-        scenes: newScenes,
-        ...(isFirst ? { activeSceneNo: mockScene.no, activeSceneSlug: slug } : {}),
-      };
-    }),
-}));
+    addScene: (scene) =>
+      set((state) => {
+        const mockScene = realSceneToMock(scene);
+        const newScenes = [...state.scenes, mockScene];
+        const isFirst = state.scenes.length === 0;
+        const slug = deriveSlug(mockScene.no, mockScene.title);
+        return {
+          scenes: newScenes,
+          ...(isFirst ? { activeSceneNo: mockScene.no, activeSceneSlug: slug } : {}),
+        };
+      }),
+  };
+});
