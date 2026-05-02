@@ -1,5 +1,6 @@
 import { create } from "zustand";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 
 export type ServerStatus = "unknown" | "online" | "offline" | "loading";
 
@@ -16,6 +17,8 @@ interface ModelState {
   sfx: ServerStatus;
   music: ServerStatus;
   health: { tts: ServerHealth | null; sfx: ServerHealth | null; music: ServerHealth | null };
+  loadProgress: { tts: number; sfx: number; music: number };
+  initListeners: () => Promise<() => void>;
   pollHealth: () => Promise<void>;
   updateServerConfig: (cfg: { tts_url?: string; sfx_url?: string; music_url?: string }) => Promise<void>;
   loadModel: (kind: "tts" | "sfx" | "music", variant?: string) => Promise<void>;
@@ -35,6 +38,18 @@ export const useModelStore = create<ModelState>((set) => ({
   sfx: "unknown",
   music: "unknown",
   health: { tts: null, sfx: null, music: null },
+  loadProgress: { tts: 0, sfx: 0, music: 0 },
+
+  initListeners: async () => {
+    const unlisten = await listen<{ model: string; progress: number }>(
+      "model-load-progress",
+      ({ payload }) => {
+        const kind = payload.model as "tts" | "sfx" | "music";
+        set((s) => ({ loadProgress: { ...s.loadProgress, [kind]: payload.progress } }));
+      }
+    );
+    return unlisten;
+  },
 
   pollHealth: async () => {
     const [tts, sfx, music] = await Promise.all([
@@ -55,16 +70,16 @@ export const useModelStore = create<ModelState>((set) => ({
   },
 
   loadModel: async (kind, variant) => {
-    set((s) => ({ ...s, [kind]: "loading" as ServerStatus }));
+    set((s) => ({ ...s, [kind]: "loading" as ServerStatus, loadProgress: { ...s.loadProgress, [kind]: 0.02 } }));
     try {
       await invoke("load_model", { model: kind, variant: variant ?? null });
     } finally {
-      // Re-poll to get updated status
       const h = await fetchHealth(kind);
       set((s) => ({
         ...s,
         [kind]: h ? "online" : "offline",
         health: { ...s.health, [kind]: h },
+        loadProgress: { ...s.loadProgress, [kind]: 0 },
       }));
     }
   },

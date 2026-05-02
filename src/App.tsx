@@ -46,7 +46,7 @@ export default function App() {
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setRightTab, agentActiveUntil } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
-  const { tts, sfx, music, pollHealth } = useModelStore();
+  const { tts, sfx, music, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
   useEffect(() => {
@@ -68,6 +68,12 @@ export default function App() {
   useEffect(() => {
     let unlisten: (() => void) | null = null;
     initListeners().then((fn) => { unlisten = fn; });
+    return () => { unlisten?.(); };
+  }, []);
+
+  useEffect(() => {
+    let unlisten: (() => void) | null = null;
+    initModelListeners().then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
 

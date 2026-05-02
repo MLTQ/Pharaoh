@@ -114,20 +114,43 @@ pub async fn load_model(
     if let Some(v) = variant {
         req = req.json(&serde_json::json!({ "variant": v }));
     }
+
+    // Emit simulated progress ticks while we wait for the server to load weights
+    let app_tick = app.clone();
+    let model_tick = model.clone();
+    let ticker = tokio::spawn(async move {
+        let mut p: f32 = 0.04;
+        loop {
+            tokio::time::sleep(Duration::from_millis(400)).await;
+            p = (p + 0.015).min(0.92);
+            let _ = app_tick.emit("model-load-progress", serde_json::json!({
+                "model": model_tick, "progress": p,
+            }));
+        }
+    });
+
     // Model loading can take 30-120 s on first call (weights → VRAM)
-    let resp = req.timeout(std::time::Duration::from_secs(180))
+    let send_result = req.timeout(std::time::Duration::from_secs(180))
         .send()
-        .await
-        .map_err(|e| Error::Other(format!("load request failed: {}", e)))?;
+        .await;
+    ticker.abort();
+
+    let resp = send_result
+        .map_err(|e| {
+            let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 0.0 }));
+            Error::Other(format!("load request failed: {}", e))
+        })?;
 
     let body: serde_json::Value = resp.json().await
         .map_err(|e| Error::Other(format!("load response parse error: {}", e)))?;
 
     if body.get("status").and_then(|v| v.as_str()) == Some("error") {
+        let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 0.0 }));
         let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
         return Err(Error::Other(format!("model load failed: {}", msg)));
     }
 
+    let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 1.0 }));
     Ok(())
 }
 

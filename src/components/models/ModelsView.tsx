@@ -25,9 +25,10 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export const ModelsView: React.FC = () => {
-  const { tts, sfx, music, health, loadModel, unloadModel, pollHealth } = useModelStore();
+  const { tts, sfx, music, health, loadProgress, loadModel, unloadModel, pollHealth } = useModelStore();
   const statusMap = { tts, sfx, music };
   const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music };
+  const progressMap = { tts: loadProgress.tts, sfx: loadProgress.sfx, music: loadProgress.music };
 
   const [ttsVariant, setTtsVariant] = useState("CustomVoice-1.7B");
   const [wooshDir, setWooshDir] = useState("");
@@ -73,6 +74,7 @@ export const ModelsView: React.FC = () => {
           const h = healthMap[s.kind];
           const isBusy = !!busy[s.kind];
           const isLoaded = h?.model_loaded ?? false;
+          const progress = progressMap[s.kind];
 
           return (
             <div
@@ -119,12 +121,27 @@ export const ModelsView: React.FC = () => {
                       color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 3,
                     }}>Status</div>
                     <div style={{ fontSize: 12, color: isLoaded ? "var(--st-rendered)" : "var(--fg-3)" }}>
-                      {isLoaded
-                        ? `Loaded${h?.model_variant ? ` · ${h.model_variant}` : ""}${h?.vram_mb ? ` · ${h.vram_mb} MB VRAM` : ""}`
-                        : "Not loaded"}
+                      {status === "loading"
+                        ? "Loading weights…"
+                        : isLoaded
+                          ? `Loaded${h?.model_variant ? ` · ${h.model_variant}` : ""}${h?.vram_mb ? ` · ${h.vram_mb} MB VRAM` : ""}`
+                          : "Not loaded"}
                     </div>
                   </div>
                 </div>
+
+                {/* Progress bar — visible while loading */}
+                {status === "loading" && (
+                  <div style={{ height: 3, background: "var(--bg-0)", borderRadius: 2, overflow: "hidden" }}>
+                    <div style={{
+                      height: "100%",
+                      width: `${Math.max(4, Math.round(progress * 100))}%`,
+                      background: s.color,
+                      borderRadius: 2,
+                      transition: "width 0.35s ease",
+                    }} />
+                  </div>
+                )}
 
                 {/* TTS variant picker */}
                 {s.kind === "tts" && (
