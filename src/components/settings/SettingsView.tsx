@@ -706,20 +706,26 @@ export const SettingsView: React.FC = () => {
                         background: "color-mix(in oklch, var(--tts) 6%, var(--bg-2))",
                         borderRadius: "var(--r)", border: "1px solid var(--line-2)",
                       }}>
-                        Each variant ships weights only — the tokenizer is a separate repo.
-                        Download both into the same subfolder. Variants share identical
-                        filenames, so each needs its own subfolder or they overwrite each other.
+                        The tokenizer is shared — download it once. Each model variant
+                        goes in its own subfolder (they ship identical filenames and
+                        overwrite each other in a flat directory).
                       </div>
+
+                      <div>
+                        <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+                          <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>Tokenizer</span>
+                          {" — "} download once, shared by all variants
+                        </div>
+                        <CopyableCommand command="hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/tokenizer" />
+                      </div>
+
                       {TTS_VARIANTS.map((v) => (
                         <div key={v.id}>
                           <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
                             <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>{v.id}</span>
                             {" — "}{v.desc}
                           </div>
-                          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                            <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
-                            <CopyableCommand command={`hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
-                          </div>
+                          <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
                         </div>
                       ))}
                     </div>

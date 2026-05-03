@@ -25,9 +25,10 @@ from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
 
-PORT          = int(os.environ.get("PHARAOH_TTS_PORT",    18001))
-MODEL_VARIANT = os.environ.get("PHARAOH_TTS_VARIANT",  "Qwen3-TTS")
-TTS_MODEL_DIR = Path(os.environ.get("PHARAOH_TTS_MODEL_DIR", "~/pharaoh-models/tts")).expanduser()
+PORT           = int(os.environ.get("PHARAOH_TTS_PORT",    18001))
+MODEL_VARIANT  = os.environ.get("PHARAOH_TTS_VARIANT",  "Qwen3-TTS")
+TTS_MODEL_DIR  = Path(os.environ.get("PHARAOH_TTS_MODEL_DIR",       "~/pharaoh-models/tts")).expanduser()
+TOKENIZER_DIR  = Path(os.environ.get("PHARAOH_TTS_TOKENIZER_DIR",   "~/pharaoh-models/tts/tokenizer")).expanduser()
 
 app = FastAPI(title="Pharaoh TTS Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -85,21 +86,31 @@ def _do_load(model_dir: Path) -> str:
     """Load model from directory synchronously. Returns tts_model_type."""
     global _tts_model, _loaded_type, _model_loaded
     import torch
+    from transformers import AutoConfig, AutoModel, AutoProcessor
     from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
+    from qwen_tts.core.models import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
 
     device_map = (
         "mps"    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
         else "cuda:0" if torch.cuda.is_available()
         else "cpu"
     )
-    log.info(f"Loading Qwen3-TTS from {model_dir} on {device_map}")
-    model = Qwen3TTSModel.from_pretrained(
-        str(model_dir),
-        device_map=device_map,
-        torch_dtype=torch.bfloat16,
-    )
-    _tts_model   = model
-    _loaded_type = model.model.tts_model_type
+
+    # Use shared tokenizer dir if it exists, otherwise fall back to model dir
+    processor_dir = TOKENIZER_DIR if TOKENIZER_DIR.is_dir() else model_dir
+    log.info(f"Loading Qwen3-TTS weights from {model_dir}, tokenizer from {processor_dir}, device={device_map}")
+
+    AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
+    AutoModel.register(Qwen3TTSConfig, Qwen3TTSForConditionalGeneration)
+    AutoProcessor.register(Qwen3TTSConfig, Qwen3TTSProcessor)
+
+    raw_model = AutoModel.from_pretrained(str(model_dir), device_map=device_map, torch_dtype=torch.bfloat16)
+    if not isinstance(raw_model, Qwen3TTSForConditionalGeneration):
+        raise TypeError(f"AutoModel returned {type(raw_model)}, expected Qwen3TTSForConditionalGeneration")
+    processor = AutoProcessor.from_pretrained(str(processor_dir), fix_mistral_regex=True)
+
+    _tts_model    = Qwen3TTSModel(model=raw_model, processor=processor, generate_defaults=raw_model.generate_config)
+    _loaded_type  = raw_model.tts_model_type
     _model_loaded = True
     log.info(f"Qwen3-TTS loaded — type={_loaded_type}")
     return _loaded_type
