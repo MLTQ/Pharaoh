@@ -13,6 +13,7 @@ import { JobQueue } from "./components/shared/JobQueue";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ModelsView } from "./components/models/ModelsView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
+import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
@@ -413,6 +414,7 @@ export default function App() {
           <div style={{ color: "var(--fg-4)", marginTop: 2 }}>48 kHz · 24-bit · stereo</div>
         </div>
       </div>
+      <ToastHost />
     </div>
   );
 }

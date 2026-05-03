@@ -182,7 +182,7 @@ export const CharacterDesignerView: React.FC = () => {
   const pushJob = (jobId: string, rowIndex: number, description: string) => {
     addJob({
       id: jobId, model: "tts", description, status: "pending",
-      progress: 0, eta: "~2s", started_at: new Date().toISOString(),
+      progress: 0, eta: "…", started_at: new Date().toISOString(),
       scene_id: null, scene_slug: slug, row_index: rowIndex,
       output_path: null, peaks: null, qa_status: "unreviewed", error: null,
     });

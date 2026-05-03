@@ -1,5 +1,9 @@
 import { create } from "zustand";
 import type { Job, QaJobStatus } from "../lib/types";
+import { useToastStore } from "./toastStore";
+import { useUiStore } from "./uiStore";
+
+const OOM_MARKER = "TTS_OOM";
 
 interface JobProgressEvent {
   job_id: string;
@@ -105,6 +109,19 @@ export const useJobStore = create<JobState>((set, get) => ({
           status: "failed",
           error: payload.error,
         });
+
+        // Surface memory-related TTS load failures as a toast that routes to the model manager.
+        if (payload.model === "tts" && payload.error.includes(OOM_MARKER)) {
+          const detail = payload.error.split(`${OOM_MARKER}:`)[1]?.trim() ?? payload.error;
+          useToastStore.getState().push({
+            kind: "warn",
+            title: "Not enough memory to load TTS variant",
+            body: detail,
+            actionLabel: "Open Models →",
+            onAction: () => useUiStore.getState().setView("models"),
+            ttlMs: 0, // sticky — user must dismiss or click action
+          });
+        }
       });
 
       unlisten = [u1, u2, u3];
