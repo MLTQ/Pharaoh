@@ -22,7 +22,7 @@ interface TTSPanelProps {
 }
 
 export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
-  const { characters } = useProjectStore();
+  const { characters, activeSceneNo, activeSceneSlug } = useProjectStore();
   const { jobs, setQaStatus } = useJobStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
@@ -32,9 +32,10 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const [genError, setGenError]   = useState<string | null>(null);
   const { submitTts } = useGenerateJob();
 
-  // Resolve the active scene's slug so we can filter takes that came from this panel
-  const activeScene = scenes.find((s) => s.no === scene) ?? scenes[0];
-  const sceneSlug = activeScene ? deriveSlug(activeScene.no, activeScene.title) : "";
+  // Match the slug source-of-truth used by useGenerateJob.submitTts so filter == write
+  const fallbackScene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
+  const sceneSlug = activeSceneSlug
+    ?? (fallbackScene ? deriveSlug(fallbackScene.no, fallbackScene.title) : "");
 
   const takes = useMemo(
     () => [...jobs]

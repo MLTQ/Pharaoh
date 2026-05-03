@@ -35,6 +35,9 @@ _model_loaded = False
 
 _ldm    = None   # FlowMapFromPretrained instance
 _device = None   # "cuda" | "mps" | "cpu"
+_load_lock = asyncio.Lock()  # serialize load attempts; auto-load on first generate
+
+OOM_MARKER = "SFX_OOM"  # FE matches this prefix to surface a memory toast
 
 
 def _woosh_status() -> dict:
@@ -61,7 +64,6 @@ def _load_sfx_model() -> None:
     """Load Woosh model synchronously (run via executor so we don't block event loop)."""
     global _ldm, _device
     import sys
-    import torch
 
     # Ensure the Woosh repo is importable
     woosh_src = str(WOOSH_DIR)
@@ -77,6 +79,43 @@ def _load_sfx_model() -> None:
     _ldm = FlowMapFromPretrained(LoadConfig(path=ckpt))
     _ldm = _ldm.eval().to(_device)
     log.info("Woosh model loaded.")
+
+
+def _is_memory_error(exc: BaseException) -> bool:
+    name = type(exc).__name__
+    if name in ("OutOfMemoryError", "MemoryError"):
+        return True
+    msg = str(exc).lower()
+    return any(s in msg for s in (
+        "out of memory", "cuda oom", "mps backend out of memory",
+        "cannot allocate", "memory allocation",
+    ))
+
+
+async def _ensure_model() -> str | None:
+    """Make sure the Woosh model is loaded. Returns an error string on failure
+    (prefixed with OOM_MARKER for memory-related failures), else None."""
+    global _model_loaded
+    if _ldm is not None:
+        return None
+
+    ws = _woosh_status()
+    if not ws["ok"]:
+        return ws["reason"]
+
+    async with _load_lock:
+        if _ldm is not None:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, _load_sfx_model)
+        except Exception as exc:
+            log.exception("Failed to auto-load Woosh model")
+            if _is_memory_error(exc):
+                return f"{OOM_MARKER}: Not enough memory to load Woosh. Free a model in the model manager and retry."
+            return f"Auto-load failed: {exc}"
+        _model_loaded = True
+    return None
 
 
 # ── Request models ──────────────────────────────────────────────────────────
@@ -104,11 +143,16 @@ class V2AParams(BaseModel):
 async def _run_sfx(job_id: str, params: dict) -> None:
     global _ldm, _device
 
-    if _ldm is None:
-        jobs.update(job_id, status="failed", error="Model not loaded — call /load first")
+    jobs.update(job_id, status="running", progress=0.02)
+
+    # Auto-load on first generate — matches TTS behavior
+    err = await _ensure_model()
+    if err:
+        log.warning(f"Job {job_id} failed: {err}")
+        jobs.update(job_id, status="failed", error=err)
         return
 
-    jobs.update(job_id, status="running", progress=0.05)
+    jobs.update(job_id, progress=0.05)
     try:
         import sys
         import torch

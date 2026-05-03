@@ -3,7 +3,13 @@ import type { Job, QaJobStatus } from "../lib/types";
 import { useToastStore } from "./toastStore";
 import { useUiStore } from "./uiStore";
 
-const OOM_MARKER = "TTS_OOM";
+const OOM_MARKERS = ["TTS_OOM", "SFX_OOM"] as const;
+
+const MODEL_LABEL: Record<string, string> = {
+  tts: "TTS",
+  sfx: "SFX",
+  music: "Music",
+};
 
 interface JobProgressEvent {
   job_id: string;
@@ -110,12 +116,14 @@ export const useJobStore = create<JobState>((set, get) => ({
           error: payload.error,
         });
 
-        // Surface memory-related TTS load failures as a toast that routes to the model manager.
-        if (payload.model === "tts" && payload.error.includes(OOM_MARKER)) {
-          const detail = payload.error.split(`${OOM_MARKER}:`)[1]?.trim() ?? payload.error;
+        // Surface memory-related load failures as a toast that routes to the model manager.
+        const oomMarker = OOM_MARKERS.find((m) => payload.error.includes(m));
+        if (oomMarker) {
+          const detail = payload.error.split(`${oomMarker}:`)[1]?.trim() ?? payload.error;
+          const label = MODEL_LABEL[payload.model] ?? payload.model;
           useToastStore.getState().push({
             kind: "warn",
-            title: "Not enough memory to load TTS variant",
+            title: `Not enough memory to load ${label} model`,
             body: detail,
             actionLabel: "Open Models →",
             onAction: () => useUiStore.getState().setView("models"),
