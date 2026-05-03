@@ -145,8 +145,8 @@ def _do_load(model_dir: Path) -> str:
 
 async def _ensure_model(required_type: str) -> str | None:
     """
-    Make sure the right model type is loaded.
-    Returns an error string if it can't be loaded, else None.
+    Make sure the right model type is loaded. Swaps automatically on mismatch
+    (multi-minute reload). Returns an error string if it can't be loaded, else None.
     """
     global _tts_model, _loaded_type, _model_loaded
 
@@ -154,31 +154,38 @@ async def _ensure_model(required_type: str) -> str | None:
     if _tts_model is not None and _loaded_type == required_type:
         return None
 
-    # Wrong type loaded — fail immediately rather than blocking for a multi-minute reload
-    if _tts_model is not None and _loaded_type != required_type:
+    # Resolve target dir before grabbing the lock so we can fail fast on missing weights
+    model_dir = _resolve_model_dir(required_type)
+    if model_dir is None:
         return (
-            f"Wrong model loaded: '{_loaded_type}' is active but '{required_type}' is "
-            f"required for this endpoint. Go to Models, unload it, then load the correct checkpoint. "
-            f"Or place the '{required_type}' weights in {TTS_MODEL_DIR}/{required_type}/"
+            f"No model directory found for '{required_type}'. "
+            f"Place model weights in {TTS_MODEL_DIR}/{required_type}/ "
+            f"or put a single model in {TTS_MODEL_DIR}/"
         )
 
-    # No model loaded yet — attempt auto-load under lock
     async with _load_lock:
-        # Re-check inside lock (another task may have loaded by now)
+        # Re-check under lock — another task may have loaded the right model by now
         if _tts_model is not None and _loaded_type == required_type:
             return None
-        if _tts_model is not None:
-            return (
-                f"Wrong model loaded: '{_loaded_type}' is active but '{required_type}' is required."
-            )
 
-        model_dir = _resolve_model_dir(required_type)
-        if model_dir is None:
-            return (
-                f"No model directory found for '{required_type}'. "
-                f"Place model weights in {TTS_MODEL_DIR}/{required_type}/ "
-                f"or put a single model in {TTS_MODEL_DIR}/"
-            )
+        # Wrong type loaded — drop the current model before loading the new one
+        # (sequential unload+load avoids holding two ~4GB models in memory at once)
+        if _tts_model is not None:
+            log.info(f"Swapping model: '{_loaded_type}' -> '{required_type}' (unload + reload)")
+            _tts_model    = None
+            _loaded_type  = None
+            _model_loaded = False
+            import gc
+            gc.collect()
+            try:
+                import torch
+                if torch.backends.mps.is_available():
+                    torch.mps.empty_cache()
+                elif torch.cuda.is_available():
+                    torch.cuda.empty_cache()
+            except Exception:
+                pass
+
         try:
             loop = asyncio.get_running_loop()
             loaded = await loop.run_in_executor(None, lambda: _do_load(model_dir))

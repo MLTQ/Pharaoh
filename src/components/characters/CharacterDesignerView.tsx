@@ -550,7 +550,13 @@ export const CharacterDesignerView: React.FC = () => {
                       saveLabel="Save as character voice"
                       isSaved={refPath === job.output_path}
                       onSave={() => {
-                        saveVoice({ ref_audio_path: job.output_path, model: "Clone" });
+                        const transcript = (testLine || DEFAULT_TEST_LINE).trim();
+                        saveVoice({
+                          ref_audio_path: job.output_path,
+                          ref_transcript: transcript,
+                          model: "Clone",
+                        });
+                        setRefTranscript(transcript);
                         setTab("clone");
                       }}
                       onQa={(s) => setQaStatus(job.id, s)}
