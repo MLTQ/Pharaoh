@@ -61,7 +61,12 @@ def _resolve_device() -> str:
 
 
 def _load_sfx_model() -> None:
-    """Load Woosh model synchronously (run via executor so we don't block event loop)."""
+    """Load Woosh model synchronously (run via executor so we don't block event loop).
+
+    Woosh resolves nested checkpoint paths (e.g. autoencoder = 'checkpoints/Woosh-AE')
+    relative to the current working directory, so we chdir into WOOSH_DIR for the
+    duration of the load and restore CWD afterwards.
+    """
     global _ldm, _device
     import sys
 
@@ -76,8 +81,13 @@ def _load_sfx_model() -> None:
     _device = _resolve_device()
     ckpt = str(WOOSH_DIR / "checkpoints" / MODEL_VARIANT)
     log.info(f"Loading Woosh model from {ckpt} on {_device}")
-    _ldm = FlowMapFromPretrained(LoadConfig(path=ckpt))
-    _ldm = _ldm.eval().to(_device)
+    prev_cwd = os.getcwd()
+    try:
+        os.chdir(WOOSH_DIR)
+        _ldm = FlowMapFromPretrained(LoadConfig(path=ckpt))
+        _ldm = _ldm.eval().to(_device)
+    finally:
+        os.chdir(prev_cwd)
     log.info("Woosh model loaded.")
 
 
