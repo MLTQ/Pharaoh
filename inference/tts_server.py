@@ -86,9 +86,7 @@ def _do_load(model_dir: Path) -> str:
     """Load model from directory synchronously. Returns tts_model_type."""
     global _tts_model, _loaded_type, _model_loaded
     import torch
-    from transformers import AutoConfig, AutoModel, AutoProcessor
     from qwen_tts.inference.qwen3_tts_model import Qwen3TTSModel
-    from qwen_tts.core.models import Qwen3TTSConfig, Qwen3TTSForConditionalGeneration, Qwen3TTSProcessor
 
     device_map = (
         "mps"    if hasattr(torch.backends, "mps") and torch.backends.mps.is_available()
@@ -96,21 +94,28 @@ def _do_load(model_dir: Path) -> str:
         else "cpu"
     )
 
-    # Use shared tokenizer dir if it exists, otherwise fall back to model dir
-    processor_dir = TOKENIZER_DIR if TOKENIZER_DIR.is_dir() else model_dir
-    log.info(f"Loading Qwen3-TTS weights from {model_dir}, tokenizer from {processor_dir}, device={device_map}")
+    # The model expects speech_tokenizer/ inside its own dir.
+    # Auto-symlink the shared tokenizer so we only store it once.
+    speech_tok_link = model_dir / "speech_tokenizer"
+    if not speech_tok_link.exists():
+        if TOKENIZER_DIR.is_dir():
+            speech_tok_link.symlink_to(TOKENIZER_DIR.resolve())
+            log.info(f"Linked {speech_tok_link} -> {TOKENIZER_DIR}")
+        else:
+            raise FileNotFoundError(
+                f"Speech tokenizer not found. Download it once:\n"
+                f"  hf download Qwen/Qwen3-TTS-Tokenizer-12Hz "
+                f"--local-dir {TOKENIZER_DIR}"
+            )
 
-    AutoConfig.register("qwen3_tts", Qwen3TTSConfig)
-    AutoModel.register(Qwen3TTSConfig, Qwen3TTSForConditionalGeneration)
-    AutoProcessor.register(Qwen3TTSConfig, Qwen3TTSProcessor)
-
-    raw_model = AutoModel.from_pretrained(str(model_dir), device_map=device_map, torch_dtype=torch.bfloat16)
-    if not isinstance(raw_model, Qwen3TTSForConditionalGeneration):
-        raise TypeError(f"AutoModel returned {type(raw_model)}, expected Qwen3TTSForConditionalGeneration")
-    processor = AutoProcessor.from_pretrained(str(processor_dir), fix_mistral_regex=True)
-
-    _tts_model    = Qwen3TTSModel(model=raw_model, processor=processor, generate_defaults=raw_model.generate_config)
-    _loaded_type  = raw_model.tts_model_type
+    log.info(f"Loading Qwen3-TTS from {model_dir} on {device_map}")
+    model = Qwen3TTSModel.from_pretrained(
+        str(model_dir),
+        device_map=device_map,
+        torch_dtype=torch.bfloat16,
+    )
+    _tts_model    = model
+    _loaded_type  = model.model.tts_model_type
     _model_loaded = True
     log.info(f"Qwen3-TTS loaded — type={_loaded_type}")
     return _loaded_type

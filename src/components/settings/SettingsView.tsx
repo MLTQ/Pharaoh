@@ -706,14 +706,14 @@ export const SettingsView: React.FC = () => {
                         background: "color-mix(in oklch, var(--tts) 6%, var(--bg-2))",
                         borderRadius: "var(--r)", border: "1px solid var(--line-2)",
                       }}>
-                        The tokenizer is shared — download it once. Each model variant
-                        goes in its own subfolder (they ship identical filenames and
-                        overwrite each other in a flat directory).
+                        The speech tokenizer (audio codec) is shared — download it once.
+                        The server automatically links it into each model variant's folder.
+                        Model variants use identical filenames, so each needs its own subfolder.
                       </div>
 
                       <div>
                         <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
-                          <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>Tokenizer</span>
+                          <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>Speech tokenizer</span>
                           {" — "} download once, shared by all variants
                         </div>
                         <CopyableCommand command="hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/tokenizer" />
