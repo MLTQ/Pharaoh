@@ -1,8 +1,10 @@
-import React, { useState } from "react";
+import React, { useMemo, useState } from "react";
 import { Icon, Wave } from "../shared/atoms";
+import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
 import { RichDirector, SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
-import { useProjectStore } from "../../store/projectStore";
+import { useProjectStore, deriveSlug } from "../../store/projectStore";
+import { useJobStore } from "../../store/jobStore";
 import type { MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
@@ -21,6 +23,7 @@ interface TTSPanelProps {
 
 export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const { characters } = useProjectStore();
+  const { jobs, setQaStatus } = useJobStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
   const [value, setValue]         = useState("");
@@ -28,6 +31,21 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError]   = useState<string | null>(null);
   const { submitTts } = useGenerateJob();
+
+  // Resolve the active scene's slug so we can filter takes that came from this panel
+  const activeScene = scenes.find((s) => s.no === scene) ?? scenes[0];
+  const sceneSlug = activeScene ? deriveSlug(activeScene.no, activeScene.title) : "";
+
+  const takes = useMemo(
+    () => [...jobs]
+      .filter((j) =>
+        j.model === "tts"
+        && j.scene_slug === sceneSlug
+        && j.row_index === 0
+      )
+      .reverse(),
+    [jobs, sceneSlug],
+  );
 
   const selectedChar = characters.find((c) => c.id === speakerId) ?? characters[0];
 
@@ -68,8 +86,9 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
             </span>
             <span className="ttl">Voice / Dialogue</span>
             <span className="desc">
-              Rich-text director: bracket directives shape voice, delivery, acoustic, and timing.
-              Chip tags, inline cues, and stage directions all interpreted by the model.
+              Type the line as you want it spoken. Use inline bracket directives to shape delivery —
+              e.g. <code style={{ fontFamily: "var(--font-mono)", color: "var(--tts)" }}>[sad] [whisper]</code>
+              {" "}before a phrase. Free-form descriptors outside brackets get spoken literally.
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -160,55 +179,54 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
       {/* ── Side panel ──────────────────────────────────────────────────── */}
       <div className="panel-side">
         {selectedChar && (
-          <>
-            <div className="panel-side-section">
-              <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                <span style={{
-                  width: 8, height: 8, borderRadius: "50%",
-                  background: charColor, display: "inline-block",
-                }} />
-                {selectedChar.name}
-              </h3>
-              {selectedChar.description && (
-                <div style={{ fontSize: 11, color: "var(--fg-3)", marginBottom: 8, lineHeight: 1.5 }}>
-                  {selectedChar.description}
-                </div>
-              )}
-              {va?.instruct_default && (
-                <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--fg-2)" }}>
-                  {va.instruct_default}
-                </div>
-              )}
-              {va?.model === "Clone" && (
-                <div style={{
-                  marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 9.5,
-                  color: va.ref_audio_path ? "var(--st-rendered)" : "var(--fg-4)",
-                  letterSpacing: "0.06em",
-                }}>
-                  {va.ref_audio_path ? "✓ clone reference set" : "△ no reference audio"}
-                </div>
-              )}
-            </div>
-
-            <div className="panel-side-section">
-              <h3>Voice model</h3>
-              <div style={{
-                fontFamily: "var(--font-mono)", fontSize: 10,
-                color: "var(--tts)", letterSpacing: "0.04em",
-              }}>
-                {va?.model === "Clone" ? "Qwen3-TTS / Clone"
-                  : va?.model === "VoiceDesign" ? "Qwen3-TTS / Voice Design"
-                  : "Qwen3-TTS / Custom Voice"}
+          <div className="panel-side-section">
+            <h3 style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <span style={{
+                width: 8, height: 8, borderRadius: "50%",
+                background: charColor, display: "inline-block",
+              }} />
+              {selectedChar.name}
+            </h3>
+            {selectedChar.description && (
+              <div style={{ fontSize: 11, color: "var(--fg-3)", marginBottom: 8, lineHeight: 1.5 }}>
+                {selectedChar.description}
               </div>
-              {va?.model === "Clone" && !va.ref_audio_path && (
-                <div style={{ fontSize: 10.5, color: "var(--fg-4)", marginTop: 6, lineHeight: 1.5 }}>
-                  Set a reference audio in Cast &amp; Voices to enable clone mode.
-                </div>
-              )}
-            </div>
-          </>
+            )}
+            {va?.instruct_default && (
+              <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--fg-2)" }}>
+                {va.instruct_default}
+              </div>
+            )}
+            {va?.model === "Clone" && (
+              <div style={{
+                marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 9.5,
+                color: va.ref_audio_path ? "var(--st-rendered)" : "var(--fg-4)",
+                letterSpacing: "0.06em",
+              }}>
+                {va.ref_audio_path ? "✓ clone reference set" : "△ no reference audio — set one in Cast & Voices"}
+              </div>
+            )}
+          </div>
         )}
 
+        <div className="panel-side-section" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          <h3>Takes</h3>
+          {takes.length === 0 ? (
+            <EmptyTakes label="No takes yet — generate a line above." />
+          ) : (
+            <TakeList label={`${takes.length} take${takes.length === 1 ? "" : "s"}`}>
+              {takes.map((job, i) => (
+                <TakeRow
+                  key={job.id}
+                  job={job}
+                  index={takes.length - 1 - i}
+                  caption={job.description}
+                  onQa={(s) => setQaStatus(job.id, s)}
+                />
+              ))}
+            </TakeList>
+          )}
+        </div>
       </div>
     </div>
   );

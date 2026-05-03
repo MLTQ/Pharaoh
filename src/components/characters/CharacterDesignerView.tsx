@@ -1,13 +1,14 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Wave, PeaksWave } from "../shared/atoms";
+import { Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
+import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import { useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import {
   submitTtsVoiceDesign,
   submitTtsVoiceClone,
 } from "../../lib/tauriCommands";
-import type { Job, Character, QaJobStatus } from "../../lib/types";
+import type { Character } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -36,70 +37,6 @@ async function pickAudioFile(): Promise<string | null> {
     return null; // browser / no dialog plugin — caller falls back to file input
   }
 }
-
-// ── TakeRow ────────────────────────────────────────────────────────────────
-
-interface TakeRowProps {
-  job: Job;
-  index: number;
-  saveLabel: string;
-  isSaved: boolean;
-  onSave: () => void;
-  onQa: (status: QaJobStatus) => void;
-}
-
-const TakeRow: React.FC<TakeRowProps> = ({ job, index, saveLabel, isSaved, onSave, onQa }) => (
-  <div style={{
-    display: "flex", alignItems: "center", gap: 8,
-    padding: "6px 12px",
-    background: isSaved ? "color-mix(in oklch, var(--tts) 8%, var(--bg-1))" : undefined,
-    borderLeft: isSaved ? "2px solid var(--tts)" : "2px solid transparent",
-    borderBottom: "1px solid var(--line-1)",
-  }}>
-    <span style={{
-      fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)",
-      letterSpacing: "0.06em", minWidth: 40,
-    }}>
-      take {index + 1}
-    </span>
-    <div style={{ flex: 1 }}>
-      {job.peaks ? (
-        <PeaksWave peaks={job.peaks} width={140} height={18} color="var(--tts)" opacity={0.8} />
-      ) : (
-        <Wave width={140} height={18} seed={job.id.charCodeAt(0)} count={28} color="var(--tts)" opacity={0.6} />
-      )}
-    </div>
-    <PlayButton path={job.output_path} size={11} />
-    <button
-      className="btn btn-sm"
-      style={{
-        padding: "2px 4px", minWidth: 0,
-        color: job.qa_status === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
-        borderColor: job.qa_status === "approved" ? "var(--st-rendered)" : undefined,
-      }}
-      onClick={() => onQa(job.qa_status === "approved" ? "unreviewed" : "approved")}
-      title="Approve"
-    >✓</button>
-    <button
-      className="btn btn-sm"
-      style={{
-        padding: "2px 4px", minWidth: 0,
-        color: job.qa_status === "rejected" ? "var(--sfx)" : "var(--fg-4)",
-        borderColor: job.qa_status === "rejected" ? "var(--sfx)" : undefined,
-      }}
-      onClick={() => onQa(job.qa_status === "rejected" ? "unreviewed" : "rejected")}
-      title="Reject"
-    >✕</button>
-    <button
-      className={`btn btn-sm${isSaved ? " btn-primary" : ""}`}
-      style={isSaved ? { borderColor: "var(--tts)", color: "var(--tts)" } : undefined}
-      onClick={() => !isSaved && onSave()}
-      disabled={isSaved}
-    >
-      {isSaved ? "saved ✓" : saveLabel}
-    </button>
-  </div>
-);
 
 // ── Main component ─────────────────────────────────────────────────────────
 
@@ -761,40 +698,6 @@ const labelStyle: React.CSSProperties = {
 const errorStyle: React.CSSProperties = {
   marginTop: 6, fontSize: 11, color: "var(--sfx)",
 };
-
-const RunningBadge: React.FC<{ label: string }> = ({ label }) => (
-  <div style={{
-    padding: "8px 12px", marginBottom: 10,
-    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-    borderRadius: "var(--r)", fontSize: 11, color: "var(--tts)",
-    fontFamily: "var(--font-mono)",
-  }}>
-    ◐ {label}
-  </div>
-);
-
-const EmptyTakes: React.FC<{ label: string }> = ({ label }) => (
-  <div style={{
-    padding: "24px", textAlign: "center",
-    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-    fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6,
-  }}>
-    {label}
-  </div>
-);
-
-const TakeList: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
-  <div style={{ borderRadius: "var(--r)", border: "1px solid var(--line-1)", overflow: "hidden" }}>
-    <div style={{
-      padding: "6px 12px", background: "var(--bg-2)",
-      fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)",
-      letterSpacing: "0.07em", textTransform: "uppercase",
-    }}>
-      {label}
-    </div>
-    {children}
-  </div>
-);
 
 const MetaSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
   <div style={{ borderTop: "1px solid var(--line-1)", paddingTop: 12, marginTop: 12 }}>
