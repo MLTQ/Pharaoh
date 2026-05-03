@@ -94,19 +94,26 @@ def _do_load(model_dir: Path) -> str:
         else "cpu"
     )
 
-    # The model expects speech_tokenizer/ inside its own dir.
-    # Auto-symlink the shared tokenizer so we only store it once.
+    if not TOKENIZER_DIR.is_dir():
+        raise FileNotFoundError(
+            f"Shared tokenizer directory not found. Download it once:\n"
+            f"  hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir {TOKENIZER_DIR}\n"
+            f"  hf download Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign --include 'tokenizer.json' --local-dir {TOKENIZER_DIR}"
+        )
+
+    # speech_tokenizer/ — neural codec model, symlink from shared dir
     speech_tok_link = model_dir / "speech_tokenizer"
     if not speech_tok_link.exists():
-        if TOKENIZER_DIR.is_dir():
-            speech_tok_link.symlink_to(TOKENIZER_DIR.resolve())
-            log.info(f"Linked {speech_tok_link} -> {TOKENIZER_DIR}")
-        else:
-            raise FileNotFoundError(
-                f"Speech tokenizer not found. Download it once:\n"
-                f"  hf download Qwen/Qwen3-TTS-Tokenizer-12Hz "
-                f"--local-dir {TOKENIZER_DIR}"
-            )
+        speech_tok_link.symlink_to(TOKENIZER_DIR.resolve())
+        log.info(f"Linked {speech_tok_link} -> {TOKENIZER_DIR}")
+
+    # Text tokenizer files — shared across all variants, symlink individually
+    for fname in ("tokenizer.json", "special_tokens_map.json"):
+        src = TOKENIZER_DIR / fname
+        dst = model_dir / fname
+        if src.is_file() and not dst.exists():
+            dst.symlink_to(src.resolve())
+            log.info(f"Linked {dst} -> {src}")
 
     log.info(f"Loading Qwen3-TTS from {model_dir} on {device_map}")
     model = Qwen3TTSModel.from_pretrained(

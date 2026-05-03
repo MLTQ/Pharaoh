@@ -713,10 +713,13 @@ export const SettingsView: React.FC = () => {
 
                       <div>
                         <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
-                          <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>Speech tokenizer</span>
+                          <span style={{ color: accent, fontFamily: "var(--font-mono)" }}>Tokenizers</span>
                           {" — "} download once, shared by all variants
                         </div>
-                        <CopyableCommand command="hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/tokenizer" />
+                        <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                          <CopyableCommand command="hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir ~/pharaoh-models/tts/tokenizer" />
+                          <CopyableCommand command="hf download Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign --include 'tokenizer.json' --local-dir ~/pharaoh-models/tts/tokenizer" />
+                        </div>
                       </div>
 
                       {TTS_VARIANTS.map((v) => (
