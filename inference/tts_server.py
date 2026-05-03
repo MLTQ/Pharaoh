@@ -96,9 +96,8 @@ def _do_load(model_dir: Path) -> str:
 
     if not TOKENIZER_DIR.is_dir():
         raise FileNotFoundError(
-            f"Shared tokenizer directory not found. Download it once:\n"
-            f"  hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir {TOKENIZER_DIR}\n"
-            f"  hf download Qwen/Qwen3-TTS-12Hz-1.7B-VoiceDesign --include 'tokenizer.json' --local-dir {TOKENIZER_DIR}"
+            f"Shared speech-tokenizer directory not found. Download it once:\n"
+            f"  hf download Qwen/Qwen3-TTS-Tokenizer-12Hz --local-dir {TOKENIZER_DIR}"
         )
 
     # speech_tokenizer/ — neural codec model, symlink from shared dir
@@ -107,11 +106,27 @@ def _do_load(model_dir: Path) -> str:
         speech_tok_link.symlink_to(TOKENIZER_DIR.resolve())
         log.info(f"Linked {speech_tok_link} -> {TOKENIZER_DIR}")
 
-    # Text tokenizer files — shared across all variants, symlink individually
-    for fname in ("tokenizer.json", "special_tokens_map.json"):
-        src = TOKENIZER_DIR / fname
+    # Text tokenizer files — identical across all Qwen3-TTS variants. If a
+    # variant's download is incomplete (e.g. VoiceDesign missing merges.txt),
+    # fill in from TOKENIZER_DIR or any sibling variant dir that has it.
+    text_tok_files = (
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "special_tokens_map.json",
+        "vocab.json",
+        "merges.txt",
+    )
+    sibling_dirs = [p for p in TTS_MODEL_DIR.iterdir()
+                    if p.is_dir() and p != model_dir and p.resolve() != TOKENIZER_DIR.resolve()] \
+                   if TTS_MODEL_DIR.is_dir() else []
+
+    for fname in text_tok_files:
         dst = model_dir / fname
-        if src.is_file() and not dst.exists():
+        if dst.exists() or dst.is_symlink():
+            continue
+        candidates = [TOKENIZER_DIR / fname, *(s / fname for s in sibling_dirs)]
+        src = next((c for c in candidates if c.is_file()), None)
+        if src is not None:
             dst.symlink_to(src.resolve())
             log.info(f"Linked {dst} -> {src}")
 
