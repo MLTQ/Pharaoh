@@ -1,0 +1,18 @@
+# Music server dependencies (ACE-Step v1.5)
+#
+# Installed into inference/.venv-music by setup.sh. Cannot share an env with
+# TTS — ace-step pins transformers==4.50.0 while qwen-tts pins 4.57.3.
+
+# Server framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
+aiofiles>=24.0
+soundfile>=0.12
+
+# ACE-Step (PyPI sdist build is broken; install from git)
+ace-step @ git+https://github.com/ace-step/ACE-Step.git
+
+# Newer torchaudio.save() dispatches through torchcodec, which ace-step
+# doesn't pull in itself.
+torchcodec>=0.4

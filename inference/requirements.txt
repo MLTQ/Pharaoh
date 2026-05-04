@@ -1,22 +1,17 @@
-# Pharaoh inference server dependencies
-
-# ── Server framework (always required) ──────────────────────────────────────
-fastapi>=0.115.0
-uvicorn[standard]>=0.30.0
-pydantic>=2.0
-aiofiles>=24.0
-
-# ── Real model inference (required when PHARAOH_REAL_MODELS=1) ──────────────
+# Pharaoh inference server dependencies — see the per-server files below.
+# First-time setup creates two uv venvs and syncs them automatically:
 #
-# TTS — Qwen3-TTS via dedicated package (NOT plain transformers)
-#   pip install qwen-tts soundfile
-#   Model dir: ~/pharaoh-models/tts   (env: PHARAOH_TTS_MODEL_DIR)
+#     ./inference/setup.sh
 #
-# SFX — Woosh runs from its own uv venv; start_servers.sh picks it up automatically
-#   cd ~/Code/Woosh && uv sync              # CPU / MPS
-#   cd ~/Code/Woosh && uv sync --extra cuda # NVIDIA GPU
-#   Model dir: ~/Code/Woosh/checkpoints/    (env: PHARAOH_WOOSH_DIR)
+# Then start everything with:
 #
-# Music — ACE-Step
-#   pip install ace-step soundfile
-#   Model dir: ~/pharaoh-models/music  (env: PHARAOH_MUSIC_MODEL_DIR)
+#     ./inference/start_servers.sh
+#
+# Per-server pinned deps:
+#   inference/requirements-tts.txt   → .venv-tts   (qwen-tts; transformers 4.57.x)
+#   inference/requirements-music.txt → .venv-music (ace-step; transformers 4.50.x)
+#
+# SFX uses the Woosh repo's own uv venv at ~/Code/Woosh/.venv (cd ~/Code/Woosh && uv sync).
+#
+# These three envs MUST stay separate — qwen-tts and ace-step pin
+# incompatible transformers versions and accelerate versions.

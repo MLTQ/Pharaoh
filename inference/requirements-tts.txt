@@ -1,0 +1,15 @@
+# TTS server dependencies (Qwen3-TTS via qwen-tts package)
+#
+# Installed into inference/.venv-tts by setup.sh. Cannot share an env with
+# music — qwen-tts pins transformers==4.57.3 / accelerate==1.12.0 while
+# ace-step pins transformers==4.50.0.
+
+# Server framework
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
+aiofiles>=24.0
+
+# Model
+qwen-tts>=0.1.1
+soundfile>=0.12

@@ -8,5 +8,7 @@ src-tauri/gen/
 .DS_Store
 
 inference/__pycache__/
+inference/.venv-tts/
+inference/.venv-music/
 
 .claude/worktrees/

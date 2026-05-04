@@ -2,21 +2,17 @@
 Pharaoh Music Server — port 18003
 Wraps ACE-Step 1.5 (ACEStepPipeline).
 
-Runs in its OWN conda env (pharoah-music) — ace-step pins
-transformers==4.50.0 which conflicts with qwen-tts (which wants
-transformers==4.57.3 and accelerate==1.12.0). They cannot coexist.
+Runs in its own uv venv (inference/.venv-music) because ace-step pins
+transformers==4.50.0, which conflicts with qwen-tts (transformers==4.57.3,
+accelerate==1.12.0). The two CANNOT coexist in one env.
 
 Model directory: PHARAOH_MUSIC_MODEL_DIR (default ~/pharaoh-models/music)
 The directory must contain ace_step_transformer/, music_dcae_f8c8/,
-music_vocoder/, umt5-base/ subfolders (downloaded from HuggingFace
-ACE-Step/ACE-Step-v1-3.5B).
+music_vocoder/, umt5-base/ (downloaded from ACE-Step/ACE-Step-v1-3.5B).
 
-Install:
-  conda create -n pharoah-music python=3.11 -y
-  conda activate pharoah-music
-  pip install fastapi uvicorn aiofiles soundfile pydantic
-  pip install git+https://github.com/ace-step/ACE-Step.git   # PyPI sdist is broken
-  pip install torchcodec                                      # torchaudio.save dispatches through it
+First-time setup is a single command:
+
+    ./inference/setup.sh
 """
 import asyncio
 import logging
