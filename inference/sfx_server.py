@@ -229,6 +229,26 @@ def _native_audioldm_cli() -> Path:
     return AUDIOLDM_PYTHON.parent.parent / suffix
 
 
+async def _pump_subprocess_stream(stream, label: str, buffer: list[str]) -> None:
+    """Forward subprocess output to logs while retaining tail text for errors."""
+    if stream is None:
+        return
+    while True:
+        chunk = await stream.read(1024)
+        if not chunk:
+            break
+        text = chunk.decode(errors="replace").replace("\r", "\n").strip()
+        if not text:
+            continue
+        for line in text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            buffer.append(line)
+            del buffer[:-80]
+            log.info("AudioLDM %s: %s", label, line)
+
+
 def _resolve_audioldm_model_id(params: dict | None = None) -> str:
     raw = str((params or {}).get("model_variant") or AUDIO_LDM_MODEL)
     aliases = {
@@ -452,14 +472,29 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
-            stdout, stderr = await proc.communicate()
-            if proc.returncode != 0:
-                msg = stderr.decode(errors="replace")[-4000:] or stdout.decode(errors="replace")[-4000:]
-                raise RuntimeError(f"native AudioLDM failed with exit {proc.returncode}: {msg}")
+            output_tail: list[str] = []
+            stdout_task = asyncio.create_task(_pump_subprocess_stream(proc.stdout, "stdout", output_tail))
+            stderr_task = asyncio.create_task(_pump_subprocess_stream(proc.stderr, "stderr", output_tail))
+            wait_task = asyncio.create_task(proc.wait())
+
+            progress = 0.10
+            while not wait_task.done():
+                await asyncio.sleep(1.0)
+                progress = min(progress + 0.01, 0.92)
+                jobs.update(job_id, progress=progress)
+                log.info("AudioLDM job %s still running (progress %.0f%%)", job_id, progress * 100)
+
+            returncode = await wait_task
+            await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
+            jobs.update(job_id, progress=0.94)
+
+            if returncode != 0:
+                msg = "\n".join(output_tail)[-4000:]
+                raise RuntimeError(f"native AudioLDM failed with exit {returncode}: {msg}")
 
             candidates = sorted(Path(tmp).rglob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)
             if not candidates:
-                msg = stdout.decode(errors="replace")[-2000:] + stderr.decode(errors="replace")[-2000:]
+                msg = "\n".join(output_tail)[-4000:]
                 raise RuntimeError(f"native AudioLDM completed without a WAV output. Output: {msg}")
 
             out_path.parent.mkdir(parents=True, exist_ok=True)

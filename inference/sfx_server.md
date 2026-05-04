@@ -24,6 +24,11 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Does**: Reports Woosh and AudioLDM readiness independently, and lets `/load` preload AudioLDM when `variant` starts with `AudioLDM`.
 - **Interacts with**: Model manager and server health polling.
 
+### Native subprocess progress
+- **Does**: Streams native AudioLDM stdout/stderr into server logs and advances job progress with a heartbeat while the subprocess runs.
+- **Interacts with**: Job polling UI and terminal logs.
+- **Rationale**: The upstream CLI can spend time downloading/loading before sustained CPU activity. Buffered subprocess output makes the job look stuck, so the server must expose liveness independently.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
