@@ -12,13 +12,13 @@ Settings panel for inference server URLs, model download commands, and install g
 ### SFX downloads
 - **Does**: Shows Woosh checkpoint instructions and the AudioLDM Hugging Face download command.
 - **Interacts with**: `sfx_server.py`, `inference/setup.sh`.
-- **Rationale**: Woosh and AudioLDM share the SFX server but have different setup paths. The Settings page needs to make both visible so users can prepare long soundscape generation without discovering missing files at runtime.
+- **Rationale**: Woosh and AudioLDM share the SFX server but have different setup paths. Native AudioLDM setup is the production path; the Hugging Face command is retained for the explicit diffusers fallback engine.
 
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
-| `sfx_server.py` | AudioLDM default local directory is `~/pharaoh-models/sfx/audioldm-s-full-v2` | Changing the Settings download path without updating server resolution |
+| `sfx_server.py` | Native AudioLDM is installed with `PHARAOH_INSTALL_AUDIOLDM=1`; diffusers fallback may use the HF local directory | Changing setup guidance without updating server resolution |
 | Users | Woosh remains the required short-foley setup | Hiding Woosh behind AudioLDM setup |
 
 ## Notes

@@ -1,12 +1,8 @@
-# Optional AudioLDM backend for inference/sfx_server.py.
+# Optional native AudioLDM backend for inference/sfx_server.py.
 #
-# Install into the Python environment used to run sfx_server.py:
-#   uv pip install --python "$PHARAOH_WOOSH_DIR/.venv/bin/python" -r inference/requirements-sfx-audioldm.txt
+# Installed into inference/.venv-audioldm by setup.sh when:
+#   PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh
 #
-# The SFX server keeps Woosh as the default backend. These packages are only
-# imported when a request selects backend="audioldm" or an AudioLDM model variant.
-diffusers>=0.27
-transformers>=4.35
-accelerate>=0.25
-scipy>=1.10
-numpy>=1.24
+# Keep AudioLDM isolated from Woosh. Woosh requires a very new transformers
+# stack, while the AudioLDM examples are from the upstream AudioLDM runner.
+audioldm @ git+https://github.com/haoheliu/AudioLDM.git

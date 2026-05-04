@@ -6,9 +6,12 @@ Requires: ~/Code/Woosh uv venv with woosh package.
 Model directory: PHARAOH_WOOSH_DIR (default ~/Code/Woosh)
 """
 import asyncio
+import shutil
 import logging
 import os
 import re
+import sys
+import tempfile
 from pathlib import Path
 from typing import Optional
 
@@ -32,6 +35,10 @@ AUDIO_LDM_MODEL = os.environ.get(
     "PHARAOH_AUDIOLDM_MODEL",
     str(AUDIO_LDM_LOCAL_DIR) if AUDIO_LDM_LOCAL_DIR.exists() else AUDIO_LDM_MODEL_ID,
 )
+AUDIOLDM_PYTHON = Path(
+    os.environ.get("PHARAOH_AUDIOLDM_PYTHON", Path(__file__).parent / ".venv-audioldm/bin/python3")
+).expanduser()
+AUDIOLDM_ENGINE = os.environ.get("PHARAOH_AUDIOLDM_ENGINE", "native").lower()
 
 SAMPLE_RATE   = 48000
 AUDIO_LDM_SAMPLE_RATE = 16000
@@ -181,6 +188,26 @@ def _is_audioldm_request(params: dict) -> bool:
 
 
 def _audioldm_status() -> dict:
+    if AUDIOLDM_ENGINE == "native":
+        cli = _native_audioldm_cli()
+        if not AUDIOLDM_PYTHON.exists():
+            return {
+                "ok": False,
+                "reason": (
+                    f"AudioLDM venv not found at {AUDIOLDM_PYTHON}. "
+                    "Run: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
+                ),
+            }
+        if not cli.exists():
+            return {
+                "ok": False,
+                "reason": (
+                    f"AudioLDM CLI not found at {cli}. "
+                    "Run: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
+                ),
+            }
+        return {"ok": True, "reason": ""}
+
     try:
         import diffusers  # noqa: F401
         import scipy  # noqa: F401
@@ -195,6 +222,11 @@ def _audioldm_status() -> dict:
             ),
         }
     return {"ok": True, "reason": ""}
+
+
+def _native_audioldm_cli() -> Path:
+    suffix = "Scripts/audioldm.exe" if sys.platform == "win32" else "bin/audioldm"
+    return AUDIOLDM_PYTHON.parent.parent / suffix
 
 
 def _resolve_audioldm_model_id(params: dict | None = None) -> str:
@@ -229,6 +261,10 @@ def _load_audioldm_model(model_id: str) -> None:
 
 
 async def _ensure_audioldm_model(params: dict | None = None) -> str | None:
+    if AUDIOLDM_ENGINE == "native":
+        status = _audioldm_status()
+        return None if status["ok"] else status["reason"]
+
     model_id = _resolve_audioldm_model_id(params)
     if _audioldm_pipe is not None and _audioldm_loaded_model_id == model_id:
         return None
@@ -256,6 +292,7 @@ def _prepare_audioldm_prompt(prompt: str) -> str:
     prompt = re.sub(r"\[([^\]:]+):\s*([^\]]+)\]", r"\2.", prompt)
     prompt = re.sub(r"\[[^\]]+\]", " ", prompt)
     prompt = re.sub(r"\s+", " ", prompt.replace("\n", ". ")).strip(" .")
+    prompt = re.sub(r"\.{2,}", ".", prompt).strip(" .")
     if len(prompt) > 320:
         prompt = prompt[:320].rsplit(" ", 1)[0].strip(" .,")
     if not prompt:
@@ -371,8 +408,73 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
 
 
 async def _run_audioldm_sfx(job_id: str, params: dict) -> None:
+    if AUDIOLDM_ENGINE == "native":
+        await _run_native_audioldm_sfx(job_id, params)
+    else:
+        await _run_diffusers_audioldm_sfx(job_id, params)
+
+
+async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
     jobs.update(job_id, status="running", progress=0.02)
 
+    err = await _ensure_audioldm_model(params)
+    if err:
+        log.warning(f"Job {job_id} failed: {err}")
+        jobs.update(job_id, status="failed", error=err)
+        return
+
+    jobs.update(job_id, progress=0.08)
+    try:
+        prompt = _prepare_audioldm_prompt(params["prompt"])
+        duration = float(params.get("duration_seconds", 30.0))
+        steps = int(params.get("steps", 200))
+        seed = int(params.get("seed", 0))
+        guidance_scale = float(params.get("guidance_scale", 2.5))
+        waveforms = int(params.get("num_waveforms_per_prompt", 3))
+        out_path = Path(params["output_path"])
+        cli = _native_audioldm_cli()
+
+        with tempfile.TemporaryDirectory(prefix="pharaoh-audioldm-") as tmp:
+            cmd = [
+                str(cli),
+                "-t", prompt,
+                "-s", tmp,
+                "--model_name", "audioldm-s-full-v2",
+                "--ddim_steps", str(steps),
+                "-gs", str(guidance_scale),
+                "-dur", str(duration),
+                "-n", str(max(1, waveforms)),
+                "--seed", str(seed),
+            ]
+            log.info("Running native AudioLDM: %s", " ".join(cmd))
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+            stdout, stderr = await proc.communicate()
+            if proc.returncode != 0:
+                msg = stderr.decode(errors="replace")[-4000:] or stdout.decode(errors="replace")[-4000:]
+                raise RuntimeError(f"native AudioLDM failed with exit {proc.returncode}: {msg}")
+
+            candidates = sorted(Path(tmp).rglob("*.wav"), key=lambda p: p.stat().st_mtime, reverse=True)
+            if not candidates:
+                msg = stdout.decode(errors="replace")[-2000:] + stderr.decode(errors="replace")[-2000:]
+                raise RuntimeError(f"native AudioLDM completed without a WAV output. Output: {msg}")
+
+            out_path.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(candidates[0], out_path)
+            log.info("Native AudioLDM wrote %s from %s", out_path, candidates[0])
+
+        jobs.update(job_id, status="complete", progress=1.0, output_path=str(out_path))
+
+    except Exception as exc:
+        log.exception("Native AudioLDM inference failed")
+        jobs.update(job_id, status="failed", error=str(exc))
+
+
+async def _run_diffusers_audioldm_sfx(job_id: str, params: dict) -> None:
+    jobs.update(job_id, status="running", progress=0.02)
     err = await _ensure_audioldm_model(params)
     if err:
         log.warning(f"Job {job_id} failed: {err}")
@@ -443,7 +545,7 @@ async def health() -> dict:
     als = _audioldm_status()
     return {
         "status": "ok",
-        "model_loaded": _model_loaded or _audioldm_pipe is not None,
+        "model_loaded": _model_loaded or _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),
         "model_variant": MODEL_VARIANT,
         "vram_mb": 2048 if _model_loaded else 0,
         "stub": False,
@@ -454,7 +556,8 @@ async def health() -> dict:
         "audioldm_error": als["reason"],
         "audioldm_model": _audioldm_loaded_model_id or AUDIO_LDM_MODEL,
         "audioldm_local_dir": str(AUDIO_LDM_LOCAL_DIR),
-        "audioldm_loaded": _audioldm_pipe is not None,
+        "audioldm_engine": AUDIOLDM_ENGINE,
+        "audioldm_loaded": _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),
     }
 
 
@@ -484,6 +587,8 @@ async def load(params: Optional[LoadParams] = None) -> dict:
         err = await _ensure_audioldm_model({"model_variant": variant})
         if err:
             return {"status": "error", "error": err}
+        if AUDIOLDM_ENGINE == "native":
+            return {"status": "loaded", "backend": "audioldm", "engine": "native", "model": "audioldm-s-full-v2"}
         return {"status": "loaded", "backend": "audioldm", "model": _audioldm_loaded_model_id}
 
     ws = _woosh_status()

@@ -318,8 +318,9 @@ function SfxDownloads() {
           fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6,
           marginBottom: 6,
         }}>
-          AudioLDM is optional. Downloading it here avoids first-use Hugging Face cache
-          surprises and matches the SFX server default local directory.
+          AudioLDM is optional. Pharaoh uses the upstream AudioLDM runner by default;
+          install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. This Hugging Face
+          download is only needed if you explicitly use the diffusers fallback engine.
         </div>
         <CopyableCommand command="hf download cvssp/audioldm-s-full-v2 --local-dir ~/pharaoh-models/sfx/audioldm-s-full-v2" />
       </div>

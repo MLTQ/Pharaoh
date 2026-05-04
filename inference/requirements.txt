@@ -10,7 +10,7 @@
 # Per-server pinned deps:
 #   inference/requirements-tts.txt   → .venv-tts   (qwen-tts; transformers 4.57.x)
 #   inference/requirements-music.txt → .venv-music (ace-step; transformers 4.50.x)
-#   inference/requirements-sfx-audioldm.txt → optional AudioLDM deps in Woosh .venv
+#   inference/requirements-sfx-audioldm.txt → optional .venv-audioldm native runner
 #
 # SFX uses the Woosh repo's own uv venv at ~/Code/Woosh/.venv (cd ~/Code/Woosh && uv sync).
 # Enable long AudioLDM soundscapes with:

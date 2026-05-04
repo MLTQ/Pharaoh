@@ -19,9 +19,9 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Interacts with**: `start_servers.sh`.
 
 ### SFX env section
-- **Does**: Checks for an existing Woosh checkout and virtualenv. Optionally installs AudioLDM dependencies into that SFX interpreter when `PHARAOH_INSTALL_AUDIOLDM=1`.
+- **Does**: Checks for an existing Woosh checkout and virtualenv. Optionally creates `inference/.venv-audioldm` and installs the upstream AudioLDM runner when `PHARAOH_INSTALL_AUDIOLDM=1`.
 - **Interacts with**: `PHARAOH_WOOSH_DIR`, Woosh checkpoints, `requirements-sfx-audioldm.txt`.
-- **Rationale**: Woosh remains the default high-quality short-foley backend. AudioLDM is optional because it adds Hugging Face/diffusers dependencies and large model downloads, but it unlocks long ambiences and soundscapes.
+- **Rationale**: Woosh remains the default high-quality short-foley backend. AudioLDM is isolated because the Woosh dependency stack makes the diffusers AudioLDM path unreliable.
 
 ## Contracts
 
@@ -30,7 +30,7 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 | `start_servers.sh` | `.venv-tts` and `.venv-music` exist after setup | Changing venv locations without updating startup |
 | Users | Missing SoX is reported with install guidance | Removing the preflight warning |
 | Woosh setup | SFX env remains managed by the Woosh repo | Creating a conflicting Pharaoh SFX env |
-| AudioLDM setup | Optional deps install into the same SFX interpreter | Requiring AudioLDM for all SFX installs |
+| AudioLDM setup | Optional deps install into `.venv-audioldm` | Installing AudioLDM into the Woosh interpreter |
 
 ## Notes
 - SoX is a system dependency, not a Python package. On macOS the expected install command is `brew install sox`.

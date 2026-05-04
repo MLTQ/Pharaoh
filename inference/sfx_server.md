@@ -11,9 +11,9 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Rationale**: Woosh remains the preferred backend for tight one-shots and foley, where quality is more important than long duration.
 
 ### AudioLDM backend
-- **Does**: Loads `diffusers.AudioLDMPipeline` when a request uses `backend="audioldm"` or an AudioLDM model variant, then generates WAVs at 16 kHz for requested durations.
-- **Interacts with**: `requirements-sfx-audioldm.txt`, `~/pharaoh-models/sfx/audioldm-s-full-v2`, Hugging Face cache, `/generate/t2a`.
-- **Rationale**: AudioLDM v1 is the practical long-form ambience option. It supports `audio_length_in_s` and the upstream demo explicitly includes long samples, unlike AudioLDM2's own TODO for >10s generation.
+- **Does**: Runs the upstream `audioldm` CLI from `inference/.venv-audioldm` when a request uses `backend="audioldm"` or an AudioLDM model variant, then copies the generated WAV to Pharaoh's requested output path.
+- **Interacts with**: `requirements-sfx-audioldm.txt`, `PHARAOH_AUDIOLDM_PYTHON`, `/generate/t2a`.
+- **Rationale**: The diffusers AudioLDM pipeline is deprecated and produced unusable diffusion artifacts inside the Woosh dependency stack. The native runner matches the upstream examples more closely and keeps AudioLDM isolated from Woosh.
 
 ### AudioLDM prompt normalization
 - **Does**: Converts Pharaoh's bracketed director markup into concise prose, prefixes it as a realistic field recording, and asks for no speech/music.
@@ -34,6 +34,6 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
-- `AudioLDM-S-Full-V2` resolves to `PHARAOH_AUDIOLDM_MODEL`, otherwise `PHARAOH_AUDIOLDM_MODEL_DIR`, otherwise the Hugging Face model id.
+- `PHARAOH_AUDIOLDM_ENGINE=diffusers` keeps the old diffusers path available for debugging only; native is the production default.
 - AudioLDM defaults intentionally match the upstream CLI more closely: 200 diffusion steps and 3 candidates per prompt. This is slower but materially better than the earlier fast 50-step/1-candidate setting.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

@@ -1,13 +1,14 @@
 #!/usr/bin/env bash
 # One-shot setup for Pharaoh's inference servers.
 #
-# Creates two isolated uv venvs alongside this script:
+# Creates isolated uv venvs alongside this script:
 #   inference/.venv-tts   → qwen-tts (transformers 4.57.3)
 #   inference/.venv-music → ace-step (transformers 4.50.0)
+#   inference/.venv-audioldm → optional upstream AudioLDM runner
 #
 # SFX continues to use the existing ~/Code/Woosh/.venv (which Woosh manages).
-# AudioLDM long-soundscape support is optional and installs extra packages into
-# that same SFX interpreter when PHARAOH_INSTALL_AUDIOLDM=1.
+# AudioLDM long-soundscape support is optional and isolated from Woosh because
+# Woosh requires a much newer transformers stack.
 #
 # Idempotent: re-running re-syncs deps but doesn't recreate working venvs.
 # Override venv locations with PHARAOH_TTS_PYTHON / PHARAOH_MUSIC_PYTHON.
@@ -16,6 +17,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_VENV="${SCRIPT_DIR}/.venv-tts"
 MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
+AUDIOLDM_VENV="${SCRIPT_DIR}/.venv-audioldm"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
 INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
 
@@ -79,12 +81,6 @@ step "SFX env (Woosh)"
 if [ -d "${WOOSH_DIR}" ]; then
     if [ -d "${WOOSH_DIR}/.venv" ]; then
         ok "Reusing ${WOOSH_DIR}/.venv"
-        if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
-            uv pip install --python "${WOOSH_DIR}/.venv/bin/python" -r "${SCRIPT_DIR}/requirements-sfx-audioldm.txt"
-            ok "AudioLDM optional deps synced into SFX env"
-        else
-            hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
-        fi
     else
         warn "Woosh repo at ${WOOSH_DIR} has no .venv yet."
         hint "Run:  cd ${WOOSH_DIR} && uv sync"
@@ -93,6 +89,21 @@ else
     warn "Woosh repo not found at ${WOOSH_DIR}"
     hint "Clone:  git clone https://github.com/SonyResearch/Woosh ${WOOSH_DIR} && cd ${WOOSH_DIR} && uv sync"
     hint "Or set PHARAOH_WOOSH_DIR to an existing checkout."
+fi
+
+# ── Optional SFX+ (AudioLDM) ─────────────────────────────────────────────────
+step "SFX+ env (AudioLDM)"
+if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
+    if [ ! -d "${AUDIOLDM_VENV}" ]; then
+        uv venv --python 3.11 "${AUDIOLDM_VENV}"
+        ok "Created ${AUDIOLDM_VENV}"
+    else
+        ok "Reusing ${AUDIOLDM_VENV}"
+    fi
+    uv pip install --python "${AUDIOLDM_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-sfx-audioldm.txt"
+    ok "AudioLDM deps synced"
+else
+    hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
 fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────

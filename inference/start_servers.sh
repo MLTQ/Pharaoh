@@ -8,10 +8,10 @@
 #   TTS   : inference/.venv-tts/bin/python3       (PHARAOH_TTS_PYTHON)
 #   Music : inference/.venv-music/bin/python3     (PHARAOH_MUSIC_PYTHON)
 #   SFX   : ~/Code/Woosh/.venv/bin/python3        (PHARAOH_WOOSH_DIR)
-#           optional AudioLDM deps: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh
+#           optional AudioLDM runner: inference/.venv-audioldm/bin/python3
 #
-# These three envs MUST be separate — qwen-tts and ace-step pin
-# incompatible transformers versions.
+# These envs MUST be separate — qwen-tts, ace-step, Woosh, and AudioLDM
+# pin or expect incompatible transformers/runtime stacks.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -20,6 +20,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PHARAOH_TTS_MODEL_DIR="${PHARAOH_TTS_MODEL_DIR:-$HOME/pharaoh-models/tts}"
 export PHARAOH_MUSIC_MODEL_DIR="${PHARAOH_MUSIC_MODEL_DIR:-$HOME/pharaoh-models/music}"
 export PHARAOH_WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
+export PHARAOH_AUDIOLDM_PYTHON="${PHARAOH_AUDIOLDM_PYTHON:-${SCRIPT_DIR}/.venv-audioldm/bin/python3}"
 
 # Resolve Python interpreters — uv venvs by default, overridable.
 TTS_PYTHON="${PHARAOH_TTS_PYTHON:-${SCRIPT_DIR}/.venv-tts/bin/python3}"
@@ -42,7 +43,8 @@ check_python "SFX"   "${WOOSH_PYTHON}" "Run: cd ${PHARAOH_WOOSH_DIR} && uv sync 
 
 echo "Starting Pharaoh inference servers..."
 echo "  TTS   : ${TTS_PYTHON}"
-echo "  SFX   : ${WOOSH_PYTHON} (Woosh, optional AudioLDM)"
+echo "  SFX   : ${WOOSH_PYTHON} (Woosh)"
+echo "  SFX+  : ${PHARAOH_AUDIOLDM_PYTHON} (optional AudioLDM runner)"
 echo "  Music : ${MUSIC_PYTHON}"
 echo ""
 

@@ -14,6 +14,7 @@ export interface ServerHealth {
   audioldm_error?: string;
   audioldm_model?: string;
   audioldm_local_dir?: string;
+  audioldm_engine?: string;
   audioldm_loaded?: boolean;
 }
 
