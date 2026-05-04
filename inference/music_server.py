@@ -186,18 +186,20 @@ async def _run_music(job_id: str, params: dict) -> None:
             batch_size=int(params.get("batch_size", 1)),
         )
 
+        # ACEStepPipeline.__call__ does `len(lyrics) > 0` etc. without None-checks,
+        # so empty-string is required for unset text fields, not None.
         if endpoint == "text2music":
-            caption = params.get("caption", "")
-            lyrics  = params.get("lyrics", "")
-            ref     = params.get("reference_audio_path", "")
+            caption = params.get("caption", "") or ""
+            lyrics  = params.get("lyrics",  "") or ""
+            ref     = params.get("reference_audio_path", "") or ""
             await loop.run_in_executor(
                 None,
                 lambda: _pipeline(
                     task="text2music",
                     prompt=caption,
-                    lyrics=lyrics or None,
+                    lyrics=lyrics,
                     audio2audio_enable=bool(ref),
-                    ref_audio_input=ref or None,
+                    ref_audio_input=ref,
                     ref_audio_strength=0.5,
                     **common_kwargs,
                 ),
@@ -207,7 +209,8 @@ async def _run_music(job_id: str, params: dict) -> None:
                 None,
                 lambda: _pipeline(
                     task="audio2audio",
-                    prompt=params.get("caption", ""),
+                    prompt=params.get("caption", "") or "",
+                    lyrics="",
                     audio2audio_enable=True,
                     ref_audio_input=params["source_audio_path"],
                     ref_audio_strength=float(params.get("cover_strength", 0.5)),
@@ -219,7 +222,8 @@ async def _run_music(job_id: str, params: dict) -> None:
                 None,
                 lambda: _pipeline(
                     task="repaint",
-                    prompt=params.get("caption", ""),
+                    prompt=params.get("caption", "") or "",
+                    lyrics="",
                     src_audio_path=params["source_audio_path"],
                     repaint_start=int(params.get("start_ms", 0)),
                     repaint_end=int(params.get("end_ms", 10000)),
