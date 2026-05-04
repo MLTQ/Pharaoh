@@ -393,13 +393,18 @@ async fn generate_sfx(
         .ok()
         .map(|ms| (ms / 1000.0).max(0.5))
         .unwrap_or(3.0);
+    let use_audioldm = row.track_type == "BED" || duration_seconds > 5.0;
 
     let params = SfxT2ARequest {
         prompt: row.prompt.clone(),
         duration_seconds,
-        model_variant: "Woosh-DFlow".into(),
-        steps: 4,
+        model_variant: if use_audioldm { "AudioLDM-S-Full-V2".into() } else { "Woosh-DFlow".into() },
+        backend: Some(if use_audioldm { "audioldm" } else { "woosh" }.into()),
+        steps: if use_audioldm { 50 } else { 4 },
         seed: random_seed(),
+        guidance_scale: use_audioldm.then_some(2.5),
+        negative_prompt: use_audioldm.then_some("low quality, distorted, clipped, noisy artifacts".into()),
+        num_waveforms_per_prompt: use_audioldm.then_some(1),
         output_path: output_path.clone(),
     };
 

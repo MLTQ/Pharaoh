@@ -21,7 +21,8 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
   const [value, setValue] = useState(
     "[surface: wet salt floor, fine grit underfoot]\n[space: salt chamber, 2.4s reverb tail, low rumble bed]\n[rhythm: slow walk · 52 bpm · doubled half-beat behind]\n\nFootsteps approach from camera, deliberate and measured. A second pair, half a beat behind, echoing back from the tunnel — same gait, same weight. The doubling tightens through the middle, then drifts ahead of the original."
   );
-  const [duration] = useState(3.0);
+  const [duration, setDuration] = useState(3.0);
+  const [backend, setBackend] = useState<"woosh" | "audioldm">("woosh");
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
   const { submitSfx } = useGenerateJob();
@@ -30,7 +31,12 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
     setGenerating(true);
     setGenError(null);
     try {
-      await submitSfx({ prompt: value, durationSeconds: duration });
+      await submitSfx({
+        prompt: value,
+        durationSeconds: duration,
+        backend,
+        modelVariant: backend === "audioldm" ? "AudioLDM-S-Full-V2" : "Woosh-DFlow",
+      });
     } catch (e) {
       setGenError(String(e));
     } finally {
@@ -43,11 +49,10 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
       <div className="panel-main">
         <div className="panel-header">
           <div className="panel-header-left">
-            <span className="eyebrow sfx">sfx-v3 · foley</span>
+            <span className="eyebrow sfx">sfx-v3 · {backend === "audioldm" ? "audioldm soundscape" : "woosh foley"}</span>
             <span className="ttl">Sound Design</span>
             <span className="desc">
-              Describe foley, ambiences and one-shots with structured directives.
-              Length-locked to selection on the timeline.
+              Use Woosh for short, sharp foley. Use AudioLDM for long ambiences and minute-scale soundscapes.
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -58,7 +63,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
               disabled={generating}
             >
               <Icon name="sparkle" style={{ width: 14, height: 14 }} />
-              {generating ? "Submitting…" : "Generate · 4 variations"}
+              {generating ? "Submitting…" : `Generate · ${duration.toFixed(1)}s`}
             </button>
             {genError && <span style={{ fontSize: 10, color: "var(--sfx)", maxWidth: 200, textAlign: "right" }}>{genError}</span>}
           </div>
@@ -68,6 +73,42 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · rich text</div>
         <RichDirector value={value} setValue={setValue} accent="var(--sfx)" />
+
+        <div className="field-row" style={{ marginTop: 18 }}>
+          <div className="field">
+            <div className="field-label">
+              <span>Backend</span>
+              <span className="hint">{backend === "audioldm" ? "long ambience" : "short foley"}</span>
+            </div>
+            <select
+              className="input"
+              value={backend}
+              onChange={(e) => {
+                const next = e.target.value as "woosh" | "audioldm";
+                setBackend(next);
+                setDuration(next === "audioldm" ? Math.max(duration, 60) : Math.min(duration, 5));
+              }}
+            >
+              <option value="woosh">Woosh · short foley</option>
+              <option value="audioldm">AudioLDM · long soundscape</option>
+            </select>
+          </div>
+          <div className="field">
+            <div className="field-label">
+              <span>Duration</span>
+              <span className="hint">{backend === "woosh" ? "best under 5s" : "supports long beds"}</span>
+            </div>
+            <input
+              className="input"
+              type="number"
+              min={backend === "audioldm" ? 5 : 0.5}
+              max={backend === "audioldm" ? 300 : 8}
+              step={0.5}
+              value={duration}
+              onChange={(e) => setDuration(Number(e.target.value) || 1)}
+            />
+          </div>
+        </div>
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Variations · 4</div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(2,1fr)", gap: 10 }}>

@@ -96,8 +96,9 @@ Uncomment the relevant lines in `inference/requirements.txt` and install:
 # TTS (Qwen3-TTS — needs ~8 GB VRAM or Apple Silicon unified memory)
 pip install transformers==4.51.3 torch torchaudio soundfile accelerate
 
-# SFX (Woosh)
-pip install woosh-audio   # or install from source per README
+# SFX (Woosh short foley, optional AudioLDM long soundscapes)
+cd ~/Code/Woosh && uv sync
+PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh
 
 # Music (ACE-Step)
 pip install ace-step      # or install from source per README
@@ -173,7 +174,7 @@ src-tauri/src/          Rust backend
 
 inference/              Python FastAPI servers
   tts_server.py         Port 18001 — Qwen3-TTS
-  sfx_server.py         Port 18002 — Woosh SFX
+  sfx_server.py         Port 18002 — Woosh SFX + optional AudioLDM soundscapes
   music_server.py       Port 18003 — ACE-Step
   _common.py            Shared job store + WAV stub helpers
 ```

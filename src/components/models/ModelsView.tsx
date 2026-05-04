@@ -11,9 +11,14 @@ const TTS_VARIANTS = [
   { id: "Base-0.6B",        desc: "Voice cloning, lightweight" },
 ];
 
+const SFX_VARIANTS = [
+  { id: "Woosh-DFlow", desc: "short foley, highest quality" },
+  { id: "AudioLDM-S-Full-V2", desc: "long effects and soundscapes" },
+];
+
 const SERVERS = [
   { kind: "tts"   as const, label: "Qwen3-TTS",          color: "var(--tts)",   port: 18001 },
-  { kind: "sfx"   as const, label: "Woosh",               color: "var(--sfx)",   port: 18002 },
+  { kind: "sfx"   as const, label: "Woosh + AudioLDM",    color: "var(--sfx)",   port: 18002 },
   { kind: "music" as const, label: "ACE-Step v1 (3.5B)",  color: "var(--music)", port: 18003 },
 ];
 
@@ -31,6 +36,7 @@ export const ModelsView: React.FC = () => {
   const progressMap = { tts: loadProgress.tts, sfx: loadProgress.sfx, music: loadProgress.music };
 
   const [ttsVariant, setTtsVariant] = useState("CustomVoice-1.7B");
+  const [sfxVariant, setSfxVariant] = useState("Woosh-DFlow");
   const [wooshDir, setWooshDir] = useState("");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
@@ -143,6 +149,31 @@ export const ModelsView: React.FC = () => {
                   </div>
                 )}
 
+                {/* SFX variant picker */}
+                {s.kind === "sfx" && (
+                  <div>
+                    <div style={{
+                      fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em",
+                      color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 4,
+                    }}>Variant</div>
+                    <select
+                      className="select"
+                      value={sfxVariant}
+                      onChange={(e) => setSfxVariant(e.target.value)}
+                      style={{ background: "var(--bg-0)", width: "100%", fontSize: 11 }}
+                    >
+                      {SFX_VARIANTS.map((v) => (
+                        <option key={v.id} value={v.id}>{v.id} — {v.desc}</option>
+                      ))}
+                    </select>
+                    {h?.audioldm_error && !h.audioldm_ready && (
+                      <div style={{ color: "var(--fg-4)", fontSize: 10.5, marginTop: 5 }}>
+                        AudioLDM optional deps not ready.
+                      </div>
+                    )}
+                  </div>
+                )}
+
                 {/* TTS variant picker */}
                 {s.kind === "tts" && (
                   <div>
@@ -168,7 +199,7 @@ export const ModelsView: React.FC = () => {
                   <button
                     className="btn"
                     disabled={isBusy || status === "offline"}
-                    onClick={() => doLoad(s.kind, s.kind === "tts" ? ttsVariant : undefined)}
+                    onClick={() => doLoad(s.kind, s.kind === "tts" ? ttsVariant : s.kind === "sfx" ? sfxVariant : undefined)}
                     style={{
                       borderColor: s.color, color: s.color,
                       background: `color-mix(in oklch, ${s.color} 10%, transparent)`,

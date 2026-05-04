@@ -154,8 +154,12 @@ export const submitSfxT2a = (args: {
     prompt: string;
     duration_seconds: number;
     model_variant: string;
+    backend?: "woosh" | "audioldm";
     steps: number;
     seed: number;
+    guidance_scale?: number;
+    negative_prompt?: string;
+    num_waveforms_per_prompt?: number;
     output_path: string;
   };
 }): Promise<string> => invoke("submit_sfx_t2a", args);

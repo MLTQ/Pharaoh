@@ -12,6 +12,7 @@ Tauri inference commands and generation lifecycle handling. This file submits jo
 ### `submit_tts_*`, `submit_sfx_t2a`, `submit_music_text2music`
 - **Does**: Submit generation requests and start background polling.
 - **Interacts with**: generation panels in `src/components/`, request models in `models.rs`.
+- **Rationale**: SFX requests carry backend metadata so sidecars distinguish Woosh foley from AudioLDM long soundscapes.
 
 ### `poll_until_done`
 - **Does**: Polls `/jobs/{id}` until completion, emitting progress/completion/failure events to the frontend.

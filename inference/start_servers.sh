@@ -8,6 +8,7 @@
 #   TTS   : inference/.venv-tts/bin/python3       (PHARAOH_TTS_PYTHON)
 #   Music : inference/.venv-music/bin/python3     (PHARAOH_MUSIC_PYTHON)
 #   SFX   : ~/Code/Woosh/.venv/bin/python3        (PHARAOH_WOOSH_DIR)
+#           optional AudioLDM deps: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh
 #
 # These three envs MUST be separate — qwen-tts and ace-step pin
 # incompatible transformers versions.
@@ -41,7 +42,7 @@ check_python "SFX"   "${WOOSH_PYTHON}" "Run: cd ${PHARAOH_WOOSH_DIR} && uv sync 
 
 echo "Starting Pharaoh inference servers..."
 echo "  TTS   : ${TTS_PYTHON}"
-echo "  SFX   : ${WOOSH_PYTHON}"
+echo "  SFX   : ${WOOSH_PYTHON} (Woosh, optional AudioLDM)"
 echo "  Music : ${MUSIC_PYTHON}"
 echo ""
 

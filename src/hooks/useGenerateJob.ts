@@ -88,22 +88,34 @@ export function useGenerateJob() {
   async function submitSfx(params: {
     prompt: string;
     durationSeconds?: number;
+    backend?: "woosh" | "audioldm";
     modelVariant?: string;
     steps?: number;
     seed?: number;
+    guidanceScale?: number;
+    negativePrompt?: string;
+    numWaveformsPerPrompt?: number;
     rowIndex?: number;
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
     const ts = Date.now();
+    const durationSeconds = params.durationSeconds ?? 3.0;
+    const backend = params.backend ?? (durationSeconds > 5 ? "audioldm" : "woosh");
+    const modelVariant = params.modelVariant
+      ?? (backend === "audioldm" ? "AudioLDM-S-Full-V2" : "Woosh-DFlow");
 
     const jobId = await submitSfxT2a({
       projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
       params: {
         prompt: params.prompt,
-        duration_seconds: params.durationSeconds ?? 3.0,
-        model_variant: params.modelVariant ?? "Woosh-DFlow",
-        steps: params.steps ?? 4,
+        duration_seconds: durationSeconds,
+        model_variant: modelVariant,
+        backend,
+        steps: params.steps ?? (backend === "audioldm" ? 50 : 4),
         seed: params.seed ?? Math.floor(Math.random() * 99999),
+        guidance_scale: params.guidanceScale ?? (backend === "audioldm" ? 2.5 : undefined),
+        negative_prompt: params.negativePrompt ?? (backend === "audioldm" ? "low quality, distorted, clipped, noisy artifacts" : undefined),
+        num_waveforms_per_prompt: params.numWaveformsPerPrompt ?? (backend === "audioldm" ? 1 : undefined),
         output_path: makeOutputPath(pDir, projectId, sceneSlug, `sfx_${ts}.wav`),
       },
     });

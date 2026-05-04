@@ -10,6 +10,10 @@ export interface ServerHealth {
   model_variant: string;
   vram_mb: number;
   stub: boolean;
+  audioldm_ready?: boolean;
+  audioldm_error?: string;
+  audioldm_model?: string;
+  audioldm_loaded?: boolean;
 }
 
 interface ModelState {

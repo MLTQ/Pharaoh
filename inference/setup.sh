@@ -6,6 +6,8 @@
 #   inference/.venv-music → ace-step (transformers 4.50.0)
 #
 # SFX continues to use the existing ~/Code/Woosh/.venv (which Woosh manages).
+# AudioLDM long-soundscape support is optional and installs extra packages into
+# that same SFX interpreter when PHARAOH_INSTALL_AUDIOLDM=1.
 #
 # Idempotent: re-running re-syncs deps but doesn't recreate working venvs.
 # Override venv locations with PHARAOH_TTS_PYTHON / PHARAOH_MUSIC_PYTHON.
@@ -15,6 +17,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_VENV="${SCRIPT_DIR}/.venv-tts"
 MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
+INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -76,6 +79,12 @@ step "SFX env (Woosh)"
 if [ -d "${WOOSH_DIR}" ]; then
     if [ -d "${WOOSH_DIR}/.venv" ]; then
         ok "Reusing ${WOOSH_DIR}/.venv"
+        if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
+            uv pip install --python "${WOOSH_DIR}/.venv/bin/python" -r "${SCRIPT_DIR}/requirements-sfx-audioldm.txt"
+            ok "AudioLDM optional deps synced into SFX env"
+        else
+            hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
+        fi
     else
         warn "Woosh repo at ${WOOSH_DIR} has no .venv yet."
         hint "Run:  cd ${WOOSH_DIR} && uv sync"
@@ -93,6 +102,7 @@ echo ""
 echo "${DIM}Next: download model weights into the directories below if you haven't already:${RESET}"
 echo "  TTS    → \$HOME/pharaoh-models/tts/{voice_design,base,custom_voice,tokenizer}/"
 echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
+echo "  SFX+   → AudioLDM downloads through Hugging Face cache on first use"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo ""
 echo "See the Models page in the app for the exact ${DIM}hf download${RESET} commands."

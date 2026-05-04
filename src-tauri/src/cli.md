@@ -18,6 +18,11 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 - **Interacts with**: `finalize_generation_output` in `commands/inference.rs`, path helpers in `app_support.rs`.
 - **Rationale**: Keeps the first useful headless workflow small while still being end-to-end real.
 
+### `generate_sfx`
+- **Does**: Generates `SFX` rows with Woosh by default and `BED` or >5-second rows with AudioLDM.
+- **Interacts with**: `SfxT2ARequest`, SFX server `/generate/t2a`.
+- **Rationale**: Headless agents should not have to stitch many short Woosh chunks for rain, wind, traffic, or room-tone beds.
+
 ### `generate_dialogue`
 - **Does**: Builds CustomVoice TTS requests from script row `prompt` text, row `instruct` direction, and project character voice assignments.
 - **Interacts with**: `TtsCustomVoiceRequest` in `models.rs`.

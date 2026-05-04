@@ -231,8 +231,12 @@ pub struct SfxT2ARequest {
     pub prompt: String,
     pub duration_seconds: f32,
     pub model_variant: String,
+    pub backend: Option<String>,
     pub steps: u32,
     pub seed: i64,
+    pub guidance_scale: Option<f32>,
+    pub negative_prompt: Option<String>,
+    pub num_waveforms_per_prompt: Option<u32>,
     pub output_path: String,
 }
 

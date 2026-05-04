@@ -15,8 +15,9 @@ Shared frontend hook for submitting scene-level TTS, SFX, and music jobs. It res
 - **Rationale**: Scene dialogue needs direction control, which the Base/clone model path does not provide. Character Designer remains responsible for clone/design probe jobs.
 
 ### `submitSfx`, `submitMusic`
-- **Does**: Submit SFX and music generation jobs with model-specific defaults.
+- **Does**: Submit SFX and music generation jobs with model-specific defaults. SFX defaults to Woosh for short clips and AudioLDM for requests longer than 5 seconds unless the caller chooses a backend explicitly.
 - **Interacts with**: SFX and Music panels.
+- **Rationale**: Woosh is preferred for short foley; AudioLDM is reserved for long effects and soundscapes that should not be stitched from many short chunks.
 
 ## Contracts
 

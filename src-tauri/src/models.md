@@ -32,3 +32,4 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 
 ## Notes
 - `JobCompleteEvent` now carries duration and binding metadata so the UI can react to automatic row binding.
+- `SfxT2ARequest.backend` is optional for compatibility; absent means Woosh. AudioLDM callers should also set AudioLDM-specific guidance fields when needed.

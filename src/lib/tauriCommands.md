@@ -12,7 +12,7 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 ### Inference wrappers
 - **Does**: Submit TTS, SFX, and music generation jobs to Rust.
 - **Interacts with**: generation panels, Character Designer, `commands/inference.rs`.
-- **Rationale**: `submitTtsVoiceClone` includes `max_new_tokens` so clone generation is bounded like other TTS modes.
+- **Rationale**: Wrapper request types mirror Rust exactly, including SFX backend selection for Woosh short foley vs AudioLDM long soundscapes.
 
 ### Sidecar and audio wrappers
 - **Does**: Read/write sidecars and call audio utility/render commands.

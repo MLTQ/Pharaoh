@@ -550,8 +550,15 @@ pub async fn submit_sfx_t2a(
         .ok_or_else(|| Error::Other("missing job_id".into()))?
         .to_string();
 
+    let backend = params.backend.as_deref().unwrap_or("woosh");
+    let is_audioldm = backend.eq_ignore_ascii_case("audioldm")
+        || params.model_variant.to_lowercase().starts_with("audioldm");
     let meta = SidecarMeta {
-        model: format!("woosh-{}", params.model_variant.to_lowercase()),
+        model: if is_audioldm {
+            format!("audioldm-{}", params.model_variant.to_lowercase())
+        } else {
+            format!("woosh-{}", params.model_variant.to_lowercase())
+        },
         model_variant: Some(params.model_variant.clone()),
         prompt: params.prompt.clone(),
         instruct: None,
@@ -562,7 +569,7 @@ pub async fn submit_sfx_t2a(
         top_p: None,
         duration_target_ms: Some((params.duration_seconds * 1000.0) as u64),
         duration_actual_ms: None,
-        sample_rate: 48000,
+        sample_rate: if is_audioldm { 16000 } else { 48000 },
         generated_at: Utc::now(),
         parent: None,
         take_index: 1,

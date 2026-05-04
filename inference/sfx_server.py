@@ -1,6 +1,7 @@
 """
 Pharaoh SFX Server — port 18002
-Wraps Woosh (Sony AI). Requires: ~/Code/Woosh uv venv with woosh package.
+Wraps Woosh (Sony AI) plus optional AudioLDM long-form generation.
+Requires: ~/Code/Woosh uv venv with woosh package.
 
 Model directory: PHARAOH_WOOSH_DIR (default ~/Code/Woosh)
 """
@@ -8,6 +9,7 @@ import asyncio
 import logging
 import os
 from pathlib import Path
+from typing import Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -21,8 +23,10 @@ log = logging.getLogger(__name__)
 PORT          = int(os.environ.get("PHARAOH_SFX_PORT",    18002))
 MODEL_VARIANT = os.environ.get("PHARAOH_SFX_VARIANT",  "Woosh-DFlow")
 WOOSH_DIR   = Path(os.environ.get("PHARAOH_WOOSH_DIR",  "")).expanduser()
+AUDIO_LDM_MODEL = os.environ.get("PHARAOH_AUDIOLDM_MODEL", "cvssp/audioldm-s-full-v2")
 
 SAMPLE_RATE   = 48000
+AUDIO_LDM_SAMPLE_RATE = 16000
 LATENT_CHANS  = 128
 FRAMES_PER_S  = 100.2   # empirical: 501 latent frames ≈ 5 s
 
@@ -36,6 +40,10 @@ _model_loaded = False
 _ldm    = None   # FlowMapFromPretrained instance
 _device = None   # "cuda" | "mps" | "cpu"
 _load_lock = asyncio.Lock()  # serialize load attempts; auto-load on first generate
+_audioldm_pipe = None
+_audioldm_model_id = None
+_audioldm_device = None
+_audioldm_load_lock = asyncio.Lock()
 
 OOM_MARKER = "SFX_OOM"  # FE matches this prefix to surface a memory toast
 
@@ -134,8 +142,12 @@ class T2AParams(BaseModel):
     prompt: str
     duration_seconds: float = 3.0
     model_variant: str = "Woosh-DFlow"
+    backend: str = "woosh"
     steps: int = 4
     seed: int = 0
+    guidance_scale: float = 2.5
+    negative_prompt: str = ""
+    num_waveforms_per_prompt: int = 1
     output_path: str
 
 
@@ -148,9 +160,97 @@ class V2AParams(BaseModel):
     output_path: str
 
 
+class LoadParams(BaseModel):
+    variant: Optional[str] = None
+
+
 # ── Background workers ───────────────────────────────────────────────────────
 
+def _is_audioldm_request(params: dict) -> bool:
+    backend = str(params.get("backend", "")).lower()
+    variant = str(params.get("model_variant", "")).lower()
+    return backend == "audioldm" or variant.startswith("audioldm")
+
+
+def _audioldm_status() -> dict:
+    try:
+        import diffusers  # noqa: F401
+        import scipy  # noqa: F401
+        import transformers  # noqa: F401
+    except Exception as exc:
+        return {
+            "ok": False,
+            "reason": (
+                "AudioLDM optional deps missing. Run: "
+                "PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh "
+                f"({exc})"
+            ),
+        }
+    return {"ok": True, "reason": ""}
+
+
+def _audioldm_model_id(params: dict | None = None) -> str:
+    raw = str((params or {}).get("model_variant") or AUDIO_LDM_MODEL)
+    aliases = {
+        "AudioLDM-S-Full-V2": "cvssp/audioldm-s-full-v2",
+        "audioldm-s-full-v2": "cvssp/audioldm-s-full-v2",
+        "AudioLDM-M-Full": "cvssp/audioldm-m-full",
+        "audioldm-m-full": "cvssp/audioldm-m-full",
+        "AudioLDM-L-Full": "cvssp/audioldm-l-full",
+        "audioldm-l-full": "cvssp/audioldm-l-full",
+    }
+    return aliases.get(raw, raw)
+
+
+def _load_audioldm_model(model_id: str) -> None:
+    global _audioldm_pipe, _audioldm_model_id, _audioldm_device
+    import torch
+    from diffusers import AudioLDMPipeline
+
+    _audioldm_device = _resolve_device()
+    dtype = torch.float16 if _audioldm_device == "cuda" else torch.float32
+    log.info(f"Loading AudioLDM model {model_id} on {_audioldm_device}")
+    pipe = AudioLDMPipeline.from_pretrained(model_id, torch_dtype=dtype)
+    if _audioldm_device == "cuda":
+        pipe.enable_model_cpu_offload()
+    else:
+        pipe = pipe.to(_audioldm_device)
+    _audioldm_pipe = pipe
+    _audioldm_model_id = model_id
+    log.info("AudioLDM model loaded.")
+
+
+async def _ensure_audioldm_model(params: dict | None = None) -> str | None:
+    model_id = _audioldm_model_id(params)
+    if _audioldm_pipe is not None and _audioldm_model_id == model_id:
+        return None
+
+    status = _audioldm_status()
+    if not status["ok"]:
+        return status["reason"]
+
+    async with _audioldm_load_lock:
+        if _audioldm_pipe is not None and _audioldm_model_id == model_id:
+            return None
+        try:
+            loop = asyncio.get_event_loop()
+            await loop.run_in_executor(None, lambda: _load_audioldm_model(model_id))
+        except Exception as exc:
+            log.exception("Failed to auto-load AudioLDM model")
+            if _is_memory_error(exc):
+                return f"{OOM_MARKER}: Not enough memory to load AudioLDM. Free a model in the model manager and retry."
+            return f"AudioLDM auto-load failed: {exc}"
+    return None
+
+
 async def _run_sfx(job_id: str, params: dict) -> None:
+    if _is_audioldm_request(params):
+        await _run_audioldm_sfx(job_id, params)
+    else:
+        await _run_woosh_sfx(job_id, params)
+
+
+async def _run_woosh_sfx(job_id: str, params: dict) -> None:
     global _ldm, _device
 
     jobs.update(job_id, status="running", progress=0.02)
@@ -233,6 +333,63 @@ async def _run_sfx(job_id: str, params: dict) -> None:
         jobs.update(job_id, status="failed", error=str(exc))
 
 
+async def _run_audioldm_sfx(job_id: str, params: dict) -> None:
+    jobs.update(job_id, status="running", progress=0.02)
+
+    err = await _ensure_audioldm_model(params)
+    if err:
+        log.warning(f"Job {job_id} failed: {err}")
+        jobs.update(job_id, status="failed", error=err)
+        return
+
+    jobs.update(job_id, progress=0.08)
+    try:
+        import numpy as np
+        import scipy.io.wavfile
+        import torch
+
+        prompt = params["prompt"]
+        duration = float(params.get("duration_seconds", 30.0))
+        steps = int(params.get("steps", 50))
+        seed = int(params.get("seed", 0))
+        guidance_scale = float(params.get("guidance_scale", 2.5))
+        negative_prompt = str(params.get("negative_prompt", ""))
+        waveforms = int(params.get("num_waveforms_per_prompt", 1))
+        out_path = params["output_path"]
+
+        generator_device = "cuda" if _audioldm_device == "cuda" else "cpu"
+        generator = torch.Generator(generator_device).manual_seed(seed)
+        loop = asyncio.get_event_loop()
+
+        def _infer():
+            with torch.inference_mode():
+                return _audioldm_pipe(
+                    prompt,
+                    audio_length_in_s=duration,
+                    num_inference_steps=steps,
+                    guidance_scale=guidance_scale,
+                    negative_prompt=negative_prompt or None,
+                    num_waveforms_per_prompt=max(1, waveforms),
+                    generator=generator,
+                ).audios[0]
+
+        audio = await loop.run_in_executor(None, _infer)
+        jobs.update(job_id, progress=0.9)
+
+        audio = np.asarray(audio, dtype=np.float32)
+        peak = max(float(np.max(np.abs(audio))), 1.0)
+        audio = audio / peak
+        pcm = (np.clip(audio, -1.0, 1.0) * 32767.0).astype(np.int16)
+
+        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        scipy.io.wavfile.write(out_path, AUDIO_LDM_SAMPLE_RATE, pcm)
+        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
+
+    except Exception as exc:
+        log.exception("AudioLDM inference failed")
+        jobs.update(job_id, status="failed", error=str(exc))
+
+
 def _submit(params: dict) -> dict:
     job_id = new_job_id()
     jobs.create(job_id, "sfx", params.get("_endpoint", "t2a"), params)
@@ -245,15 +402,20 @@ def _submit(params: dict) -> dict:
 @app.get("/health")
 async def health() -> dict:
     ws = _woosh_status()
+    als = _audioldm_status()
     return {
         "status": "ok",
-        "model_loaded": _model_loaded,
+        "model_loaded": _model_loaded or _audioldm_pipe is not None,
         "model_variant": MODEL_VARIANT,
         "vram_mb": 2048 if _model_loaded else 0,
         "stub": False,
         "woosh_dir": str(WOOSH_DIR),
         "woosh_ready": ws["ok"],
         "woosh_error": ws["reason"],
+        "audioldm_ready": als["ok"],
+        "audioldm_error": als["reason"],
+        "audioldm_model": _audioldm_model_id or AUDIO_LDM_MODEL,
+        "audioldm_loaded": _audioldm_pipe is not None,
     }
 
 
@@ -276,8 +438,15 @@ async def get_job(job_id: str) -> dict:
 
 
 @app.post("/load")
-async def load() -> dict:
+async def load(params: Optional[LoadParams] = None) -> dict:
     global _model_loaded
+    variant = params.variant if params else None
+    if variant and variant.lower().startswith("audioldm"):
+        err = await _ensure_audioldm_model({"model_variant": variant})
+        if err:
+            return {"status": "error", "error": err}
+        return {"status": "loaded", "backend": "audioldm", "model": _audioldm_model_id}
+
     ws = _woosh_status()
     if not ws["ok"]:
         return {"status": "error", "error": ws["reason"]}
@@ -295,9 +464,11 @@ async def load() -> dict:
 
 @app.post("/unload")
 async def unload() -> dict:
-    global _model_loaded, _ldm
+    global _model_loaded, _ldm, _audioldm_pipe, _audioldm_model_id
     _model_loaded = False
     _ldm = None
+    _audioldm_pipe = None
+    _audioldm_model_id = None
     return {"status": "unloaded"}
 
 
