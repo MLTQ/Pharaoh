@@ -14,7 +14,7 @@ use crate::commands::inference::finalize_generation_output;
 use crate::error::{Error, Result};
 use crate::models::{
     LlmConfig, MusicText2MusicRequest, Project, ScriptRow, SfxT2ARequest, SidecarMeta, Storyboard,
-    TtsCustomVoiceRequest, TtsVoiceCloneRequest, TtsVoiceDesignRequest,
+    TtsCustomVoiceRequest,
 };
 
 pub async fn run(args: Vec<String>) -> Result<()> {
@@ -300,161 +300,56 @@ async fn generate_dialogue(
     );
     let output_path = asset_output_path(projects_dir, project_id, scene_slug, &format!("{stem}_{}", Utc::now().timestamp_millis()));
 
-    let (job_id, meta) = match character
-        .map(|character| character.voice_assignment.model.as_str())
-        .unwrap_or("CustomVoice")
-    {
-        "Clone" if character
-            .and_then(|character| character.voice_assignment.ref_audio_path.as_ref())
-            .is_some() =>
-        {
-            let character = character.expect("character checked above");
-            let params = TtsVoiceCloneRequest {
-                text: row.prompt.clone(),
-                ref_audio_path: character
-                    .voice_assignment
-                    .ref_audio_path
-                    .clone()
-                    .unwrap_or_default(),
-                ref_transcript: character
-                    .voice_assignment
-                    .ref_transcript
-                    .clone()
-                    .unwrap_or_default(),
-                language: "en".into(),
-                icl_mode: false,
-                seed: random_seed(),
-                temperature: 0.7,
-                top_p: 0.9,
-                max_new_tokens: 1024,
-                output_path: output_path.clone(),
-            };
-            let job_id = submit_job(
-                &http,
-                format!("{}/generate/voice_clone", config.tts_url),
-                &params,
-                "TTS",
-            )
-            .await?;
-            let meta = SidecarMeta {
-                model: "qwen3-tts-clone".into(),
-                model_variant: Some("1.7B".into()),
-                prompt: params.text.clone(),
-                instruct: None,
-                speaker: None,
-                language: Some(params.language.clone()),
-                seed: params.seed,
-                temperature: Some(params.temperature),
-                top_p: Some(params.top_p),
-                duration_target_ms: None,
-                duration_actual_ms: None,
-                sample_rate: 24000,
-                generated_at: Utc::now(),
-                parent: Some(params.ref_audio_path.clone()),
-                take_index: 1,
-                qa_status: "unreviewed".into(),
-                qa_notes: String::new(),
-            };
-            (job_id, meta)
-        }
-        "VoiceDesign" => {
-            let character = character;
-            let params = TtsVoiceDesignRequest {
-                text: row.prompt.clone(),
-                voice_description: character
-                    .and_then(|character| character.voice_assignment.instruct_default.clone())
-                    .filter(|value| !value.trim().is_empty())
-                    .or_else(|| (!row.instruct.trim().is_empty()).then_some(row.instruct.clone()))
-                    .unwrap_or_else(|| "neutral voice".into()),
-                language: "en".into(),
-                seed: random_seed(),
-                temperature: 0.7,
-                top_p: 0.9,
-                max_new_tokens: 2048,
-                output_path: output_path.clone(),
-            };
-            let job_id = submit_job(
-                &http,
-                format!("{}/generate/voice_design", config.tts_url),
-                &params,
-                "TTS",
-            )
-            .await?;
-            let meta = SidecarMeta {
-                model: "qwen3-tts-voicedesign".into(),
-                model_variant: Some("1.7B".into()),
-                prompt: params.text.clone(),
-                instruct: Some(params.voice_description.clone()),
-                speaker: None,
-                language: Some(params.language.clone()),
-                seed: params.seed,
-                temperature: Some(params.temperature),
-                top_p: Some(params.top_p),
-                duration_target_ms: None,
-                duration_actual_ms: None,
-                sample_rate: 24000,
-                generated_at: Utc::now(),
-                parent: None,
-                take_index: 1,
-                qa_status: "unreviewed".into(),
-                qa_notes: String::new(),
-            };
-            (job_id, meta)
-        }
-        _ => {
-            let speaker = character
-                .and_then(|character| character.voice_assignment.speaker.clone())
-                .filter(|value| !value.trim().is_empty())
-                .unwrap_or_else(|| "Vivian".into());
-            let instruct = (!row.instruct.trim().is_empty())
-                .then_some(row.instruct.clone())
-                .or_else(|| {
-                    character.and_then(|character| character.voice_assignment.instruct_default.clone())
-                })
-                .unwrap_or_default();
-            let params = TtsCustomVoiceRequest {
-                text: row.prompt.clone(),
-                speaker: speaker.clone(),
-                language: "en".into(),
-                instruct: instruct.clone(),
-                seed: random_seed(),
-                temperature: 0.7,
-                top_p: 0.9,
-                max_new_tokens: 2048,
-                output_path: output_path.clone(),
-            };
-            let job_id = submit_job(
-                &http,
-                format!("{}/generate/custom_voice", config.tts_url),
-                &params,
-                "TTS",
-            )
-            .await?;
-            let meta = SidecarMeta {
-                model: "qwen3-tts-customvoice".into(),
-                model_variant: Some("1.7B".into()),
-                prompt: params.text.clone(),
-                instruct: if params.instruct.is_empty() {
-                    None
-                } else {
-                    Some(params.instruct.clone())
-                },
-                speaker: Some(params.speaker.clone()),
-                language: Some(params.language.clone()),
-                seed: params.seed,
-                temperature: Some(params.temperature),
-                top_p: Some(params.top_p),
-                duration_target_ms: None,
-                duration_actual_ms: None,
-                sample_rate: 24000,
-                generated_at: Utc::now(),
-                parent: None,
-                take_index: 1,
-                qa_status: "unreviewed".into(),
-                qa_notes: String::new(),
-            };
-            (job_id, meta)
-        }
+    let speaker = character
+        .and_then(|character| character.voice_assignment.speaker.clone())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Vivian".into());
+    let instruct = (!row.instruct.trim().is_empty())
+        .then_some(row.instruct.clone())
+        .or_else(|| {
+            character.and_then(|character| character.voice_assignment.instruct_default.clone())
+        })
+        .unwrap_or_default();
+    let params = TtsCustomVoiceRequest {
+        text: row.prompt.clone(),
+        speaker: speaker.clone(),
+        language: "en".into(),
+        instruct: instruct.clone(),
+        seed: random_seed(),
+        temperature: 0.7,
+        top_p: 0.9,
+        max_new_tokens: 2048,
+        output_path: output_path.clone(),
+    };
+    let job_id = submit_job(
+        &http,
+        format!("{}/generate/custom_voice", config.tts_url),
+        &params,
+        "TTS",
+    )
+    .await?;
+    let meta = SidecarMeta {
+        model: "qwen3-tts-customvoice".into(),
+        model_variant: Some("1.7B".into()),
+        prompt: params.text.clone(),
+        instruct: if params.instruct.is_empty() {
+            None
+        } else {
+            Some(params.instruct.clone())
+        },
+        speaker: Some(params.speaker.clone()),
+        language: Some(params.language.clone()),
+        seed: params.seed,
+        temperature: Some(params.temperature),
+        top_p: Some(params.top_p),
+        duration_target_ms: None,
+        duration_actual_ms: None,
+        sample_rate: 24000,
+        generated_at: Utc::now(),
+        parent: None,
+        take_index: 1,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
     };
 
     let status = poll_job(&http, format!("{}/jobs", config.tts_url), &job_id, "TTS").await?;

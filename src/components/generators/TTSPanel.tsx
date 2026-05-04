@@ -1,20 +1,13 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { Icon, Wave } from "../shared/atoms";
 import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
-import { RichDirector, SceneRouter } from "./RichDirector";
+import { SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import type { MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
-
-const MODEL_BADGE: Record<string, string> = {
-  Clone: "clone",
-  VoiceDesign: "design",
-  CustomVoice: "custom",
-  FineTuned: "fine-tuned",
-};
 
 interface TTSPanelProps {
   scenes: MockScene[];
@@ -26,7 +19,8 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const { jobs, setQaStatus } = useJobStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
-  const [value, setValue]         = useState("");
+  const [line, setLine]           = useState("");
+  const [direction, setDirection] = useState(characters[0]?.voice_assignment.instruct_default ?? "");
   const [pace, setPace]           = useState(0.92);
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError]   = useState<string | null>(null);
@@ -49,20 +43,34 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   );
 
   const selectedChar = characters.find((c) => c.id === speakerId) ?? characters[0];
+  const selectedVoice = selectedChar?.voice_assignment;
+  const customSpeaker = selectedVoice?.speaker || "Vivian";
+
+  useEffect(() => {
+    if (speakerId || !characters[0]) return;
+    setSpeakerId(characters[0].id);
+    setDirection(characters[0].voice_assignment.instruct_default ?? "");
+  }, [characters, speakerId]);
 
   const handleSelectSpeaker = (id: string) => {
     setSpeakerId(id);
+    const next = characters.find((c) => c.id === id);
+    setDirection(next?.voice_assignment.instruct_default ?? "");
   };
 
   const handleGenerate = async () => {
+    if (!line.trim()) {
+      setGenError("Add a line first.");
+      return;
+    }
     setGenerating(true);
     setGenError(null);
     try {
       await submitTts({
-        text: value,
-        speaker: speakerId,
+        text: line.trim(),
+        speaker: customSpeaker,
         character: selectedChar,
-        instruct: selectedChar?.voice_assignment.instruct_default ?? "",
+        instruct: direction.trim(),
         seed: Math.floor(Math.random() * 99999),
         temperature: pace,
       });
@@ -73,7 +81,6 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
     }
   };
 
-  const va = selectedChar?.voice_assignment;
   const charColor = selectedChar ? `oklch(0.7 0.12 ${CHAR_HUE(selectedChar.id)})` : "var(--tts)";
 
   return (
@@ -82,18 +89,16 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         <div className="panel-header">
           <div className="panel-header-left">
             <span className="eyebrow tts">
-              qwen3-tts ·{" "}
-              {va ? MODEL_BADGE[va.model] : "custom"}
+              qwen3-tts · customvoice · {customSpeaker}
             </span>
             <span className="ttl">Voice / Dialogue</span>
             <span className="desc">
-              Type the line as you want it spoken. Use inline bracket directives to shape delivery —
-              e.g. <code style={{ fontFamily: "var(--font-mono)", color: "var(--tts)" }}>[sad] [whisper]</code>
-              {" "}before a phrase. Free-form descriptors outside brackets get spoken literally.
+              Write the spoken line separately from the performance direction. Direction is sent as
+              Qwen CustomVoice instruction text, not spoken dialogue.
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
-            <button className="btn btn-tts" onClick={handleGenerate} disabled={generating}>
+            <button className="btn btn-tts" onClick={handleGenerate} disabled={generating || !line.trim()}>
               <Icon name="sparkle" style={{ width: 14, height: 14 }} />
               {generating ? "Submitting…" : "Generate take"}
             </button>
@@ -112,7 +117,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
             const hue = CHAR_HUE(c.id);
             const color = `oklch(0.7 0.12 ${hue})`;
             const va = c.voice_assignment;
-            const hasRef = va.model === "Clone" && !!va.ref_audio_path;
+            const assignedSpeaker = va.speaker || "Vivian";
             const instruct = va.instruct_default ?? "";
             return (
               <div
@@ -128,10 +133,10 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
                   {c.id}
                   <span style={{
                     fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.04em",
-                    color: hasRef ? "var(--st-rendered)" : active ? "var(--tts)" : "var(--fg-4)",
+                    color: active ? "var(--tts)" : "var(--fg-4)",
                     marginLeft: 2,
                   }}>
-                    {hasRef ? "clone ✓" : MODEL_BADGE[va.model]}
+                    {assignedSpeaker}
                   </span>
                 </span>
                 <span className="name">{c.name}</span>
@@ -146,8 +151,34 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           })}
         </div>
 
-        <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · rich text</div>
-        <RichDirector value={value} setValue={setValue} accent="var(--tts)" />
+        <div style={{ display: "grid", gridTemplateColumns: "minmax(0, 1.15fr) minmax(260px, 0.85fr)", gap: 12, marginTop: 20 }}>
+          <div className="field">
+            <div className="field-label">
+              <span>Line</span>
+              <span className="hint">{line.length} chars</span>
+            </div>
+            <textarea
+              className="textarea"
+              value={line}
+              onChange={(e) => setLine(e.target.value)}
+              placeholder="Type the words the character should speak."
+              style={{ minHeight: 148, fontSize: 13, lineHeight: 1.55 }}
+            />
+          </div>
+          <div className="field">
+            <div className="field-label">
+              <span>Direction</span>
+              <span className="hint">CustomVoice instruct</span>
+            </div>
+            <textarea
+              className="textarea"
+              value={direction}
+              onChange={(e) => setDirection(e.target.value)}
+              placeholder="Describe delivery, emotion, pacing, proximity, or accent."
+              style={{ minHeight: 148, fontSize: 12, lineHeight: 1.55 }}
+            />
+          </div>
+        </div>
 
         <div className="field-row" style={{ marginTop: 18 }}>
           <div className="field">
@@ -193,18 +224,18 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
                 {selectedChar.description}
               </div>
             )}
-            {va?.instruct_default && (
+            {selectedVoice?.instruct_default && (
               <div style={{ fontSize: 11.5, lineHeight: 1.6, color: "var(--fg-2)" }}>
-                {va.instruct_default}
+                {selectedVoice.instruct_default}
               </div>
             )}
-            {va?.model === "Clone" && (
+            {selectedVoice?.model === "Clone" && (
               <div style={{
                 marginTop: 8, fontFamily: "var(--font-mono)", fontSize: 9.5,
-                color: va.ref_audio_path ? "var(--st-rendered)" : "var(--fg-4)",
+                color: selectedVoice.ref_audio_path ? "var(--st-rendered)" : "var(--fg-4)",
                 letterSpacing: "0.06em",
               }}>
-                {va.ref_audio_path ? "✓ clone reference set" : "△ no reference audio — set one in Cast & Voices"}
+                clone reference kept for design; dialogue uses CustomVoice
               </div>
             )}
           </div>

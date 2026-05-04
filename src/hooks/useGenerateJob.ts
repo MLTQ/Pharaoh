@@ -3,8 +3,6 @@ import { useJobStore } from "../store/jobStore";
 import { useUiStore } from "../store/uiStore";
 import {
   submitTtsCustomVoice,
-  submitTtsVoiceDesign,
-  submitTtsVoiceClone,
   submitSfxT2a,
   submitMusicText2Music,
 } from "../lib/tauriCommands";
@@ -38,7 +36,7 @@ export function useGenerateJob() {
   async function submitTts(params: {
     text: string;
     speaker: string;
-    character?: Character;   // if provided, routes by voice_assignment.model
+    character?: Character;
     instruct?: string;
     seed?: number;
     temperature?: number;
@@ -48,56 +46,23 @@ export function useGenerateJob() {
     const ts = Date.now();
     const char = params.character;
     const stem = (char?.id ?? params.speaker).toLowerCase();
-    let jobId: string;
+    const speaker = params.speaker || char?.voice_assignment.speaker || "Vivian";
+    const instruct = params.instruct ?? char?.voice_assignment.instruct_default ?? "";
 
-    if (char?.voice_assignment.model === "Clone" && char.voice_assignment.ref_audio_path) {
-      jobId = await submitTtsVoiceClone({
-        projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
-        params: {
-          text: params.text,
-          ref_audio_path: char.voice_assignment.ref_audio_path,
-          ref_transcript: char.voice_assignment.ref_transcript ?? "",
-          language: "en",
-          icl_mode: false,
-          seed: params.seed ?? Math.floor(Math.random() * 99999),
-          temperature: params.temperature ?? 0.7,
-          top_p: 0.9,
-          max_new_tokens: 1024,
-          output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_clone_${ts}.wav`),
-        },
-      });
-    } else if (char?.voice_assignment.model === "VoiceDesign") {
-      const voiceDesc = char.voice_assignment.instruct_default || params.instruct || "neutral voice";
-      jobId = await submitTtsVoiceDesign({
-        projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
-        params: {
-          text: params.text,
-          voice_description: voiceDesc,
-          language: "en",
-          seed: params.seed ?? Math.floor(Math.random() * 99999),
-          temperature: params.temperature ?? 0.7,
-          top_p: 0.9,
-          max_new_tokens: 2048,
-          output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_design_${ts}.wav`),
-        },
-      });
-    } else {
-      // CustomVoice or no character — fall back to custom voice API
-      jobId = await submitTtsCustomVoice({
-        projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
-        params: {
-          text: params.text,
-          speaker: params.speaker,
-          language: "en",
-          instruct: params.instruct ?? char?.voice_assignment.instruct_default ?? "",
-          seed: params.seed ?? Math.floor(Math.random() * 99999),
-          temperature: params.temperature ?? 0.7,
-          top_p: 0.9,
-          max_new_tokens: 2048,
-          output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
-        },
-      });
-    }
+    const jobId = await submitTtsCustomVoice({
+      projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
+      params: {
+        text: params.text,
+        speaker,
+        language: "en",
+        instruct,
+        seed: params.seed ?? Math.floor(Math.random() * 99999),
+        temperature: params.temperature ?? 0.7,
+        top_p: 0.9,
+        max_new_tokens: 2048,
+        output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
+      },
+    });
 
     const job: Job = {
       id: jobId,

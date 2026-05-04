@@ -10,9 +10,9 @@ Shared frontend hook for submitting scene-level TTS, SFX, and music jobs. It res
 - **Interacts with**: `projectStore.ts`.
 
 ### `submitTts`
-- **Does**: Routes dialogue generation through clone, voice-design, or custom-voice TTS based on character assignment.
+- **Does**: Submits production dialogue through Qwen CustomVoice, passing performance direction as `instruct`.
 - **Interacts with**: `tauriCommands.ts`, `jobStore.ts`.
-- **Rationale**: Clone requests include a bounded `max_new_tokens` value to prevent long-running open-ended generation.
+- **Rationale**: Scene dialogue needs direction control, which the Base/clone model path does not provide. Character Designer remains responsible for clone/design probe jobs.
 
 ### `submitSfx`, `submitMusic`
 - **Does**: Submit SFX and music generation jobs with model-specific defaults.
