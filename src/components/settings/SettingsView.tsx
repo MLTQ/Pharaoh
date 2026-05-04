@@ -64,7 +64,7 @@ const MODELS = [
     description: "Music generation — lyrics + caption · 48 kHz",
     port: 18003,
     variants: null as null,
-    install: "conda activate pharoah && pip install git+https://github.com/ace-step/ACE-Step.git",
+    install: "conda activate pharoah && pip install git+https://github.com/ace-step/ACE-Step.git && pip install torchcodec",
   },
 ];
 

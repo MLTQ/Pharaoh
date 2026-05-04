@@ -10,6 +10,8 @@ ACE-Step/ACE-Step-v1-3.5B).
 Install (the PyPI sdist is broken, so install from git):
   conda activate pharoah
   pip install git+https://github.com/ace-step/ACE-Step.git
+  pip install torchcodec   # ACE-Step deps don't pull this in but newer
+                            # torchaudio.save() dispatches through it
 """
 import asyncio
 import logging
