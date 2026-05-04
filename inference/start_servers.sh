@@ -11,9 +11,12 @@
 #   SFX:   cd ~/Code/Woosh && uv sync      (env: PHARAOH_WOOSH_DIR)
 #   Music: conda activate pharoah \
 #            && pip install git+https://github.com/ace-step/ACE-Step.git \
-#            && pip install torchcodec
+#            && pip install torchcodec \
+#            && pip install 'transformers>=4.51,<4.55'
 #          (PyPI ace-step sdist is broken — install from git;
-#           newer torchaudio.save() dispatches through torchcodec)
+#           newer torchaudio.save() dispatches through torchcodec;
+#           ace-step pins transformers==4.50 which is too old for
+#           qwen-tts — bump it back up after installing.)
 #          models in ~/pharaoh-models/music (env: PHARAOH_MUSIC_MODEL_DIR)
 #          hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music
 set -e
