@@ -23,7 +23,14 @@ log = logging.getLogger(__name__)
 PORT          = int(os.environ.get("PHARAOH_SFX_PORT",    18002))
 MODEL_VARIANT = os.environ.get("PHARAOH_SFX_VARIANT",  "Woosh-DFlow")
 WOOSH_DIR   = Path(os.environ.get("PHARAOH_WOOSH_DIR",  "")).expanduser()
-AUDIO_LDM_MODEL = os.environ.get("PHARAOH_AUDIOLDM_MODEL", "cvssp/audioldm-s-full-v2")
+AUDIO_LDM_MODEL_ID = "cvssp/audioldm-s-full-v2"
+AUDIO_LDM_LOCAL_DIR = Path(
+    os.environ.get("PHARAOH_AUDIOLDM_MODEL_DIR", "~/pharaoh-models/sfx/audioldm-s-full-v2")
+).expanduser()
+AUDIO_LDM_MODEL = os.environ.get(
+    "PHARAOH_AUDIOLDM_MODEL",
+    str(AUDIO_LDM_LOCAL_DIR) if AUDIO_LDM_LOCAL_DIR.exists() else AUDIO_LDM_MODEL_ID,
+)
 
 SAMPLE_RATE   = 48000
 AUDIO_LDM_SAMPLE_RATE = 16000
@@ -192,8 +199,8 @@ def _audioldm_status() -> dict:
 def _audioldm_model_id(params: dict | None = None) -> str:
     raw = str((params or {}).get("model_variant") or AUDIO_LDM_MODEL)
     aliases = {
-        "AudioLDM-S-Full-V2": "cvssp/audioldm-s-full-v2",
-        "audioldm-s-full-v2": "cvssp/audioldm-s-full-v2",
+        "AudioLDM-S-Full-V2": AUDIO_LDM_MODEL,
+        "audioldm-s-full-v2": AUDIO_LDM_MODEL,
         "AudioLDM-M-Full": "cvssp/audioldm-m-full",
         "audioldm-m-full": "cvssp/audioldm-m-full",
         "AudioLDM-L-Full": "cvssp/audioldm-l-full",
@@ -415,6 +422,7 @@ async def health() -> dict:
         "audioldm_ready": als["ok"],
         "audioldm_error": als["reason"],
         "audioldm_model": _audioldm_model_id or AUDIO_LDM_MODEL,
+        "audioldm_local_dir": str(AUDIO_LDM_LOCAL_DIR),
         "audioldm_loaded": _audioldm_pipe is not None,
     }
 

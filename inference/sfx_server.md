@@ -12,7 +12,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 
 ### AudioLDM backend
 - **Does**: Loads `diffusers.AudioLDMPipeline` when a request uses `backend="audioldm"` or an AudioLDM model variant, then generates WAVs at 16 kHz for requested durations.
-- **Interacts with**: `requirements-sfx-audioldm.txt`, Hugging Face cache, `/generate/t2a`.
+- **Interacts with**: `requirements-sfx-audioldm.txt`, `~/pharaoh-models/sfx/audioldm-s-full-v2`, Hugging Face cache, `/generate/t2a`.
 - **Rationale**: AudioLDM v1 is the practical long-form ambience option. It supports `audio_length_in_s` and the upstream demo explicitly includes long samples, unlike AudioLDM2's own TODO for >10s generation.
 
 ### Health and lifecycle
@@ -29,4 +29,5 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
+- `AudioLDM-S-Full-V2` resolves to `PHARAOH_AUDIOLDM_MODEL`, otherwise `PHARAOH_AUDIOLDM_MODEL_DIR`, otherwise the Hugging Face model id.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

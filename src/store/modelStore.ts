@@ -13,6 +13,7 @@ export interface ServerHealth {
   audioldm_ready?: boolean;
   audioldm_error?: string;
   audioldm_model?: string;
+  audioldm_local_dir?: string;
   audioldm_loaded?: boolean;
 }
 

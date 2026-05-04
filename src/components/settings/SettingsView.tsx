@@ -52,8 +52,8 @@ const MODELS = [
   },
   {
     kind: "sfx" as const,
-    label: "Woosh (Sony Research)",
-    description: "Sound design — fixed ~5s clips · 48 kHz",
+    label: "Woosh + AudioLDM",
+    description: "Sound design — short foley + long soundscapes",
     port: 18002,
     variants: null as null,
     install: null as null, // determined at runtime by hardware detection
@@ -294,6 +294,39 @@ function WooshCheckpoints() {
   );
 }
 
+function SfxDownloads() {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div>
+        <div style={{
+          fontFamily: "var(--font-mono)", fontSize: 10.5,
+          color: "var(--sfx)", marginBottom: 6,
+        }}>
+          Woosh · short foley checkpoints
+        </div>
+        <WooshCheckpoints />
+      </div>
+
+      <div>
+        <div style={{
+          fontFamily: "var(--font-mono)", fontSize: 10.5,
+          color: "var(--sfx)", marginBottom: 6,
+        }}>
+          AudioLDM · long soundscapes
+        </div>
+        <div style={{
+          fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6,
+          marginBottom: 6,
+        }}>
+          AudioLDM is optional. Downloading it here avoids first-use Hugging Face cache
+          surprises and matches the SFX server default local directory.
+        </div>
+        <CopyableCommand command="hf download cvssp/audioldm-s-full-v2 --local-dir ~/pharaoh-models/sfx/audioldm-s-full-v2" />
+      </div>
+    </div>
+  );
+}
+
 // ── Woosh one-click setup ─────────────────────────────────────────────────────
 
 interface SetupProgress {
@@ -524,7 +557,14 @@ export const SettingsView: React.FC = () => {
     }
   };
 
-  const sfxHealth = healthMap.sfx as (typeof healthMap.sfx & { woosh_ready?: boolean; woosh_error?: string; woosh_dir?: string }) | null;
+  const sfxHealth = healthMap.sfx as (typeof healthMap.sfx & {
+    woosh_ready?: boolean;
+    woosh_error?: string;
+    woosh_dir?: string;
+    audioldm_ready?: boolean;
+    audioldm_error?: string;
+    audioldm_local_dir?: string;
+  }) | null;
 
   return (
     <div className="panel-view" style={{ overflowY: "auto" }}>
@@ -672,6 +712,14 @@ export const SettingsView: React.FC = () => {
                         ✓ checkpoints found
                       </div>
                     )}
+                    {sfxHealth && !sfxHealth.audioldm_ready && sfxHealth.audioldm_error && (
+                      <div style={{
+                        marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 10,
+                        color: "var(--fg-4)", lineHeight: 1.5,
+                      }}>
+                        AudioLDM optional deps: {sfxHealth.audioldm_error}
+                      </div>
+                    )}
                   </div>
                 )}
 
@@ -730,7 +778,7 @@ export const SettingsView: React.FC = () => {
                       ))}
                     </div>
                   ) : m.kind === "sfx" ? (
-                    <WooshCheckpoints />
+                    <SfxDownloads />
                   ) : (
                     <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
                   )}
@@ -740,7 +788,15 @@ export const SettingsView: React.FC = () => {
                 <div>
                   <Label>Install</Label>
                   {m.kind === "sfx" ? (
-                    <WooshInstall hw={hw} />
+                    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                      <WooshInstall hw={hw} />
+                      <div>
+                        <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+                          Optional AudioLDM dependencies for long soundscapes
+                        </div>
+                        <CopyableCommand command="PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh" />
+                      </div>
+                    </div>
                   ) : (
                     <CopyableCommand command={m.install!} />
                   )}
