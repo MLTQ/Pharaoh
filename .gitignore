@@ -6,3 +6,7 @@ src-tauri/gen/
 .env
 
 .DS_Store
+
+inference/__pycache__/
+
+.claude/worktrees/
