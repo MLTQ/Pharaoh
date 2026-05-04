@@ -61,6 +61,7 @@ export const CharacterDesignerView: React.FC = () => {
   const [instruct, setInstruct]           = useState(char?.voice_assignment.instruct_default ?? "");
   const [refTranscript, setRefTranscript] = useState(char?.voice_assignment.ref_transcript ?? "");
   const [generating, setGenerating]       = useState(false);
+  const [submitting, setSubmitting]       = useState<DesignTab | null>(null);
   const [genError, setGenError]           = useState<string | null>(null);
   const [addingChar, setAddingChar]       = useState(false);
   const [newName, setNewName]             = useState("");
@@ -94,8 +95,8 @@ export const CharacterDesignerView: React.FC = () => {
     [jobs, slug]
   );
 
-  const runningDesign = jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
-  const runningClone  = jobs.some((j) => j.scene_slug === slug && j.row_index === CLONE_ROW  && (j.status === "running" || j.status === "pending"));
+  const runningDesign = submitting === "design" || jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
+  const runningClone  = submitting === "clone"  || jobs.some((j) => j.scene_slug === slug && j.row_index === CLONE_ROW  && (j.status === "running" || j.status === "pending"));
 
   // ── Helpers ──
 
@@ -132,7 +133,7 @@ export const CharacterDesignerView: React.FC = () => {
       if (!voiceDesc.trim()) setGenError("Add a voice description first.");
       return;
     }
-    setGenerating(true); setGenError(null);
+    setGenerating(true); setSubmitting("design"); setGenError(null);
     try {
       const jobId = await submitTtsVoiceDesign({
         projectId: realProjectId ?? "demo",
@@ -149,6 +150,7 @@ export const CharacterDesignerView: React.FC = () => {
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
     } finally {
+      setSubmitting(null);
       setGenerating(false);
     }
   };
@@ -157,7 +159,7 @@ export const CharacterDesignerView: React.FC = () => {
     if (!char || generating) return;
     const refPath = char.voice_assignment.ref_audio_path;
     if (!refPath) { setGenError("Set a reference audio first."); return; }
-    setGenerating(true); setGenError(null);
+    setGenerating(true); setSubmitting("clone"); setGenError(null);
     try {
       const jobId = await submitTtsVoiceClone({
         projectId: realProjectId ?? "demo",
@@ -169,6 +171,7 @@ export const CharacterDesignerView: React.FC = () => {
           language: "en", icl_mode: false,
           seed: Math.floor(Math.random() * 9999),
           temperature: 0.7, top_p: 0.9,
+          max_new_tokens: 1024,
           output_path: outputPath("clone"),
         },
       });
@@ -176,6 +179,7 @@ export const CharacterDesignerView: React.FC = () => {
     } catch (e: unknown) {
       setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
     } finally {
+      setSubmitting(null);
       setGenerating(false);
     }
   };

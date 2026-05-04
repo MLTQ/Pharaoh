@@ -240,10 +240,23 @@ class VoiceCloneParams(BaseModel):
     seed: int = 0
     temperature: float = 0.7
     top_p: float = 0.9
+    max_new_tokens: int = 1024
     output_path: str
 
 
 # ── Background worker ────────────────────────────────────────────────────────
+
+async def _run_blocking_generation(job_id: str, fn, start: float = 0.15, end: float = 0.85):
+    """Run a blocking Qwen generation call and emit coarse progress heartbeats."""
+    loop = asyncio.get_running_loop()
+    future = loop.run_in_executor(None, fn)
+    progress = start
+    while not future.done():
+        jobs.update(job_id, progress=progress)
+        await asyncio.sleep(1.0)
+        progress = min(end, progress + 0.03)
+    return await future
+
 
 async def _run_tts(job_id: str, params: dict) -> None:
     endpoint      = params.get("_endpoint", "custom_voice")
@@ -272,11 +285,10 @@ async def _run_tts(job_id: str, params: dict) -> None:
             torch.manual_seed(seed)
 
         model = _tts_models[required_type]
-        loop = asyncio.get_running_loop()
 
         if endpoint == "voice_design":
-            wavs, sr = await loop.run_in_executor(
-                None,
+            wavs, sr = await _run_blocking_generation(
+                job_id,
                 lambda: model.generate_voice_design(
                     text=params["text"],
                     instruct=params.get("voice_description", ""),
@@ -287,8 +299,8 @@ async def _run_tts(job_id: str, params: dict) -> None:
                 ),
             )
         elif endpoint == "voice_clone":
-            wavs, sr = await loop.run_in_executor(
-                None,
+            wavs, sr = await _run_blocking_generation(
+                job_id,
                 lambda: model.generate_voice_clone(
                     text=params["text"],
                     language=language,
@@ -297,11 +309,12 @@ async def _run_tts(job_id: str, params: dict) -> None:
                     x_vector_only_mode=not params.get("icl_mode", False),
                     temperature=params.get("temperature", 0.7),
                     top_p=params.get("top_p", 0.9),
+                    max_new_tokens=params.get("max_new_tokens", 1024),
                 ),
             )
         else:
-            wavs, sr = await loop.run_in_executor(
-                None,
+            wavs, sr = await _run_blocking_generation(
+                job_id,
                 lambda: model.generate_custom_voice(
                     text=params["text"],
                     speaker=params.get("speaker", "Vivian"),
@@ -315,6 +328,7 @@ async def _run_tts(job_id: str, params: dict) -> None:
 
         jobs.update(job_id, progress=0.9)
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: sf.write(out_path, wavs[0], sr))
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
 

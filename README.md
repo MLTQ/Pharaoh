@@ -24,6 +24,7 @@ In **stub mode** (default), the servers return silent WAV files with simulated p
 | Node.js | 20+ | `brew install node` or [nodejs.org](https://nodejs.org) |
 | Python | 3.11+ | `brew install python@3.11` |
 | ffmpeg | any recent | `brew install ffmpeg` — required for Render Scene |
+| SoX | any recent | `brew install sox` — used by Qwen3-TTS voice clone preprocessing |
 | Xcode CLT | (macOS) | `xcode-select --install` |
 
 ---
@@ -37,11 +38,7 @@ cd pharaoh
 npm install
 
 # 2. Set up Python inference servers
-cd inference
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-cd ..
+./inference/setup.sh
 
 # 3. Start inference servers (stub mode — no GPU needed)
 ./inference/start_servers.sh

@@ -326,6 +326,7 @@ async fn generate_dialogue(
                 seed: random_seed(),
                 temperature: 0.7,
                 top_p: 0.9,
+                max_new_tokens: 1024,
                 output_path: output_path.clone(),
             };
             let job_id = submit_job(

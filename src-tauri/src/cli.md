@@ -18,6 +18,11 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 - **Interacts with**: `finalize_generation_output` in `commands/inference.rs`, path helpers in `app_support.rs`.
 - **Rationale**: Keeps the first useful headless workflow small while still being end-to-end real.
 
+### `generate_dialogue`
+- **Does**: Builds TTS requests from script rows and project character voice assignments.
+- **Interacts with**: Qwen clone/design/custom request models in `models.rs`.
+- **Rationale**: Voice clone requests set a bounded token cap to avoid runaway TTS calls.
+
 ### `compose_render_scene`
 - **Does**: Renders a scene using the same Rust audio engine used by the GUI.
 - **Interacts with**: `render_scene_with_projects_dir` in `commands/audio_engine.rs`.

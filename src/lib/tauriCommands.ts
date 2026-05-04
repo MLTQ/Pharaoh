@@ -125,6 +125,7 @@ export const submitTtsVoiceClone = (args: {
     seed: number;
     temperature: number;
     top_p: number;
+    max_new_tokens: number;
     output_path: string;
   };
 }): Promise<string> => invoke("submit_tts_voice_clone", args);

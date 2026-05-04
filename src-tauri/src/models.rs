@@ -220,6 +220,7 @@ pub struct TtsVoiceCloneRequest {
     pub seed: i64,
     pub temperature: f32,
     pub top_p: f32,
+    pub max_new_tokens: u32,
     pub output_path: String,
 }
 

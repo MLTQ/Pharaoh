@@ -62,6 +62,7 @@ export function useGenerateJob() {
           seed: params.seed ?? Math.floor(Math.random() * 99999),
           temperature: params.temperature ?? 0.7,
           top_p: 0.9,
+          max_new_tokens: 1024,
           output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_clone_${ts}.wav`),
         },
       });

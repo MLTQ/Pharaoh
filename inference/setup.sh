@@ -40,6 +40,15 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 ok "uv $(uv --version | awk '{print $2}')"
 
+step "Checking audio tools"
+if command -v sox >/dev/null 2>&1; then
+    ok "SoX found at $(command -v sox)"
+else
+    warn "SoX is not installed."
+    hint "Install with:  brew install sox"
+    hint "Qwen3-TTS voice cloning can warn or fail during reference-audio preprocessing without it."
+fi
+
 # ── TTS env ──────────────────────────────────────────────────────────────────
 step "TTS env (.venv-tts)"
 if [ ! -d "${TTS_VENV}" ]; then

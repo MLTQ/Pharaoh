@@ -16,6 +16,7 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 ### `Tts*Request`, `SfxT2ARequest`, `MusicText2MusicRequest`
 - **Does**: Encode inference payloads sent to the Python servers.
 - **Interacts with**: `inference.rs`, `cli.rs`.
+- **Rationale**: Clone requests include `max_new_tokens` because Qwen can otherwise spend unbounded time in generation.
 
 ### `JobProgressEvent`, `JobCompleteEvent`, `JobFailedEvent`
 - **Does**: Define frontend event payloads for live generation state.
