@@ -400,11 +400,12 @@ async fn generate_sfx(
         duration_seconds,
         model_variant: if use_audioldm { "AudioLDM-S-Full-V2".into() } else { "Woosh-DFlow".into() },
         backend: Some(if use_audioldm { "audioldm" } else { "woosh" }.into()),
-        steps: if use_audioldm { 50 } else { 4 },
+        steps: if use_audioldm { 200 } else { 4 },
         seed: random_seed(),
         guidance_scale: use_audioldm.then_some(2.5),
-        negative_prompt: use_audioldm.then_some("low quality, distorted, clipped, noisy artifacts".into()),
-        num_waveforms_per_prompt: use_audioldm.then_some(1),
+        negative_prompt: use_audioldm
+            .then_some("speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts".into()),
+        num_waveforms_per_prompt: use_audioldm.then_some(3),
         output_path: output_path.clone(),
     };
 

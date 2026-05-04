@@ -15,6 +15,11 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Interacts with**: `requirements-sfx-audioldm.txt`, `~/pharaoh-models/sfx/audioldm-s-full-v2`, Hugging Face cache, `/generate/t2a`.
 - **Rationale**: AudioLDM v1 is the practical long-form ambience option. It supports `audio_length_in_s` and the upstream demo explicitly includes long samples, unlike AudioLDM2's own TODO for >10s generation.
 
+### AudioLDM prompt normalization
+- **Does**: Converts Pharaoh's bracketed director markup into concise prose, prefixes it as a realistic field recording, and asks for no speech/music.
+- **Interacts with**: `SFXPanel.tsx`, script rows, headless CLI SFX generation.
+- **Rationale**: AudioLDM quality drops when fed long screenplay-style directions. The upstream examples are short natural-language audio captions.
+
 ### Health and lifecycle
 - **Does**: Reports Woosh and AudioLDM readiness independently, and lets `/load` preload AudioLDM when `variant` starts with `AudioLDM`.
 - **Interacts with**: Model manager and server health polling.
@@ -30,4 +35,5 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
 - `AudioLDM-S-Full-V2` resolves to `PHARAOH_AUDIOLDM_MODEL`, otherwise `PHARAOH_AUDIOLDM_MODEL_DIR`, otherwise the Hugging Face model id.
+- AudioLDM defaults intentionally match the upstream CLI more closely: 200 diffusion steps and 3 candidates per prompt. This is slower but materially better than the earlier fast 50-step/1-candidate setting.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.
