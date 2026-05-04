@@ -9,8 +9,10 @@
 # First-time setup:
 #   TTS:   models in ~/pharaoh-models/tts  (env: PHARAOH_TTS_MODEL_DIR)
 #   SFX:   cd ~/Code/Woosh && uv sync      (env: PHARAOH_WOOSH_DIR)
-#   Music: conda activate pharoah && pip install ace-step
+#   Music: conda activate pharoah && pip install git+https://github.com/ace-step/ACE-Step.git
+#          (the PyPI sdist is broken — install from git)
 #          models in ~/pharaoh-models/music (env: PHARAOH_MUSIC_MODEL_DIR)
+#          hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

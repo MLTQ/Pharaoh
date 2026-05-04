@@ -3,7 +3,7 @@ import type { Job, QaJobStatus } from "../lib/types";
 import { useToastStore } from "./toastStore";
 import { useUiStore } from "./uiStore";
 
-const OOM_MARKERS = ["TTS_OOM", "SFX_OOM"] as const;
+const OOM_MARKERS = ["TTS_OOM", "SFX_OOM", "MUSIC_OOM"] as const;
 
 const MODEL_LABEL: Record<string, string> = {
   tts: "TTS",

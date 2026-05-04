@@ -64,7 +64,7 @@ const MODELS = [
     description: "Music generation — lyrics + caption · 48 kHz",
     port: 18003,
     variants: null as null,
-    install: "git clone https://github.com/ACE-Step/ACE-Step && cd ACE-Step && pip install -e .",
+    install: "conda activate pharoah && pip install git+https://github.com/ace-step/ACE-Step.git",
   },
 ];
 
