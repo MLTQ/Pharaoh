@@ -295,6 +295,8 @@ pub struct JobCompleteEvent {
     pub project_id: String,
     pub scene_slug: String,
     pub row_index: usize,
+    pub duration_ms: Option<u64>,
+    pub bound_to_script: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

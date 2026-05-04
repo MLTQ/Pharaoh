@@ -116,7 +116,7 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa })
 
 export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
   const { jobs, activeTakes, setActiveTake, setQaStatus } = useJobStore();
-  const { realProjectId, activeSceneSlug } = useProjectStore();
+  const { realProjectId } = useProjectStore();
 
   const completedByModel = (model: "tts" | "sfx" | "music") =>
     jobs.filter(j => j.model === model && j.status === "complete" && j.output_path);
@@ -148,10 +148,10 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
   const handleUse = (job: Job) => {
     if (!job.output_path || job.scene_slug == null || job.row_index == null) return;
     setActiveTake(job.scene_slug, job.row_index, job.id);
-    if (realProjectId && activeSceneSlug) {
+    if (realProjectId) {
       updateScriptRow({
         projectId: realProjectId,
-        sceneSlug: activeSceneSlug,
+        sceneSlug: job.scene_slug,
         rowIndex: job.row_index,
         fields: { file: job.output_path },
       }).catch(console.error);

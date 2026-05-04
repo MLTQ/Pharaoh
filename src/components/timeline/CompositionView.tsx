@@ -4,6 +4,7 @@ import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
+import { useJobStore } from "../../store/jobStore";
 import { readScript, updateScriptRow, renderScene } from "../../lib/tauriCommands";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow } from "../../lib/types";
 
@@ -112,6 +113,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { realProjectId, activeSceneSlug, characters } = useProjectStore();
+  const { jobs } = useJobStore();
 
   // ── Script rows ──────────────────────────────────────────────────────────
 
@@ -123,7 +125,15 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     } else {
       setScriptRows([]);
     }
-  }, [realProjectId, activeSceneSlug, scene.no]);
+  }, [
+    realProjectId,
+    activeSceneSlug,
+    scene.no,
+    jobs
+      .filter((job) => job.scene_slug === activeSceneSlug && job.status === "complete")
+      .map((job) => `${job.id}:${job.output_path ?? ""}`)
+      .join("|"),
+  ]);
 
   const handleAddRow = (row: ScriptRow) => setScriptRows((prev) => [...prev, row]);
 

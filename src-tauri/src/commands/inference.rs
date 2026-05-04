@@ -1,5 +1,7 @@
 use std::time::Duration;
+use std::path::{Path, PathBuf};
 use tauri::{AppHandle, Emitter, Manager};
+use crate::app_support::{app_projects_dir, bind_generated_asset};
 use crate::error::{Error, Result};
 
 // ── Hardware detection ────────────────────────────────────────────────────
@@ -188,6 +190,7 @@ async fn poll_until_done(
     project_id: String,
     scene_slug: String,
     row_index: usize,
+    projects_dir: PathBuf,
     sidecar_meta: SidecarMeta,
 ) {
     loop {
@@ -231,29 +234,33 @@ async fn poll_until_done(
         match status.status.as_str() {
             "complete" => {
                 let output_path = status.output_path.unwrap_or_default();
-                // Write sidecar adjacent to the audio file
-                let audio_path = std::path::Path::new(&output_path);
-                let meta_path = audio_path.with_extension("wav.meta.json");
-                let mut meta = sidecar_meta.clone();
-                // Fill actual duration from WAV if readable
-                if let Ok(reader) = hound::WavReader::open(audio_path) {
-                    let spec = reader.spec();
-                    let total_samples = reader.duration();
-                    meta.duration_actual_ms = Some(
-                        (total_samples as u64 * 1000) / spec.sample_rate as u64
-                    );
-                    meta.sample_rate = spec.sample_rate;
-                }
-                if let Ok(json) = serde_json::to_string_pretty(&meta) {
-                    let _ = std::fs::write(&meta_path, json);
-                }
+                let finalized = match finalize_generation_output(
+                    &projects_dir,
+                    &project_id,
+                    &scene_slug,
+                    row_index,
+                    &output_path,
+                    sidecar_meta.clone(),
+                ) {
+                    Ok(finalized) => finalized,
+                    Err(e) => {
+                        let _ = app.emit("job-failed", &JobFailedEvent {
+                            job_id: job_id.clone(),
+                            model: model.clone(),
+                            error: format!("finalization error: {}", e),
+                        });
+                        return;
+                    }
+                };
                 let _ = app.emit("job-complete", &JobCompleteEvent {
                     job_id: job_id.clone(),
                     model: model.clone(),
-                    output_path,
+                    output_path: finalized.output_path,
                     project_id,
                     scene_slug,
                     row_index,
+                    duration_ms: finalized.duration_ms,
+                    bound_to_script: finalized.bound_to_script,
                 });
                 return;
             }
@@ -270,6 +277,57 @@ async fn poll_until_done(
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct FinalizedJob {
+    pub output_path: String,
+    pub duration_ms: Option<u64>,
+    pub bound_to_script: bool,
+}
+
+pub fn finalize_generation_output(
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+    row_index: usize,
+    output_path: &str,
+    mut sidecar_meta: SidecarMeta,
+) -> Result<FinalizedJob> {
+    let audio_path = Path::new(output_path);
+    let meta_path = audio_path.with_extension("wav.meta.json");
+
+    let duration_ms = if let Ok(reader) = hound::WavReader::open(audio_path) {
+        let spec = reader.spec();
+        let total_samples = reader.duration();
+        let duration_ms = (total_samples as u64 * 1000) / spec.sample_rate as u64;
+        sidecar_meta.duration_actual_ms = Some(duration_ms);
+        sidecar_meta.sample_rate = spec.sample_rate;
+        Some(duration_ms)
+    } else {
+        sidecar_meta.duration_actual_ms
+    };
+
+    if let Some(parent) = meta_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let json = serde_json::to_string_pretty(&sidecar_meta)?;
+    std::fs::write(&meta_path, json)?;
+
+    let bound_to_script = bind_generated_asset(
+        projects_dir,
+        project_id,
+        scene_slug,
+        row_index,
+        output_path,
+        duration_ms,
+    )?;
+
+    Ok(FinalizedJob {
+        output_path: output_path.to_string(),
+        duration_ms,
+        bound_to_script,
+    })
+}
+
 
 // ── TTS commands ──────────────────────────────────────────────────────────
 
@@ -282,6 +340,7 @@ pub async fn submit_tts_custom_voice(
     params: TtsCustomVoiceRequest,
 ) -> Result<String> {
     let state = app.state::<AppState>();
+    let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
         let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
@@ -332,6 +391,7 @@ pub async fn submit_tts_custom_voice(
         project_id,
         scene_slug,
         row_index,
+        projects_dir,
         meta,
     ));
 
@@ -347,6 +407,7 @@ pub async fn submit_tts_voice_design(
     params: TtsVoiceDesignRequest,
 ) -> Result<String> {
     let state = app.state::<AppState>();
+    let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
         let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
@@ -391,7 +452,7 @@ pub async fn submit_tts_voice_design(
     tokio::spawn(poll_until_done(
         app.clone(), http,
         format!("{}/jobs", base_url), job_id.clone(),
-        "tts".into(), project_id, scene_slug, row_index, meta,
+        "tts".into(), project_id, scene_slug, row_index, projects_dir, meta,
     ));
     Ok(job_id)
 }
@@ -405,6 +466,7 @@ pub async fn submit_tts_voice_clone(
     params: TtsVoiceCloneRequest,
 ) -> Result<String> {
     let state = app.state::<AppState>();
+    let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
         let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
@@ -449,7 +511,7 @@ pub async fn submit_tts_voice_clone(
     tokio::spawn(poll_until_done(
         app.clone(), http,
         format!("{}/jobs", base_url), job_id.clone(),
-        "tts".into(), project_id, scene_slug, row_index, meta,
+        "tts".into(), project_id, scene_slug, row_index, projects_dir, meta,
     ));
     Ok(job_id)
 }
@@ -466,6 +528,7 @@ pub async fn submit_sfx_t2a(
     params: SfxT2ARequest,
 ) -> Result<String> {
     let state = app.state::<AppState>();
+    let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
         let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.sfx_url.clone(), state.http.clone())
@@ -510,7 +573,7 @@ pub async fn submit_sfx_t2a(
     tokio::spawn(poll_until_done(
         app.clone(), http,
         format!("{}/jobs", base_url), job_id.clone(),
-        "sfx".into(), project_id, scene_slug, row_index, meta,
+        "sfx".into(), project_id, scene_slug, row_index, projects_dir, meta,
     ));
     Ok(job_id)
 }
@@ -527,6 +590,7 @@ pub async fn submit_music_text2music(
     params: MusicText2MusicRequest,
 ) -> Result<String> {
     let state = app.state::<AppState>();
+    let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
         let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.music_url.clone(), state.http.clone())
@@ -571,7 +635,7 @@ pub async fn submit_music_text2music(
     tokio::spawn(poll_until_done(
         app.clone(), http,
         format!("{}/jobs", base_url), job_id.clone(),
-        "music".into(), project_id, scene_slug, row_index, meta,
+        "music".into(), project_id, scene_slug, row_index, projects_dir, meta,
     ));
     Ok(job_id)
 }

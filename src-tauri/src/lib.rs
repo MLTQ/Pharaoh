@@ -1,9 +1,12 @@
+mod app_support;
+mod cli;
 mod commands;
 mod error;
 mod models;
 
 use tauri::Manager;
 use models::{AppConfig, AppState};
+use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
 
 pub fn run() {
     tauri::Builder::default()
@@ -19,25 +22,8 @@ pub fn run() {
             let config_path = config_dir.join("config.json");
 
             // Load or build default AppConfig
-            let home = app.path().home_dir().expect("could not resolve home dir");
-            let app_config: AppConfig = if config_path.exists() {
-                std::fs::read_to_string(&config_path)
-                    .ok()
-                    .and_then(|s| serde_json::from_str(&s).ok())
-                    .unwrap_or_else(|| AppConfig::with_home(&home))
-            } else {
-                AppConfig::with_home(&home)
-            };
-
-            // Ensure projects and models directories exist
-            let projects_dir = std::path::PathBuf::from(&app_config.projects_dir);
-            if !projects_dir.exists() {
-                std::fs::create_dir_all(&projects_dir)?;
-            }
-            let models_dir = std::path::PathBuf::from(&app_config.models_dir);
-            if !models_dir.exists() {
-                std::fs::create_dir_all(&models_dir)?;
-            }
+            let app_config: AppConfig = load_or_default_app_config(&config_path)?;
+            ensure_app_dirs(&app_config)?;
 
             app.manage(AppState::new(config_path, app_config));
             Ok(())
@@ -90,4 +76,12 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+pub fn run_cli(args: Vec<String>) -> Result<(), String> {
+    let runtime = tokio::runtime::Runtime::new()
+        .map_err(|e| format!("failed to start runtime: {}", e))?;
+    runtime
+        .block_on(cli::run(args))
+        .map_err(|e| e.to_string())
 }

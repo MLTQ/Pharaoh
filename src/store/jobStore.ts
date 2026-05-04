@@ -25,6 +25,8 @@ interface JobCompleteEvent {
   project_id: string;
   scene_slug: string;
   row_index: number;
+  duration_ms: number | null;
+  bound_to_script: boolean;
 }
 
 interface JobFailedEvent {

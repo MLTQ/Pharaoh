@@ -1,37 +1,15 @@
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 use uuid::Uuid;
 use chrono::Utc;
-use crate::models::{AppState, Project, Scene, Storyboard, LlmConfig, SceneStatus};
+use crate::app_support::{app_projects_dir, project_dir, read_json, write_json};
+use crate::models::{Project, Scene, Storyboard, LlmConfig, SceneStatus};
 use crate::error::{Error, Result};
-
-fn projects_dir(app: &AppHandle) -> PathBuf {
-    let state = app.state::<AppState>();
-    let cfg = state.app_config.read().expect("app_config lock poisoned");
-    PathBuf::from(&cfg.projects_dir)
-}
-
-fn project_dir(app: &AppHandle, project_id: &str) -> PathBuf {
-    projects_dir(app).join(project_id)
-}
-
-fn read_json<T: serde::de::DeserializeOwned>(path: &PathBuf) -> Result<T> {
-    let data = std::fs::read_to_string(path)?;
-    Ok(serde_json::from_str(&data)?)
-}
-
-fn write_json<T: serde::Serialize>(path: &PathBuf, value: &T) -> Result<()> {
-    let json = serde_json::to_string_pretty(value)?;
-    if let Some(parent) = path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(path, json)?;
-    Ok(())
-}
 
 #[tauri::command]
 pub fn get_projects_dir(app: AppHandle) -> String {
-    projects_dir(&app).to_string_lossy().to_string()
+    app_projects_dir(&app)
+        .map(|path| path.to_string_lossy().to_string())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -62,7 +40,7 @@ pub fn create_project(
         },
     };
 
-    let dir = project_dir(&app, &id);
+    let dir = project_dir(&app_projects_dir(&app)?, &id);
     std::fs::create_dir_all(&dir)?;
     std::fs::create_dir_all(dir.join("scenes"))?;
     std::fs::create_dir_all(dir.join("output"))?;
@@ -77,19 +55,19 @@ pub fn create_project(
 
 #[tauri::command]
 pub fn open_project(app: AppHandle, project_id: String) -> Result<Project> {
-    let path = project_dir(&app, &project_id).join("project.json");
+    let path = project_dir(&app_projects_dir(&app)?, &project_id).join("project.json");
     read_json(&path)
 }
 
 #[tauri::command]
 pub fn get_project(app: AppHandle, project_id: String) -> Result<Project> {
-    let path = project_dir(&app, &project_id).join("project.json");
+    let path = project_dir(&app_projects_dir(&app)?, &project_id).join("project.json");
     read_json(&path)
 }
 
 #[tauri::command]
 pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
-    let dir = projects_dir(&app);
+    let dir = app_projects_dir(&app)?;
     if !dir.exists() {
         return Ok(vec![]);
     }
@@ -112,7 +90,7 @@ pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
 pub fn update_project(app: AppHandle, project: Project) -> Result<Project> {
     let mut p = project;
     p.updated_at = Utc::now();
-    let path = project_dir(&app, &p.id).join("project.json");
+    let path = project_dir(&app_projects_dir(&app)?, &p.id).join("project.json");
     write_json(&path, &p)?;
     Ok(p)
 }
@@ -147,7 +125,7 @@ pub fn create_scene(
     };
 
     // Create scene directories
-    let scene_dir = project_dir(&app, &project_id)
+    let scene_dir = project_dir(&app_projects_dir(&app)?, &project_id)
         .join("scenes")
         .join(&slug);
     std::fs::create_dir_all(scene_dir.join("assets"))?;
@@ -161,8 +139,8 @@ pub fn create_scene(
     )?;
 
     // Update storyboard.json
-    let project_dir = project_dir(&app, &project_id);
-    let storyboard_path = project_dir.join("storyboard.json");
+    let project_root = project_dir(&app_projects_dir(&app)?, &project_id);
+    let storyboard_path = project_root.join("storyboard.json");
     let mut storyboard: Storyboard = if storyboard_path.exists() {
         read_json(&storyboard_path)?
     } else {
@@ -173,7 +151,7 @@ pub fn create_scene(
     write_json(&storyboard_path, &storyboard)?;
 
     // Touch updated_at on project
-    let project_path = project_dir.join("project.json");
+    let project_path = project_root.join("project.json");
     if let Ok(mut proj) = read_json::<Project>(&project_path) {
         proj.updated_at = Utc::now();
         let _ = write_json(&project_path, &proj);
@@ -188,7 +166,7 @@ pub fn update_scene(
     project_id: String,
     scene: Scene,
 ) -> Result<Scene> {
-    let storyboard_path = project_dir(&app, &project_id).join("storyboard.json");
+    let storyboard_path = project_dir(&app_projects_dir(&app)?, &project_id).join("storyboard.json");
     let mut storyboard: Storyboard = read_json(&storyboard_path)?;
     if let Some(existing) = storyboard.scenes.iter_mut().find(|s| s.id == scene.id) {
         *existing = scene.clone();
@@ -205,7 +183,7 @@ pub fn get_scene(
     project_id: String,
     scene_id: String,
 ) -> Result<Scene> {
-    let storyboard_path = project_dir(&app, &project_id).join("storyboard.json");
+    let storyboard_path = project_dir(&app_projects_dir(&app)?, &project_id).join("storyboard.json");
     let storyboard: Storyboard = read_json(&storyboard_path)?;
     storyboard
         .scenes
@@ -216,7 +194,7 @@ pub fn get_scene(
 
 #[tauri::command]
 pub fn list_scenes(app: AppHandle, project_id: String) -> Result<Vec<Scene>> {
-    let storyboard_path = project_dir(&app, &project_id).join("storyboard.json");
+    let storyboard_path = project_dir(&app_projects_dir(&app)?, &project_id).join("storyboard.json");
     if !storyboard_path.exists() {
         return Ok(vec![]);
     }

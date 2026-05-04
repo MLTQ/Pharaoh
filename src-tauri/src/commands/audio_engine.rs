@@ -1,14 +1,8 @@
-use std::path::PathBuf;
-use tauri::{AppHandle, Manager};
+use std::path::Path;
+use tauri::AppHandle;
+use crate::app_support::{app_projects_dir, read_script_rows, scene_dir};
 use crate::error::{Error, Result};
 use crate::models::ScriptRow;
-
-fn projects_dir(app: &AppHandle) -> PathBuf {
-    app.path()
-        .home_dir()
-        .expect("no home dir")
-        .join("pharaoh-projects")
-}
 
 fn db_to_linear(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -62,21 +56,20 @@ pub async fn render_scene(
     project_id: String,
     scene_slug: String,
 ) -> Result<String> {
-    let scene_dir = projects_dir(&app)
-        .join(&project_id)
-        .join("scenes")
-        .join(&scene_slug);
-    let output_path = scene_dir.join("render.wav");
+    let projects_dir = app_projects_dir(&app)?;
+    render_scene_with_projects_dir(&projects_dir, &project_id, &scene_slug).await
+}
 
-    let rows: Vec<ScriptRow> = {
-        let script_path = scene_dir.join("script.csv");
-        let mut reader = csv::Reader::from_path(&script_path)
-            .map_err(|e| Error::Other(format!("cannot read script.csv: {}", e)))?;
-        reader
-            .deserialize()
-            .collect::<csv::Result<_>>()
-            .map_err(|e| Error::Other(format!("csv parse error: {}", e)))?
-    };
+pub async fn render_scene_with_projects_dir(
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+) -> Result<String> {
+    let scene_root = scene_dir(projects_dir, project_id, scene_slug);
+    let output_path = scene_root.join("render.wav");
+
+    let rows: Vec<ScriptRow> = read_script_rows(&scene_root.join("script.csv"))
+        .map_err(|e| Error::Other(format!("cannot read script.csv: {}", e)))?;
 
     // Only rows that are fully placed (file + start_ms) and not direction cues
     let placed: Vec<&ScriptRow> = rows
