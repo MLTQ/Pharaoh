@@ -102,6 +102,12 @@ if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
     fi
     uv pip install --python "${AUDIOLDM_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-sfx-audioldm.txt"
     ok "AudioLDM deps synced"
+    if "${AUDIOLDM_VENV}/bin/python" -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1; then
+        ok "AudioLDM CUDA candidate ranking available"
+    else
+        warn "AudioLDM CUDA is not available; Pharaoh will force one candidate per prompt on this machine."
+        hint "This is expected on Apple Silicon/CPU. Upstream AudioLDM candidate ranking calls CUDA directly."
+    fi
 else
     hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
 fi

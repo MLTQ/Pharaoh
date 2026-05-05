@@ -15,6 +15,7 @@ export interface ServerHealth {
   audioldm_model?: string;
   audioldm_local_dir?: string;
   audioldm_engine?: string;
+  audioldm_cuda?: boolean | null;
   audioldm_loaded?: boolean;
 }
 

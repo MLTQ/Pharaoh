@@ -29,6 +29,11 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Interacts with**: Job polling UI and terminal logs.
 - **Rationale**: The upstream CLI can spend time downloading/loading before sustained CPU activity. Buffered subprocess output makes the job look stuck, so the server must expose liveness independently.
 
+### Native CUDA candidate guard
+- **Does**: Detects whether the isolated AudioLDM torch build has CUDA. If not, native requests are forced to `-n 1`.
+- **Interacts with**: Upstream AudioLDM CLI.
+- **Rationale**: Upstream AudioLDM candidate ranking uses CLAP and unconditionally calls `waveform.cuda()`. Multi-candidate generation crashes after DDIM on Apple Silicon/CPU builds.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
@@ -40,5 +45,5 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
 - `PHARAOH_AUDIOLDM_ENGINE=diffusers` keeps the old diffusers path available for debugging only; native is the production default.
-- AudioLDM defaults intentionally match the upstream CLI more closely: 200 diffusion steps and 3 candidates per prompt. This is slower but materially better than the earlier fast 50-step/1-candidate setting.
+- AudioLDM defaults use 200 diffusion steps. Candidate count defaults to 1 for cross-platform reliability; CUDA users may request more candidates explicitly.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

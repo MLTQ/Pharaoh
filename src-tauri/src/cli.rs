@@ -405,7 +405,7 @@ async fn generate_sfx(
         guidance_scale: use_audioldm.then_some(2.5),
         negative_prompt: use_audioldm
             .then_some("speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts".into()),
-        num_waveforms_per_prompt: use_audioldm.then_some(3),
+        num_waveforms_per_prompt: use_audioldm.then_some(1),
         output_path: output_path.clone(),
     };
 

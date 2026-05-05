@@ -115,7 +115,7 @@ export function useGenerateJob() {
         seed: params.seed ?? Math.floor(Math.random() * 99999),
         guidance_scale: params.guidanceScale ?? (backend === "audioldm" ? 2.5 : undefined),
         negative_prompt: params.negativePrompt ?? (backend === "audioldm" ? "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts" : undefined),
-        num_waveforms_per_prompt: params.numWaveformsPerPrompt ?? (backend === "audioldm" ? 3 : undefined),
+        num_waveforms_per_prompt: params.numWaveformsPerPrompt ?? (backend === "audioldm" ? 1 : undefined),
         output_path: makeOutputPath(pDir, projectId, sceneSlug, `sfx_${ts}.wav`),
       },
     });

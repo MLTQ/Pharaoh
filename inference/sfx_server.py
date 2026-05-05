@@ -39,6 +39,7 @@ AUDIOLDM_PYTHON = Path(
     os.environ.get("PHARAOH_AUDIOLDM_PYTHON", Path(__file__).parent / ".venv-audioldm/bin/python3")
 ).expanduser()
 AUDIOLDM_ENGINE = os.environ.get("PHARAOH_AUDIOLDM_ENGINE", "native").lower()
+_native_audioldm_cuda_available: bool | None = None
 
 SAMPLE_RATE   = 48000
 AUDIO_LDM_SAMPLE_RATE = 16000
@@ -227,6 +228,33 @@ def _audioldm_status() -> dict:
 def _native_audioldm_cli() -> Path:
     suffix = "Scripts/audioldm.exe" if sys.platform == "win32" else "bin/audioldm"
     return AUDIOLDM_PYTHON.parent.parent / suffix
+
+
+def _native_audioldm_has_cuda() -> bool:
+    """Return whether the isolated native AudioLDM torch build can use CUDA."""
+    global _native_audioldm_cuda_available
+    if _native_audioldm_cuda_available is not None:
+        return _native_audioldm_cuda_available
+
+    if not AUDIOLDM_PYTHON.exists():
+        _native_audioldm_cuda_available = False
+        return False
+
+    try:
+        import subprocess
+
+        result = subprocess.run(
+            [str(AUDIOLDM_PYTHON), "-c", "import torch; print(int(torch.cuda.is_available()))"],
+            check=False,
+            capture_output=True,
+            text=True,
+            timeout=10,
+        )
+        _native_audioldm_cuda_available = result.stdout.strip().endswith("1")
+    except Exception:
+        log.exception("Failed to detect native AudioLDM CUDA support")
+        _native_audioldm_cuda_available = False
+    return _native_audioldm_cuda_available
 
 
 async def _pump_subprocess_stream(stream, label: str, buffer: list[str]) -> None:
@@ -451,6 +479,11 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
         seed = int(params.get("seed", 0))
         guidance_scale = float(params.get("guidance_scale", 2.5))
         waveforms = int(params.get("num_waveforms_per_prompt", 3))
+        if waveforms > 1 and not _native_audioldm_has_cuda():
+            log.warning(
+                "Native AudioLDM candidate ranking requires CUDA; forcing -n 1 on this platform."
+            )
+            waveforms = 1
         out_path = Path(params["output_path"])
         cli = _native_audioldm_cli()
 
@@ -592,6 +625,7 @@ async def health() -> dict:
         "audioldm_model": _audioldm_loaded_model_id or AUDIO_LDM_MODEL,
         "audioldm_local_dir": str(AUDIO_LDM_LOCAL_DIR),
         "audioldm_engine": AUDIOLDM_ENGINE,
+        "audioldm_cuda": _native_audioldm_has_cuda() if AUDIOLDM_ENGINE == "native" and als["ok"] else None,
         "audioldm_loaded": _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),
     }
 

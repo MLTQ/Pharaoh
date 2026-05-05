@@ -8,7 +8,7 @@ Zustand store for inference server health, model load/unload state, and load-pro
 ### `ServerHealth`
 - **Does**: Mirrors `/health` payloads from TTS, SFX, and music servers.
 - **Interacts with**: `ModelsView.tsx`.
-- **Rationale**: The SFX health shape includes optional AudioLDM readiness fields while the shared store remains compatible with TTS and music responses.
+- **Rationale**: The SFX health shape includes optional AudioLDM readiness and CUDA capability fields while the shared store remains compatible with TTS and music responses.
 
 ### `pollHealth`, `loadModel`, `unloadModel`
 - **Does**: Calls Tauri inference commands and updates online/loading/offline state.
