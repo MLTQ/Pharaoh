@@ -126,8 +126,8 @@ export const UpscaleView: React.FC = () => {
     || error?.includes("NotOpenSSLWarning");
 
   return (
-    <div className="panel-view" style={{ overflow: "hidden" }}>
-      <div style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(300px, 420px) minmax(0, 1fr)" }}>
+    <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--bg-1)" }}>
+      <div style={{ height: "100%", width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "minmax(300px, 420px) minmax(0, 1fr)" }}>
         <div style={{
           borderRight: "1px solid var(--line-1)",
           background: "var(--bg-1)",

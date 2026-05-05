@@ -34,3 +34,4 @@ Dedicated post-processing page for reviewing generated WAV assets and running ne
 ## Notes
 - The page intentionally does not auto-install AudioSR. Optional model environments stay explicit because they are large and slow.
 - The main pane intentionally fills available canvas width. Avoid reintroducing narrow centered columns; this is a production workbench, not a document layout.
+- The root intentionally does not use `.panel-view`; that shared shell adds a wide-screen right column for other pages and will squeeze this two-pane workspace into a narrow strip.
