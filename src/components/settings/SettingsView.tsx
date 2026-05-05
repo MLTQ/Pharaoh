@@ -25,7 +25,7 @@ function useHardwareProfile(): HardwareProfile | null {
 // Woosh install commands per GPU backend
 const WOOSH_CLONE = "git clone https://github.com/SonyResearch/Woosh && cd Woosh";
 const AUDIOLDM_M_FULL_URL = "https://zenodo.org/record/7813012/files/audioldm-m-full.ckpt?download=1";
-const AUDIOLDM_M_FULL_DOWNLOAD = `mkdir -p "$HOME/.cache/audioldm" && curl -L -C - -o "$HOME/.cache/audioldm/audioldm-m-full.ckpt" "${AUDIOLDM_M_FULL_URL}"`;
+const AUDIOLDM_M_FULL_DOWNLOAD = `mkdir -p "$HOME/pharaoh-models/sfx/audioldm" && curl -L -C - -o "$HOME/pharaoh-models/sfx/audioldm/audioldm-m-full.ckpt" "${AUDIOLDM_M_FULL_URL}"`;
 const WOOSH_VARIANTS: Record<string, { label: string; cmd: string }> = {
   cuda: { label: "NVIDIA CUDA",      cmd: `${WOOSH_CLONE} && uv sync --extra cuda` },
   mps:  { label: "Apple Silicon MPS", cmd: `${WOOSH_CLONE} && uv sync` },
@@ -323,7 +323,7 @@ function SfxDownloads() {
           AudioLDM is optional. Pharaoh uses the upstream AudioLDM runner by default;
           install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. Download the native
           <code>audioldm-m-full</code> checkpoint manually if the first-run downloader fails;
-          the command is resumable and writes to the cache path the upstream CLI expects.
+          the command is resumable and writes to Pharaoh's SFX model directory.
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
           <div>

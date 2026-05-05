@@ -37,6 +37,13 @@ AUDIO_LDM_MODEL = os.environ.get(
     str(AUDIO_LDM_LOCAL_DIR) if AUDIO_LDM_LOCAL_DIR.exists() else AUDIO_LDM_MODEL_ID,
 )
 AUDIOLDM_NATIVE_MODEL = os.environ.get("PHARAOH_AUDIOLDM_NATIVE_MODEL", "audioldm-m-full")
+AUDIOLDM_CACHE_DIR = Path(
+    os.environ.get(
+        "PHARAOH_AUDIOLDM_CACHE_DIR",
+        os.environ.get("AUDIOLDM_CACHE_DIR", "~/pharaoh-models/sfx/audioldm"),
+    )
+).expanduser()
+os.environ["AUDIOLDM_CACHE_DIR"] = str(AUDIOLDM_CACHE_DIR)
 AUDIOLDM_PYTHON = Path(
     os.environ.get("PHARAOH_AUDIOLDM_PYTHON", Path(__file__).parent / ".venv-audioldm/bin/python3")
 ).expanduser()
@@ -705,6 +712,7 @@ async def health() -> dict:
         "audioldm_error": als["reason"],
         "audioldm_model": _audioldm_loaded_model_id or (AUDIOLDM_NATIVE_MODEL if AUDIOLDM_ENGINE == "native" else AUDIO_LDM_MODEL),
         "audioldm_local_dir": str(AUDIO_LDM_LOCAL_DIR),
+        "audioldm_cache_dir": str(AUDIOLDM_CACHE_DIR),
         "audioldm_engine": AUDIOLDM_ENGINE,
         "audioldm_cuda": _native_audioldm_has_cuda() if AUDIOLDM_ENGINE == "native" and als["ok"] else None,
         "audioldm_loaded": _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),

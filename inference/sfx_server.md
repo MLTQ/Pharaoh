@@ -12,7 +12,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 
 ### AudioLDM backend
 - **Does**: Runs the upstream `audioldm` CLI from `inference/.venv-audioldm` when a request uses `backend="audioldm"` or an AudioLDM model variant, then copies the generated WAV to Pharaoh's requested output path.
-- **Interacts with**: `requirements-sfx-audioldm.txt`, `PHARAOH_AUDIOLDM_PYTHON`, `/generate/t2a`.
+- **Interacts with**: `requirements-sfx-audioldm.txt`, `PHARAOH_AUDIOLDM_PYTHON`, `PHARAOH_AUDIOLDM_CACHE_DIR`, `/generate/t2a`.
 - **Rationale**: The diffusers AudioLDM pipeline is deprecated and produced unusable diffusion artifacts inside the Woosh dependency stack. The native runner matches the upstream examples more closely, defaults to upstream's recommended `audioldm-m-full`, and keeps AudioLDM isolated from Woosh.
 
 ### AudioLDM prompt normalization
@@ -45,7 +45,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
 - Native AudioLDM defaults to `PHARAOH_AUDIOLDM_NATIVE_MODEL=audioldm-m-full`. The previous `audioldm-s-full-v2` default was a mismatch with upstream CLI defaults and produced poor results.
-- On first use, native AudioLDM downloads checkpoints into `AUDIOLDM_CACHE_DIR` or `~/.cache/audioldm`. A stderr line such as `8% |#####|` is the upstream checkpoint download progress bar, not an inference error.
+- On first use, native AudioLDM downloads checkpoints into `PHARAOH_AUDIOLDM_CACHE_DIR` / `AUDIOLDM_CACHE_DIR`, defaulting to `~/pharaoh-models/sfx/audioldm`. A stderr line such as `8% |#####|` is the upstream checkpoint download progress bar, not an inference error.
 - `PHARAOH_AUDIOLDM_ENGINE=diffusers` keeps the old diffusers path available for debugging only; native is the production default.
 - AudioLDM defaults use 200 diffusion steps. Candidate count defaults to 1 for cross-platform reliability; CUDA users may request more candidates explicitly.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

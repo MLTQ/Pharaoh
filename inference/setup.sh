@@ -20,6 +20,7 @@ MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
 AUDIOLDM_VENV="${SCRIPT_DIR}/.venv-audioldm"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
 INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
+AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -119,7 +120,7 @@ echo ""
 echo "${DIM}Next: download model weights into the directories below if you haven't already:${RESET}"
 echo "  TTS    → \$HOME/pharaoh-models/tts/{voice_design,base,custom_voice,tokenizer}/"
 echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
-echo "  SFX+   → \$HOME/.cache/audioldm/audioldm-m-full.ckpt  (downloaded by native AudioLDM)"
+echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo ""
-echo "See the Models page in the app for the exact ${DIM}hf download${RESET} commands."
+echo "See the Models page in the app for the exact model download commands."

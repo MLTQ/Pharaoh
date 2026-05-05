@@ -20,6 +20,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 export PHARAOH_TTS_MODEL_DIR="${PHARAOH_TTS_MODEL_DIR:-$HOME/pharaoh-models/tts}"
 export PHARAOH_MUSIC_MODEL_DIR="${PHARAOH_MUSIC_MODEL_DIR:-$HOME/pharaoh-models/music}"
 export PHARAOH_WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
+export PHARAOH_AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
+export AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR}"
 export PHARAOH_AUDIOLDM_PYTHON="${PHARAOH_AUDIOLDM_PYTHON:-${SCRIPT_DIR}/.venv-audioldm/bin/python3}"
 
 # Resolve Python interpreters — uv venvs by default, overridable.
@@ -45,6 +47,7 @@ echo "Starting Pharaoh inference servers..."
 echo "  TTS   : ${TTS_PYTHON}"
 echo "  SFX   : ${WOOSH_PYTHON} (Woosh)"
 echo "  SFX+  : ${PHARAOH_AUDIOLDM_PYTHON} (optional AudioLDM runner)"
+echo "  SFX+ models: ${AUDIOLDM_CACHE_DIR}"
 echo "  Music : ${MUSIC_PYTHON}"
 echo ""
 
