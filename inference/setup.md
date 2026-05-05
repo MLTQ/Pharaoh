@@ -40,3 +40,4 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 
 ## Notes
 - SoX is a system dependency, not a Python package. On macOS the expected install command is `brew install sox`.
+- AudioSR 0.0.7 pulls older librosa code that imports `pkg_resources`, so the optional AudioSR requirements include `setuptools`. `urllib3<2` avoids noisy LibreSSL warnings on the macOS Python used by uv.

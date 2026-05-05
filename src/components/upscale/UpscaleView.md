@@ -14,8 +14,13 @@ Dedicated post-processing page for reviewing generated WAV assets and running ne
 - **Interacts with**: `upscaleAudioAsset`.
 - **Rationale**: AudioSR has a general model and a speech model; users need to pick based on ambience/SFX/music versus dialogue.
 
+### Result and error panels
+- **Does**: Keep success paths and long subprocess errors inside the main pane with internal scrolling.
+- **Interacts with**: `audio_enhance.rs`.
+- **Rationale**: Python model stacks produce long tracebacks; they must remain readable without breaking the page layout.
+
 ### Setup guidance
-- **Does**: Shows the optional AudioSR setup command when the backend reports that the CLI is missing.
+- **Does**: Shows the optional AudioSR setup command when the backend reports that the CLI or known runtime dependencies are missing.
 - **Interacts with**: `inference/setup.sh`.
 
 ## Contracts
@@ -28,3 +33,4 @@ Dedicated post-processing page for reviewing generated WAV assets and running ne
 
 ## Notes
 - The page intentionally does not auto-install AudioSR. Optional model environments stay explicit because they are large and slow.
+- The main pane intentionally fills available canvas width. Avoid reintroducing narrow centered columns; this is a production workbench, not a document layout.

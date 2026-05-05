@@ -2,3 +2,5 @@
 # Installed into inference/.venv-audiosr by setup.sh when:
 #   PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh
 audiosr==0.0.7
+setuptools<70
+urllib3<2

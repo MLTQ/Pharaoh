@@ -121,10 +121,13 @@ export const UpscaleView: React.FC = () => {
       setBusy(false);
     }
   };
+  const showSetupCommand = error?.includes("AudioSR CLI not found")
+    || error?.includes("No module named 'pkg_resources'")
+    || error?.includes("NotOpenSSLWarning");
 
   return (
     <div className="panel-view" style={{ overflow: "hidden" }}>
-      <div style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(280px, 360px) 1fr" }}>
+      <div style={{ height: "100%", display: "grid", gridTemplateColumns: "minmax(300px, 420px) minmax(0, 1fr)" }}>
         <div style={{
           borderRight: "1px solid var(--line-1)",
           background: "var(--bg-1)",
@@ -212,11 +215,11 @@ export const UpscaleView: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", padding: "28px 34px" }}>
+        <div style={{ overflowY: "auto", overflowX: "hidden", padding: "28px 34px", minWidth: 0 }}>
           {!selected ? (
             <div style={{ color: "var(--fg-4)", fontSize: 13 }}>Select a generated sound to upscale.</div>
           ) : (
-            <div style={{ maxWidth: 820, display: "flex", flexDirection: "column", gap: 18 }}>
+            <div style={{ width: "100%", display: "flex", flexDirection: "column", gap: 18 }}>
               <div style={{
                 border: "1px solid var(--line-1)",
                 background: "var(--bg-1)",
@@ -241,11 +244,11 @@ export const UpscaleView: React.FC = () => {
                   <PlayButton path={selected.audio_path} size={14} />
                 </div>
 
-                <div style={{ minHeight: 66, border: "1px solid var(--line-1)", background: "var(--bg-0)", borderRadius: 2, padding: 10 }}>
+                <div style={{ minHeight: 66, border: "1px solid var(--line-1)", background: "var(--bg-0)", borderRadius: 2, padding: 10, overflow: "hidden" }}>
                   {peaks[selected.audio_path] ? (
-                    <PeaksWave peaks={peaks[selected.audio_path]} width={620} height={54} color={KIND_COLOR[selected.kind]} opacity={0.9} />
+                    <PeaksWave peaks={peaks[selected.audio_path]} width={920} height={54} color={KIND_COLOR[selected.kind]} opacity={0.9} />
                   ) : (
-                    <Wave width={620} height={54} seed={selected.name.charCodeAt(0)} count={120} color={KIND_COLOR[selected.kind]} opacity={0.75} />
+                    <Wave width={920} height={54} seed={selected.name.charCodeAt(0)} count={150} color={KIND_COLOR[selected.kind]} opacity={0.75} />
                   )}
                 </div>
 
@@ -260,7 +263,7 @@ export const UpscaleView: React.FC = () => {
                 borderRadius: 3,
                 padding: 18,
                 display: "grid",
-                gridTemplateColumns: "repeat(4, minmax(120px, 1fr))",
+                gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))",
                 gap: 12,
               }}>
                 <label>
@@ -304,19 +307,29 @@ export const UpscaleView: React.FC = () => {
               </div>
 
               {lastOutput && (
-                <div style={{ border: "1px solid var(--st-rendered)", borderRadius: 3, padding: 12, color: "var(--st-rendered)", fontSize: 12 }}>
-                  Upscaled asset written: <code>{lastOutput}</code>
+                <div style={{ border: "1px solid var(--st-rendered)", borderRadius: 3, padding: 12, color: "var(--st-rendered)", fontSize: 12, overflowWrap: "anywhere" }}>
+                  Upscaled asset written: <code style={{ overflowWrap: "anywhere" }}>{lastOutput}</code>
                   <span style={{ marginLeft: 10 }}><PlayButton path={lastOutput} size={12} /></span>
                 </div>
               )}
 
               {error && (
-                <div style={{ border: "1px solid var(--sfx)", borderRadius: 3, padding: 12, color: "var(--fg-2)", fontSize: 12, lineHeight: 1.6 }}>
+                <div style={{ border: "1px solid var(--sfx)", borderRadius: 3, padding: 12, color: "var(--fg-2)", fontSize: 12, lineHeight: 1.6, overflow: "hidden" }}>
                   <div style={{ color: "var(--sfx)", marginBottom: 8 }}>AudioSR could not run:</div>
-                  <code style={{ whiteSpace: "pre-wrap", wordBreak: "break-word" }}>{error}</code>
-                  {error.includes("AudioSR CLI not found") && (
+                  <pre style={{
+                    margin: 0,
+                    maxHeight: 360,
+                    overflow: "auto",
+                    whiteSpace: "pre-wrap",
+                    overflowWrap: "anywhere",
+                    wordBreak: "break-word",
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 11,
+                    lineHeight: 1.55,
+                  }}>{error}</pre>
+                  {showSetupCommand && (
                     <div style={{ marginTop: 12 }}>
-                      <div style={{ color: "var(--fg-3)", marginBottom: 6 }}>Install the optional AudioSR environment:</div>
+                      <div style={{ color: "var(--fg-3)", marginBottom: 6 }}>Install or refresh the optional AudioSR environment:</div>
                       <CopyableCommand command={AUDIOSR_SETUP} />
                     </div>
                   )}
