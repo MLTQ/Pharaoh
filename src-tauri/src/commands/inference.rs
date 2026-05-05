@@ -1,31 +1,45 @@
-use std::time::Duration;
-use std::path::{Path, PathBuf};
-use tauri::{AppHandle, Emitter, Manager};
 use crate::app_support::{app_projects_dir, bind_generated_asset};
 use crate::error::{Error, Result};
+use std::path::{Path, PathBuf};
+use std::time::Duration;
+use tauri::{AppHandle, Emitter, Manager};
 
 // ── Hardware detection ────────────────────────────────────────────────────
 
 #[derive(serde::Serialize)]
 pub struct HardwareProfile {
-    pub os: String,      // "macos" | "linux" | "windows"
-    pub arch: String,    // "aarch64" | "x86_64" | other
-    pub gpu: String,     // "cuda" | "mps" | "cpu"
+    pub os: String,       // "macos" | "linux" | "windows"
+    pub arch: String,     // "aarch64" | "x86_64" | other
+    pub gpu: String,      // "cuda" | "mps" | "cpu"
     pub gpu_name: String, // e.g. "NVIDIA GeForce RTX 4090" or ""
 }
 
 #[tauri::command]
 pub async fn detect_hardware() -> HardwareProfile {
-    let os = if cfg!(target_os = "macos") { "macos" }
-             else if cfg!(target_os = "linux") { "linux" }
-             else { "windows" }.to_string();
+    let os = if cfg!(target_os = "macos") {
+        "macos"
+    } else if cfg!(target_os = "linux") {
+        "linux"
+    } else {
+        "windows"
+    }
+    .to_string();
 
-    let arch = if cfg!(target_arch = "aarch64") { "aarch64" }
-               else { "x86_64" }.to_string();
+    let arch = if cfg!(target_arch = "aarch64") {
+        "aarch64"
+    } else {
+        "x86_64"
+    }
+    .to_string();
 
     // Apple Silicon → MPS
     if cfg!(all(target_os = "macos", target_arch = "aarch64")) {
-        return HardwareProfile { os, arch, gpu: "mps".into(), gpu_name: "Apple Silicon".into() };
+        return HardwareProfile {
+            os,
+            arch,
+            gpu: "mps".into(),
+            gpu_name: "Apple Silicon".into(),
+        };
     }
 
     // Try nvidia-smi for CUDA
@@ -35,37 +49,49 @@ pub async fn detect_hardware() -> HardwareProfile {
     {
         if out.status.success() {
             let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
-            return HardwareProfile { os, arch, gpu: "cuda".into(), gpu_name: name };
+            return HardwareProfile {
+                os,
+                arch,
+                gpu: "cuda".into(),
+                gpu_name: name,
+            };
         }
     }
 
-    HardwareProfile { os, arch, gpu: "cpu".into(), gpu_name: String::new() }
+    HardwareProfile {
+        os,
+        arch,
+        gpu: "cpu".into(),
+        gpu_name: String::new(),
+    }
 }
 use crate::models::{
     AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus,
-    MusicText2MusicRequest, ServerHealth, SfxT2ARequest, SidecarMeta,
-    TtsCustomVoiceRequest, TtsVoiceCloneRequest, TtsVoiceDesignRequest,
+    MusicText2MusicRequest, ServerHealth, SfxT2ARequest, SidecarMeta, TtsCustomVoiceRequest,
+    TtsVoiceCloneRequest, TtsVoiceDesignRequest,
 };
 use chrono::Utc;
 
 // ── Health check ─────────────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn check_server_health(
-    app: AppHandle,
-    model: String,
-) -> Result<ServerHealth> {
+pub async fn check_server_health(app: AppHandle, model: String) -> Result<ServerHealth> {
     let state = app.state::<AppState>();
     let url = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         match model.as_str() {
-            "tts"   => format!("{}/health", cfg.tts_url),
-            "sfx"   => format!("{}/health", cfg.sfx_url),
+            "tts" => format!("{}/health", cfg.tts_url),
+            "sfx" => format!("{}/health", cfg.sfx_url),
             "music" => format!("{}/health", cfg.music_url),
-            other   => return Err(Error::Other(format!("unknown model: {}", other))),
+            "post" => format!("{}/health", cfg.post_url),
+            other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };
-    let resp = state.http
+    let resp = state
+        .http
         .get(&url)
         .timeout(Duration::from_secs(3))
         .send()
@@ -84,32 +110,44 @@ pub async fn update_server_config(
     tts_url: Option<String>,
     sfx_url: Option<String>,
     music_url: Option<String>,
+    post_url: Option<String>,
 ) -> Result<()> {
     let state = app.state::<AppState>();
-    let mut cfg = state.server_config.write().map_err(|_| Error::Other("lock poisoned".into()))?;
-    if let Some(u) = tts_url   { cfg.tts_url = u; }
-    if let Some(u) = sfx_url   { cfg.sfx_url = u; }
-    if let Some(u) = music_url { cfg.music_url = u; }
+    let mut cfg = state
+        .server_config
+        .write()
+        .map_err(|_| Error::Other("lock poisoned".into()))?;
+    if let Some(u) = tts_url {
+        cfg.tts_url = u;
+    }
+    if let Some(u) = sfx_url {
+        cfg.sfx_url = u;
+    }
+    if let Some(u) = music_url {
+        cfg.music_url = u;
+    }
+    if let Some(u) = post_url {
+        cfg.post_url = u;
+    }
     Ok(())
 }
-
 
 // ── Model load / unload ──────────────────────────────────────────────────
 
 #[tauri::command]
-pub async fn load_model(
-    app: AppHandle,
-    model: String,
-    variant: Option<String>,
-) -> Result<()> {
+pub async fn load_model(app: AppHandle, model: String, variant: Option<String>) -> Result<()> {
     let state = app.state::<AppState>();
     let url = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         match model.as_str() {
-            "tts"   => format!("{}/load", cfg.tts_url),
-            "sfx"   => format!("{}/load", cfg.sfx_url),
+            "tts" => format!("{}/load", cfg.tts_url),
+            "sfx" => format!("{}/load", cfg.sfx_url),
             "music" => format!("{}/load", cfg.music_url),
-            other   => return Err(Error::Other(format!("unknown model: {}", other))),
+            "post" => format!("{}/load", cfg.post_url),
+            other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };
     let mut req = state.http.post(&url);
@@ -125,53 +163,73 @@ pub async fn load_model(
         loop {
             tokio::time::sleep(Duration::from_millis(400)).await;
             p = (p + 0.015).min(0.92);
-            let _ = app_tick.emit("model-load-progress", serde_json::json!({
-                "model": model_tick, "progress": p,
-            }));
+            let _ = app_tick.emit(
+                "model-load-progress",
+                serde_json::json!({
+                    "model": model_tick, "progress": p,
+                }),
+            );
         }
     });
 
     // Model loading can take 30-120 s on first call (weights → VRAM)
-    let send_result = req.timeout(std::time::Duration::from_secs(180))
+    let send_result = req
+        .timeout(std::time::Duration::from_secs(180))
         .send()
         .await;
     ticker.abort();
 
-    let resp = send_result
-        .map_err(|e| {
-            let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 0.0 }));
-            Error::Other(format!("load request failed: {}", e))
-        })?;
+    let resp = send_result.map_err(|e| {
+        let _ = app.emit(
+            "model-load-progress",
+            serde_json::json!({ "model": model, "progress": 0.0 }),
+        );
+        Error::Other(format!("load request failed: {}", e))
+    })?;
 
-    let body: serde_json::Value = resp.json().await
+    let body: serde_json::Value = resp
+        .json()
+        .await
         .map_err(|e| Error::Other(format!("load response parse error: {}", e)))?;
 
     if body.get("status").and_then(|v| v.as_str()) == Some("error") {
-        let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 0.0 }));
-        let msg = body.get("error").and_then(|v| v.as_str()).unwrap_or("unknown error");
+        let _ = app.emit(
+            "model-load-progress",
+            serde_json::json!({ "model": model, "progress": 0.0 }),
+        );
+        let msg = body
+            .get("error")
+            .and_then(|v| v.as_str())
+            .unwrap_or("unknown error");
         return Err(Error::Other(format!("model load failed: {}", msg)));
     }
 
-    let _ = app.emit("model-load-progress", serde_json::json!({ "model": model, "progress": 1.0 }));
+    let _ = app.emit(
+        "model-load-progress",
+        serde_json::json!({ "model": model, "progress": 1.0 }),
+    );
     Ok(())
 }
 
 #[tauri::command]
-pub async fn unload_model(
-    app: AppHandle,
-    model: String,
-) -> Result<()> {
+pub async fn unload_model(app: AppHandle, model: String) -> Result<()> {
     let state = app.state::<AppState>();
     let url = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         match model.as_str() {
-            "tts"   => format!("{}/unload", cfg.tts_url),
-            "sfx"   => format!("{}/unload", cfg.sfx_url),
+            "tts" => format!("{}/unload", cfg.tts_url),
+            "sfx" => format!("{}/unload", cfg.sfx_url),
             "music" => format!("{}/unload", cfg.music_url),
-            other   => return Err(Error::Other(format!("unknown model: {}", other))),
+            "post" => format!("{}/unload", cfg.post_url),
+            other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };
-    state.http.post(&url)
+    state
+        .http
+        .post(&url)
         .timeout(std::time::Duration::from_secs(10))
         .send()
         .await
@@ -206,30 +264,39 @@ async fn poll_until_done(
             Ok(r) => match r.json().await {
                 Ok(s) => s,
                 Err(e) => {
-                    let _ = app.emit("job-failed", &JobFailedEvent {
-                        job_id: job_id.clone(),
-                        model: model.clone(),
-                        error: format!("parse error: {}", e),
-                    });
+                    let _ = app.emit(
+                        "job-failed",
+                        &JobFailedEvent {
+                            job_id: job_id.clone(),
+                            model: model.clone(),
+                            error: format!("parse error: {}", e),
+                        },
+                    );
                     return;
                 }
             },
             Err(e) => {
-                let _ = app.emit("job-failed", &JobFailedEvent {
-                    job_id: job_id.clone(),
-                    model: model.clone(),
-                    error: format!("poll error: {}", e),
-                });
+                let _ = app.emit(
+                    "job-failed",
+                    &JobFailedEvent {
+                        job_id: job_id.clone(),
+                        model: model.clone(),
+                        error: format!("poll error: {}", e),
+                    },
+                );
                 return;
             }
         };
 
-        let _ = app.emit("job-progress", &JobProgressEvent {
-            job_id: job_id.clone(),
-            model: model.clone(),
-            status: status.status.clone(),
-            progress: status.progress,
-        });
+        let _ = app.emit(
+            "job-progress",
+            &JobProgressEvent {
+                job_id: job_id.clone(),
+                model: model.clone(),
+                status: status.status.clone(),
+                progress: status.progress,
+            },
+        );
 
         match status.status.as_str() {
             "complete" => {
@@ -244,32 +311,41 @@ async fn poll_until_done(
                 ) {
                     Ok(finalized) => finalized,
                     Err(e) => {
-                        let _ = app.emit("job-failed", &JobFailedEvent {
-                            job_id: job_id.clone(),
-                            model: model.clone(),
-                            error: format!("finalization error: {}", e),
-                        });
+                        let _ = app.emit(
+                            "job-failed",
+                            &JobFailedEvent {
+                                job_id: job_id.clone(),
+                                model: model.clone(),
+                                error: format!("finalization error: {}", e),
+                            },
+                        );
                         return;
                     }
                 };
-                let _ = app.emit("job-complete", &JobCompleteEvent {
-                    job_id: job_id.clone(),
-                    model: model.clone(),
-                    output_path: finalized.output_path,
-                    project_id,
-                    scene_slug,
-                    row_index,
-                    duration_ms: finalized.duration_ms,
-                    bound_to_script: finalized.bound_to_script,
-                });
+                let _ = app.emit(
+                    "job-complete",
+                    &JobCompleteEvent {
+                        job_id: job_id.clone(),
+                        model: model.clone(),
+                        output_path: finalized.output_path,
+                        project_id,
+                        scene_slug,
+                        row_index,
+                        duration_ms: finalized.duration_ms,
+                        bound_to_script: finalized.bound_to_script,
+                    },
+                );
                 return;
             }
             "failed" => {
-                let _ = app.emit("job-failed", &JobFailedEvent {
-                    job_id: job_id.clone(),
-                    model: model.clone(),
-                    error: status.error.unwrap_or_else(|| "unknown error".into()),
-                });
+                let _ = app.emit(
+                    "job-failed",
+                    &JobFailedEvent {
+                        job_id: job_id.clone(),
+                        model: model.clone(),
+                        error: status.error.unwrap_or_else(|| "unknown error".into()),
+                    },
+                );
                 return;
             }
             _ => {} // pending | running — keep polling
@@ -328,7 +404,6 @@ pub fn finalize_generation_output(
     })
 }
 
-
 // ── TTS commands ──────────────────────────────────────────────────────────
 
 #[tauri::command]
@@ -342,7 +417,10 @@ pub async fn submit_tts_custom_voice(
     let state = app.state::<AppState>();
     let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
     };
 
@@ -366,7 +444,11 @@ pub async fn submit_tts_custom_voice(
         model: "qwen3-tts-customvoice".into(),
         model_variant: Some("1.7B".into()),
         prompt: params.text.clone(),
-        instruct: if params.instruct.is_empty() { None } else { Some(params.instruct.clone()) },
+        instruct: if params.instruct.is_empty() {
+            None
+        } else {
+            Some(params.instruct.clone())
+        },
         speaker: Some(params.speaker.clone()),
         language: Some(params.language.clone()),
         seed: params.seed,
@@ -409,7 +491,10 @@ pub async fn submit_tts_voice_design(
     let state = app.state::<AppState>();
     let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
     };
 
@@ -450,9 +535,16 @@ pub async fn submit_tts_voice_design(
     };
 
     tokio::spawn(poll_until_done(
-        app.clone(), http,
-        format!("{}/jobs", base_url), job_id.clone(),
-        "tts".into(), project_id, scene_slug, row_index, projects_dir, meta,
+        app.clone(),
+        http,
+        format!("{}/jobs", base_url),
+        job_id.clone(),
+        "tts".into(),
+        project_id,
+        scene_slug,
+        row_index,
+        projects_dir,
+        meta,
     ));
     Ok(job_id)
 }
@@ -468,7 +560,10 @@ pub async fn submit_tts_voice_clone(
     let state = app.state::<AppState>();
     let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.tts_url.clone(), state.http.clone())
     };
 
@@ -509,13 +604,19 @@ pub async fn submit_tts_voice_clone(
     };
 
     tokio::spawn(poll_until_done(
-        app.clone(), http,
-        format!("{}/jobs", base_url), job_id.clone(),
-        "tts".into(), project_id, scene_slug, row_index, projects_dir, meta,
+        app.clone(),
+        http,
+        format!("{}/jobs", base_url),
+        job_id.clone(),
+        "tts".into(),
+        project_id,
+        scene_slug,
+        row_index,
+        projects_dir,
+        meta,
     ));
     Ok(job_id)
 }
-
 
 // ── SFX commands ──────────────────────────────────────────────────────────
 
@@ -530,7 +631,10 @@ pub async fn submit_sfx_t2a(
     let state = app.state::<AppState>();
     let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.sfx_url.clone(), state.http.clone())
     };
 
@@ -578,13 +682,19 @@ pub async fn submit_sfx_t2a(
     };
 
     tokio::spawn(poll_until_done(
-        app.clone(), http,
-        format!("{}/jobs", base_url), job_id.clone(),
-        "sfx".into(), project_id, scene_slug, row_index, projects_dir, meta,
+        app.clone(),
+        http,
+        format!("{}/jobs", base_url),
+        job_id.clone(),
+        "sfx".into(),
+        project_id,
+        scene_slug,
+        row_index,
+        projects_dir,
+        meta,
     ));
     Ok(job_id)
 }
-
 
 // ── Music commands ────────────────────────────────────────────────────────
 
@@ -599,7 +709,10 @@ pub async fn submit_music_text2music(
     let state = app.state::<AppState>();
     let projects_dir = app_projects_dir(&app)?;
     let (base_url, http) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         (cfg.music_url.clone(), state.http.clone())
     };
 
@@ -623,7 +736,11 @@ pub async fn submit_music_text2music(
         model: "ace-step-1.5".into(),
         model_variant: Some(params.lm_model_size.clone()),
         prompt: params.caption.clone(),
-        instruct: if params.lyrics.is_empty() { None } else { Some(params.lyrics.clone()) },
+        instruct: if params.lyrics.is_empty() {
+            None
+        } else {
+            Some(params.lyrics.clone())
+        },
         speaker: None,
         language: Some(params.language.clone()),
         seed: params.seed,
@@ -633,16 +750,27 @@ pub async fn submit_music_text2music(
         duration_actual_ms: None,
         sample_rate: 44100,
         generated_at: Utc::now(),
-        parent: if params.reference_audio_path.is_empty() { None } else { Some(params.reference_audio_path.clone()) },
+        parent: if params.reference_audio_path.is_empty() {
+            None
+        } else {
+            Some(params.reference_audio_path.clone())
+        },
         take_index: 1,
         qa_status: "unreviewed".into(),
         qa_notes: String::new(),
     };
 
     tokio::spawn(poll_until_done(
-        app.clone(), http,
-        format!("{}/jobs", base_url), job_id.clone(),
-        "music".into(), project_id, scene_slug, row_index, projects_dir, meta,
+        app.clone(),
+        http,
+        format!("{}/jobs", base_url),
+        job_id.clone(),
+        "music".into(),
+        project_id,
+        scene_slug,
+        row_index,
+        projects_dir,
+        meta,
     ));
     Ok(job_id)
 }

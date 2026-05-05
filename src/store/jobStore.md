@@ -1,7 +1,7 @@
 # jobStore.ts
 
 ## Purpose
-Frontend store for generation and post-processing jobs, active takes, and event listeners. It translates Tauri inference/post events into UI state used by the queue, asset browser, and script views.
+Frontend store for generation and Post-server jobs, active takes, and event listeners. It translates Tauri inference/post events into UI state used by the queue, asset browser, and script views.
 
 ## Components
 
@@ -24,7 +24,7 @@ Frontend store for generation and post-processing jobs, active takes, and event 
 | `AssetBrowser.tsx` | First completed take for a row is auto-selected | Changing active-take behavior |
 | `CompositionView.tsx` | Completed jobs are visible in state quickly enough to trigger script refresh | Delayed or missing completion updates |
 | `inference.rs` | Event payloads match these TypeScript interfaces | Payload drift |
-| `audio_enhance.rs` | AudioSR progress events can update caller-created `post` jobs | Changing event id/model |
+| `audio_enhance.rs` | AudioSR progress events can update caller-created `post` jobs without auto-selecting a script take | Changing event id/model |
 
 ## Notes
 - The store does not write `script.csv` itself on completion; backend finalization owns that. The UI only mirrors the resulting state.

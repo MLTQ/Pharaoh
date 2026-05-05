@@ -1,12 +1,15 @@
+use crate::error::{Error, Result};
+use crate::models::{AllServerHealth, AppConfig, AppState, ServerHealth};
 use std::time::Duration;
 use tauri::{AppHandle, Manager};
-use crate::error::{Error, Result};
-use crate::models::{AppConfig, AllServerHealth, AppState, ServerHealth};
 
 #[tauri::command]
 pub async fn get_app_config(app: AppHandle) -> Result<AppConfig> {
     let state = app.state::<AppState>();
-    let cfg = state.app_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
+    let cfg = state
+        .app_config
+        .read()
+        .map_err(|_| Error::Other("lock poisoned".into()))?;
     Ok(cfg.clone())
 }
 
@@ -16,10 +19,14 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
 
     // Sync the in-memory server config so live requests use new URLs immediately
     {
-        let mut scfg = state.server_config.write().map_err(|_| Error::Other("lock poisoned".into()))?;
-        scfg.tts_url   = config.tts_url.clone();
-        scfg.sfx_url   = config.sfx_url.clone();
+        let mut scfg = state
+            .server_config
+            .write()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
+        scfg.tts_url = config.tts_url.clone();
+        scfg.sfx_url = config.sfx_url.clone();
         scfg.music_url = config.music_url.clone();
+        scfg.post_url = config.post_url.clone();
     }
 
     // Ensure projects_dir exists when changed
@@ -41,7 +48,10 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
 
     // Update in-memory config
     {
-        let mut acfg = state.app_config.write().map_err(|_| Error::Other("lock poisoned".into()))?;
+        let mut acfg = state
+            .app_config
+            .write()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
         *acfg = config;
     }
 
@@ -51,9 +61,17 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
 #[tauri::command]
 pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
     let state = app.state::<AppState>();
-    let (tts_url, sfx_url, music_url) = {
-        let cfg = state.server_config.read().map_err(|_| Error::Other("lock poisoned".into()))?;
-        (cfg.tts_url.clone(), cfg.sfx_url.clone(), cfg.music_url.clone())
+    let (tts_url, sfx_url, music_url, post_url) = {
+        let cfg = state
+            .server_config
+            .read()
+            .map_err(|_| Error::Other("lock poisoned".into()))?;
+        (
+            cfg.tts_url.clone(),
+            cfg.sfx_url.clone(),
+            cfg.music_url.clone(),
+            cfg.post_url.clone(),
+        )
     };
     let http = state.http.clone();
 
@@ -71,8 +89,14 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
     let (tts, sfx, music) = tokio::join!(
         try_health(http.clone(), tts_url),
         try_health(http.clone(), sfx_url),
-        try_health(http, music_url),
+        try_health(http.clone(), music_url),
     );
+    let post = try_health(http, post_url).await;
 
-    Ok(AllServerHealth { tts, sfx, music })
+    Ok(AllServerHealth {
+        tts,
+        sfx,
+        music,
+        post,
+    })
 }

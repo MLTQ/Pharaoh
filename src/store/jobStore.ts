@@ -99,7 +99,7 @@ export const useJobStore = create<JobState>((set, get) => ({
 
         // Auto-select as active take if this row has no active take yet
         const key = takeKey(payload.scene_slug, payload.row_index);
-        if (!get().activeTakes[key]) {
+        if (payload.model !== "post" && !get().activeTakes[key]) {
           get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
         }
 

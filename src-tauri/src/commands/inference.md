@@ -6,7 +6,7 @@ Tauri inference commands and generation lifecycle handling. This file submits jo
 ## Components
 
 ### `check_server_health`, `update_server_config`, `load_model`, `unload_model`
-- **Does**: Manage server connectivity and model lifecycle.
+- **Does**: Manage server connectivity and model lifecycle for TTS, SFX, music, and Post services.
 - **Interacts with**: `modelStore.ts`, settings UI.
 
 ### `submit_tts_*`, `submit_sfx_t2a`, `submit_music_text2music`

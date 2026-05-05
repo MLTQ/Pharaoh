@@ -39,6 +39,7 @@ export interface AppConfig {
   tts_url: string;
   sfx_url: string;
   music_url: string;
+  post_url: string;
   tts_public: boolean;
   sfx_public: boolean;
   music_public: boolean;
@@ -51,6 +52,7 @@ export interface AllServerHealth {
   tts: ServerHealth | null;
   sfx: ServerHealth | null;
   music: ServerHealth | null;
+  post: ServerHealth | null;
 }
 
 export interface ServerHealth {
@@ -66,6 +68,9 @@ export interface ServerHealth {
   audioldm_engine?: string;
   audioldm_cuda?: boolean | null;
   audioldm_loaded?: boolean;
+  audiosr_ready?: boolean;
+  audiosr_error?: string;
+  audiosr_cli?: string;
 }
 
 // ── Storyboard ──────────────────────────────────────────────────────────────

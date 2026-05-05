@@ -24,9 +24,9 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Rationale**: Woosh remains the default high-quality short-foley backend. AudioLDM is isolated because the Woosh dependency stack makes the diffusers AudioLDM path unreliable.
 
 ### AudioSR env section
-- **Does**: Optionally creates `inference/.venv-audiosr` and installs the AudioSR CLI when `PHARAOH_INSTALL_AUDIOSR=1`.
-- **Interacts with**: `audio_enhance.rs`, `UpscaleView.tsx`, `requirements-audiosr.txt`.
-- **Rationale**: Neural upscaling is a post-processing concern with another heavy dependency stack, so it stays separate from generation servers.
+- **Does**: Optionally creates `inference/.venv-audiosr` and installs the AudioSR CLI used by `post_server.py` when `PHARAOH_INSTALL_AUDIOSR=1`.
+- **Interacts with**: `post_server.py`, `audio_enhance.rs`, `UpscaleView.tsx`, `requirements-audiosr.txt`.
+- **Rationale**: Neural upscaling is ML work and must stay on the inference host, but it needs its own dependency stack.
 
 ## Contracts
 

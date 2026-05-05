@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Start all three Pharaoh inference servers.
+# Start Pharaoh inference servers.
 # Usage: ./inference/start_servers.sh
 #
 # First time? Run:  ./inference/setup.sh
@@ -9,6 +9,7 @@
 #   Music : inference/.venv-music/bin/python3     (PHARAOH_MUSIC_PYTHON)
 #   SFX   : ~/Code/Woosh/.venv/bin/python3        (PHARAOH_WOOSH_DIR)
 #           optional AudioLDM runner: inference/.venv-audioldm/bin/python3
+#   Post  : inference/.venv-audiosr/bin/python3   (optional AudioSR)
 #
 # These envs MUST be separate — qwen-tts, ace-step, Woosh, and AudioLDM
 # pin or expect incompatible transformers/runtime stacks.
@@ -27,6 +28,7 @@ export PHARAOH_AUDIOLDM_PYTHON="${PHARAOH_AUDIOLDM_PYTHON:-${SCRIPT_DIR}/.venv-a
 # Resolve Python interpreters — uv venvs by default, overridable.
 TTS_PYTHON="${PHARAOH_TTS_PYTHON:-${SCRIPT_DIR}/.venv-tts/bin/python3}"
 MUSIC_PYTHON="${PHARAOH_MUSIC_PYTHON:-${SCRIPT_DIR}/.venv-music/bin/python3}"
+POST_PYTHON="${PHARAOH_POST_PYTHON:-${SCRIPT_DIR}/.venv-audiosr/bin/python3}"
 WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
 
 missing=0
@@ -49,6 +51,11 @@ echo "  SFX   : ${WOOSH_PYTHON} (Woosh)"
 echo "  SFX+  : ${PHARAOH_AUDIOLDM_PYTHON} (optional AudioLDM runner)"
 echo "  SFX+ models: ${AUDIOLDM_CACHE_DIR}"
 echo "  Music : ${MUSIC_PYTHON}"
+if [ -x "${POST_PYTHON}" ]; then
+    echo "  Post  : ${POST_PYTHON} (AudioSR)"
+else
+    echo "  Post  : not installed (PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh)"
+fi
 echo ""
 
 cd "$SCRIPT_DIR"
@@ -56,10 +63,16 @@ cd "$SCRIPT_DIR"
 "${TTS_PYTHON}"   tts_server.py   &
 "${WOOSH_PYTHON}" sfx_server.py   &
 "${MUSIC_PYTHON}" music_server.py &
+if [ -x "${POST_PYTHON}" ]; then
+    "${POST_PYTHON}" post_server.py &
+fi
 
 echo "  TTS   → http://localhost:18001/health"
 echo "  SFX   → http://localhost:18002/health"
 echo "  Music → http://localhost:18003/health"
+if [ -x "${POST_PYTHON}" ]; then
+    echo "  Post  → http://localhost:18004/health"
+fi
 echo ""
 echo "Press Ctrl-C to stop all servers."
 wait

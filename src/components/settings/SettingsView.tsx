@@ -72,7 +72,7 @@ const MODELS = [
     kind: "post" as const,
     label: "AudioSR",
     description: "Post-processing — neural audio upscaling to 48 kHz",
-    port: null as null,
+    port: 18004,
     variants: null as null,
     install: "PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh",
   },
@@ -551,15 +551,16 @@ function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
 
 export const SettingsView: React.FC = () => {
   const hw = useHardwareProfile();
-  const { tts, sfx, music, health, updateServerConfig } = useModelStore();
+  const { tts, sfx, music, post, health, updateServerConfig } = useModelStore();
 
-  const statusMap = { tts, sfx, music, post: "unknown" as const };
-  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: null };
+  const statusMap = { tts, sfx, music, post };
+  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post };
 
   const [urls, setUrls] = useState({
     tts:   `http://127.0.0.1:18001`,
     sfx:   `http://127.0.0.1:18002`,
     music: `http://127.0.0.1:18003`,
+    post:  `http://127.0.0.1:18004`,
   });
 
   const [wooshDir, setWooshDir] = useState("");
@@ -567,13 +568,15 @@ export const SettingsView: React.FC = () => {
   // Load persisted config on mount
   useEffect(() => {
     invoke<AppConfig>("get_app_config").then((cfg) => {
-      setUrls({ tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url });
+      setUrls({ tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url, post: cfg.post_url });
       setWooshDir(cfg.woosh_dir ?? "");
     }).catch(() => {});
   }, []);
 
-  const handleUrlBlur = async (kind: "tts" | "sfx" | "music") => {
+  const handleUrlBlur = async (kind: "tts" | "sfx" | "music" | "post") => {
     await updateServerConfig({ [`${kind}_url`]: urls[kind] });
+    const cfg = await invoke<AppConfig>("get_app_config");
+    await invoke("save_app_config", { config: { ...cfg, [`${kind}_url`]: urls[kind] } });
   };
 
   const handleBrowseWoosh = async () => {
@@ -656,7 +659,7 @@ export const SettingsView: React.FC = () => {
               {/* Body */}
               <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* URL + health */}
-                {m.kind !== "post" && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}>
                     <Label>Server URL</Label>
                     <input
@@ -692,7 +695,7 @@ export const SettingsView: React.FC = () => {
                       {h?.vram_mb ? ` · ${h.vram_mb} MB` : ""}
                     </span>
                   </div>
-                </div>}
+                </div>
 
                 {/* Woosh directory (SFX only) */}
                 {m.kind === "sfx" && (
@@ -811,8 +814,8 @@ export const SettingsView: React.FC = () => {
                     <SfxDownloads />
                   ) : m.kind === "post" ? (
                     <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
-                      AudioSR downloads its own checkpoints on first upscale. Use the Audio Upscale page to
-                      select generated WAVs and run the optional post-processing pass.
+                      AudioSR runs through the Post server so upscaling can live on the remote ML host.
+                      It downloads its own checkpoints on first upscale.
                     </div>
                   ) : (
                     <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />

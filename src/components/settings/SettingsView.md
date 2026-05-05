@@ -1,12 +1,12 @@
 # SettingsView.tsx
 
 ## Purpose
-Settings panel for inference server URLs, model download commands, optional post-processing setup, and install guidance.
+Settings panel for inference server URLs, model download commands, post-processing server setup, and install guidance.
 
 ## Components
 
 ### Model cards
-- **Does**: Render per-server URL, health, model download instructions, and install commands.
+- **Does**: Render per-server URL, health, model download instructions, and install commands; URL edits update live config and persist to app config.
 - **Interacts with**: `modelStore.ts`, Tauri settings commands.
 
 ### SFX downloads
@@ -15,9 +15,9 @@ Settings panel for inference server URLs, model download commands, optional post
 - **Rationale**: Woosh and AudioLDM share the SFX server but have different setup paths. Native AudioLDM setup is the production path and expects `audioldm-m-full.ckpt` in `~/pharaoh-models/sfx/audioldm`; the Hugging Face command is retained only for the explicit diffusers fallback engine.
 
 ### AudioSR setup
-- **Does**: Shows the optional AudioSR install command for neural upscaling.
-- **Interacts with**: `UpscaleView.tsx`, `audio_enhance.rs`, `setup.sh`.
-- **Rationale**: AudioSR is not an inference server; it is a post-processing CLI used on demand.
+- **Does**: Shows the Post server URL and optional AudioSR install command for neural upscaling.
+- **Interacts with**: `UpscaleView.tsx`, `audio_enhance.rs`, `post_server.py`, `setup.sh`.
+- **Rationale**: AudioSR must run on the inference host, not in the local desktop process.
 
 ## Contracts
 
@@ -25,7 +25,7 @@ Settings panel for inference server URLs, model download commands, optional post
 |-----------|---------|------------------|
 | `sfx_server.py` | Native AudioLDM is installed with `PHARAOH_INSTALL_AUDIOLDM=1`; native checkpoints land in `~/pharaoh-models/sfx/audioldm`; diffusers fallback may use the HF local directory | Changing setup guidance without updating server resolution |
 | Users | Woosh remains the required short-foley setup | Hiding Woosh behind AudioLDM setup |
-| `UpscaleView.tsx` | AudioSR setup command installs `inference/.venv-audiosr/bin/audiosr` | Showing a command that installs elsewhere |
+| `UpscaleView.tsx` | AudioSR setup command installs `inference/.venv-audiosr/bin/audiosr` and `post_url` points at the Post server | Showing a local-only CLI workflow |
 
 ## Notes
 - AudioLDM dependencies are installed separately with `PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh`; the native model command only places the `.ckpt` expected by the upstream CLI.

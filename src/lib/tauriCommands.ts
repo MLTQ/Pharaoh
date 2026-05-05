@@ -86,13 +86,14 @@ export const saveAppConfig = (config: AppConfig): Promise<void> =>
 export const getServerHealthAll = (): Promise<AllServerHealth> =>
   invoke("get_server_health_all");
 
-export const checkServerHealth = (model: "tts" | "sfx" | "music"): Promise<ServerHealth> =>
+export const checkServerHealth = (model: "tts" | "sfx" | "music" | "post"): Promise<ServerHealth> =>
   invoke("check_server_health", { model });
 
 export const updateServerConfig = (cfg: {
   ttsUrl?: string;
   sfxUrl?: string;
   musicUrl?: string;
+  postUrl?: string;
 }): Promise<void> => invoke("update_server_config", cfg);
 
 export const submitTtsCustomVoice = (args: {

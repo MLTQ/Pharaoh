@@ -17,19 +17,23 @@ export interface ServerHealth {
   audioldm_engine?: string;
   audioldm_cuda?: boolean | null;
   audioldm_loaded?: boolean;
+  audiosr_ready?: boolean;
+  audiosr_error?: string;
+  audiosr_cli?: string;
 }
 
 interface ModelState {
   tts: ServerStatus;
   sfx: ServerStatus;
   music: ServerStatus;
-  health: { tts: ServerHealth | null; sfx: ServerHealth | null; music: ServerHealth | null };
-  loadProgress: { tts: number; sfx: number; music: number };
+  post: ServerStatus;
+  health: { tts: ServerHealth | null; sfx: ServerHealth | null; music: ServerHealth | null; post: ServerHealth | null };
+  loadProgress: { tts: number; sfx: number; music: number; post: number };
   initListeners: () => Promise<() => void>;
   pollHealth: () => Promise<void>;
-  updateServerConfig: (cfg: { tts_url?: string; sfx_url?: string; music_url?: string }) => Promise<void>;
-  loadModel: (kind: "tts" | "sfx" | "music", variant?: string) => Promise<void>;
-  unloadModel: (kind: "tts" | "sfx" | "music") => Promise<void>;
+  updateServerConfig: (cfg: { tts_url?: string; sfx_url?: string; music_url?: string; post_url?: string }) => Promise<void>;
+  loadModel: (kind: "tts" | "sfx" | "music" | "post", variant?: string) => Promise<void>;
+  unloadModel: (kind: "tts" | "sfx" | "music" | "post") => Promise<void>;
 }
 
 async function fetchHealth(model: string): Promise<ServerHealth | null> {
@@ -44,14 +48,15 @@ export const useModelStore = create<ModelState>((set) => ({
   tts: "unknown",
   sfx: "unknown",
   music: "unknown",
-  health: { tts: null, sfx: null, music: null },
-  loadProgress: { tts: 0, sfx: 0, music: 0 },
+  post: "unknown",
+  health: { tts: null, sfx: null, music: null, post: null },
+  loadProgress: { tts: 0, sfx: 0, music: 0, post: 0 },
 
   initListeners: async () => {
     const unlisten = await listen<{ model: string; progress: number }>(
       "model-load-progress",
       ({ payload }) => {
-        const kind = payload.model as "tts" | "sfx" | "music";
+        const kind = payload.model as "tts" | "sfx" | "music" | "post";
         set((s) => ({ loadProgress: { ...s.loadProgress, [kind]: payload.progress } }));
       }
     );
@@ -59,16 +64,18 @@ export const useModelStore = create<ModelState>((set) => ({
   },
 
   pollHealth: async () => {
-    const [tts, sfx, music] = await Promise.all([
+    const [tts, sfx, music, post] = await Promise.all([
       fetchHealth("tts"),
       fetchHealth("sfx"),
       fetchHealth("music"),
+      fetchHealth("post"),
     ]);
     set({
       tts: tts ? "online" : "offline",
       sfx: sfx ? "online" : "offline",
       music: music ? "online" : "offline",
-      health: { tts, sfx, music },
+      post: post ? "online" : "offline",
+      health: { tts, sfx, music, post },
     });
   },
 

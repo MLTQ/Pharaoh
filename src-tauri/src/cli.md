@@ -34,9 +34,9 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 - **Interacts with**: `render_scene_with_projects_dir` in `commands/audio_engine.rs`.
 
 ### `post_upscale`
-- **Does**: Runs AudioSR upscaling on a generated WAV and prints the new output path as JSON.
-- **Interacts with**: `upscale_audio_asset_path` in `commands/audio_enhance.rs`.
-- **Rationale**: Agents need the same post-production upscaling path as the GUI.
+- **Does**: Submits AudioSR upscaling to the configured Post server, polls to completion, writes sidecar metadata, and prints the output path as JSON.
+- **Interacts with**: `post_server.py`, helpers in `commands/audio_enhance.rs`.
+- **Rationale**: Agents need the same remote-safe post-production upscaling path as the GUI.
 
 ## Contracts
 

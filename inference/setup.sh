@@ -133,13 +133,13 @@ fi
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 step "Done"
-ok "Run all three servers with:  ./inference/start_servers.sh"
+ok "Run available servers with:  ./inference/start_servers.sh"
 echo ""
 echo "${DIM}Next: download model weights into the directories below if you haven't already:${RESET}"
 echo "  TTS    → \$HOME/pharaoh-models/tts/{voice_design,base,custom_voice,tokenizer}/"
 echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
-echo "  Post   → AudioSR downloads its own checkpoints on first upscale"
+echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
 echo ""
 echo "See the Models page in the app for the exact model download commands."

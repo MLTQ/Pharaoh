@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -107,6 +107,7 @@ pub struct ServerConfig {
     pub tts_url: String,
     pub sfx_url: String,
     pub music_url: String,
+    pub post_url: String,
 }
 
 impl Default for ServerConfig {
@@ -115,8 +116,13 @@ impl Default for ServerConfig {
             tts_url: "http://127.0.0.1:18001".to_string(),
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
+            post_url: "http://127.0.0.1:18004".to_string(),
         }
     }
+}
+
+fn default_post_url() -> String {
+    "http://127.0.0.1:18004".to_string()
 }
 
 // ── Persistent app config ────────────────────────────────────────────────
@@ -126,6 +132,8 @@ pub struct AppConfig {
     pub tts_url: String,
     pub sfx_url: String,
     pub music_url: String,
+    #[serde(default = "default_post_url")]
+    pub post_url: String,
     /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
     pub tts_public: bool,
     pub sfx_public: bool,
@@ -143,12 +151,17 @@ impl AppConfig {
             tts_url: "http://127.0.0.1:18001".to_string(),
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
+            post_url: default_post_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
             projects_dir: home.join("pharaoh-projects").to_string_lossy().into_owned(),
             models_dir: home.join("pharaoh-models").to_string_lossy().into_owned(),
-            woosh_dir: home.join("Code").join("Woosh").to_string_lossy().into_owned(),
+            woosh_dir: home
+                .join("Code")
+                .join("Woosh")
+                .to_string_lossy()
+                .into_owned(),
         }
     }
 }
@@ -158,6 +171,7 @@ pub struct AllServerHealth {
     pub tts: Option<ServerHealth>,
     pub sfx: Option<ServerHealth>,
     pub music: Option<ServerHealth>,
+    pub post: Option<ServerHealth>,
 }
 
 pub struct AppState {
@@ -173,6 +187,7 @@ impl AppState {
             tts_url: app_config.tts_url.clone(),
             sfx_url: app_config.sfx_url.clone(),
             music_url: app_config.music_url.clone(),
+            post_url: app_config.post_url.clone(),
         };
         Self {
             http: reqwest::Client::new(),

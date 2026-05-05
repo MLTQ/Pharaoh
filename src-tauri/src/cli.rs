@@ -10,7 +10,7 @@ use crate::app_support::{
     read_script_rows, scene_dir, script_path, write_json,
 };
 use crate::commands::audio_engine::render_scene_with_projects_dir;
-use crate::commands::audio_enhance::upscale_audio_asset_path;
+use crate::commands::audio_enhance::{output_path_for, write_upscale_sidecar};
 use crate::commands::inference::finalize_generation_output;
 use crate::error::{Error, Result};
 use crate::models::{
@@ -37,7 +37,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             compose_render_scene(&config, project_id, scene_slug).await
         }
         [group, action, input_path, rest @ ..] if group == "post" && action == "upscale" => {
-            post_upscale(input_path, rest).await
+            post_upscale(&config, input_path, rest).await
         }
         [group, action, subaction, project_id, scene_slug, row_index]
             if group == "generate" && action == "row" && subaction == "scene" =>
@@ -211,7 +211,21 @@ async fn compose_render_scene(
     }))
 }
 
-async fn post_upscale(input_path: &str, rest: &[String]) -> Result<()> {
+#[derive(Serialize)]
+struct CliPostUpscaleRequest {
+    input_path: String,
+    output_path: String,
+    model_name: String,
+    ddim_steps: u32,
+    guidance_scale: f32,
+    seed: i64,
+}
+
+async fn post_upscale(
+    config: &crate::models::AppConfig,
+    input_path: &str,
+    rest: &[String],
+) -> Result<()> {
     let mut model = "basic".to_string();
     let mut steps = 50u32;
     let mut guidance = 3.5f32;
@@ -260,11 +274,33 @@ async fn post_upscale(input_path: &str, rest: &[String]) -> Result<()> {
         return Err(Error::Other("--model must be basic or speech".into()));
     }
 
-    let output_path =
-        upscale_audio_asset_path(input_path.to_string(), model, steps, guidance, seed).await?;
+    let output_path = output_path_for(Path::new(input_path), &model)?
+        .to_string_lossy()
+        .to_string();
+    let params = CliPostUpscaleRequest {
+        input_path: input_path.to_string(),
+        output_path: output_path.clone(),
+        model_name: model.clone(),
+        ddim_steps: steps,
+        guidance_scale: guidance,
+        seed,
+    };
+    let http = reqwest::Client::new();
+    let job_id = submit_job(
+        &http,
+        format!("{}/generate/upscale", config.post_url),
+        &params,
+        "Post",
+    )
+    .await?;
+    let status = poll_job(&http, format!("{}/jobs", config.post_url), &job_id, "Post").await?;
+    let final_output = status.output_path.unwrap_or(output_path);
+    let duration_ms =
+        write_upscale_sidecar(input_path.to_string(), final_output.clone(), model, seed)?;
     print_json(&json!({
         "input_path": input_path,
-        "output_path": output_path,
+        "output_path": final_output,
+        "duration_ms": duration_ms,
     }))
 }
 

@@ -71,7 +71,7 @@ function CopyableCommand({ command }: { command: string }) {
 
 export const UpscaleView: React.FC = () => {
   const { realProjectId } = useProjectStore();
-  const { addJob, updateJob } = useJobStore();
+  const { jobs, addJob, updateJob } = useJobStore();
   const [assets, setAssets] = useState<GeneratedAudioAsset[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [peaks, setPeaks] = useState<Record<string, number[]>>({});
@@ -83,6 +83,7 @@ export const UpscaleView: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastOutput, setLastOutput] = useState<string | null>(null);
+  const [activeUpscaleJobId, setActiveUpscaleJobId] = useState<string | null>(null);
 
   const selected = assets.find((a) => a.audio_path === selectedPath) ?? assets[0] ?? null;
   const visibleAssets = assets.filter((a) => filter === "all" || a.kind === filter);
@@ -105,6 +106,22 @@ export const UpscaleView: React.FC = () => {
       .then((p) => setPeaks((prev) => ({ ...prev, [selected.audio_path]: p })))
       .catch(() => {});
   }, [selected?.audio_path]);
+
+  useEffect(() => {
+    if (!activeUpscaleJobId) return;
+    const job = jobs.find((j) => j.id === activeUpscaleJobId);
+    if (!job) return;
+    if (job.status === "complete" && job.output_path) {
+      setBusy(false);
+      setLastOutput(job.output_path);
+      setActiveUpscaleJobId(null);
+      refresh();
+    } else if (job.status === "failed") {
+      setBusy(false);
+      setError(job.error ?? "AudioSR failed");
+      setActiveUpscaleJobId(null);
+    }
+  }, [activeUpscaleJobId, jobs]);
 
   const runUpscale = async () => {
     if (!selected) return;
@@ -130,8 +147,9 @@ export const UpscaleView: React.FC = () => {
     setBusy(true);
     setError(null);
     setLastOutput(null);
+    setActiveUpscaleJobId(jobId);
     try {
-      const output = await upscaleAudioAsset({
+      await upscaleAudioAsset({
         inputPath: selected.audio_path,
         jobId,
         modelName,
@@ -139,16 +157,6 @@ export const UpscaleView: React.FC = () => {
         guidanceScale: guidance,
         seed,
       });
-      const outputPeaks = await getWaveformPeaks(output, 120).catch(() => null);
-      updateJob(jobId, {
-        status: "complete",
-        progress: 100,
-        eta: "done",
-        output_path: output,
-        peaks: outputPeaks,
-      });
-      setLastOutput(output);
-      refresh();
     } catch (e) {
       const message = String(e);
       updateJob(jobId, {
@@ -157,11 +165,12 @@ export const UpscaleView: React.FC = () => {
         error: message,
       });
       setError(message);
-    } finally {
       setBusy(false);
+      setActiveUpscaleJobId(null);
     }
   };
   const showSetupCommand = error?.includes("AudioSR CLI not found")
+    || error?.includes("Post server error")
     || error?.includes("No module named 'pkg_resources'")
     || error?.includes("NotOpenSSLWarning");
 
