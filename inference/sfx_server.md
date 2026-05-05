@@ -25,9 +25,9 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Interacts with**: Model manager and server health polling.
 
 ### Native subprocess progress
-- **Does**: Streams native AudioLDM stdout/stderr into server logs and advances job progress with a heartbeat while the subprocess runs.
+- **Does**: Streams native AudioLDM stdout/stderr into server logs and maps upstream download, DDIM sampling, and save progress lines into Pharaoh job progress.
 - **Interacts with**: Job polling UI and terminal logs.
-- **Rationale**: The upstream CLI can spend time downloading/loading before sustained CPU activity. Buffered subprocess output makes the job look stuck, so the server must expose liveness independently.
+- **Rationale**: The upstream CLI writes checkpoint download bars to stderr and sampler bars with carriage returns. A blind heartbeat made first-run model downloads look like stuck 92% inference, so Pharaoh derives progress from AudioLDM's own output instead.
 
 ### Native CUDA candidate guard
 - **Does**: Detects whether the isolated AudioLDM torch build has CUDA. If not, native requests are forced to `-n 1`.
@@ -45,6 +45,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
 - Native AudioLDM defaults to `PHARAOH_AUDIOLDM_NATIVE_MODEL=audioldm-m-full`. The previous `audioldm-s-full-v2` default was a mismatch with upstream CLI defaults and produced poor results.
+- On first use, native AudioLDM downloads checkpoints into `AUDIOLDM_CACHE_DIR` or `~/.cache/audioldm`. A stderr line such as `8% |#####|` is the upstream checkpoint download progress bar, not an inference error.
 - `PHARAOH_AUDIOLDM_ENGINE=diffusers` keeps the old diffusers path available for debugging only; native is the production default.
 - AudioLDM defaults use 200 diffusion steps. Candidate count defaults to 1 for cross-platform reliability; CUDA users may request more candidates explicitly.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

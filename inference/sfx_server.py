@@ -14,7 +14,7 @@ import re
 import sys
 import tempfile
 from pathlib import Path
-from typing import Optional
+from typing import Callable, Optional
 
 import uvicorn
 from fastapi import FastAPI, HTTPException
@@ -259,7 +259,35 @@ def _native_audioldm_has_cuda() -> bool:
     return _native_audioldm_cuda_available
 
 
-async def _pump_subprocess_stream(stream, label: str, buffer: list[str]) -> None:
+def _native_audioldm_output_progress(line: str) -> float | None:
+    """Map upstream AudioLDM console output into Pharaoh job progress."""
+    if "Downloading the main structure" in line:
+        return 0.04
+    if "Weights downloaded" in line:
+        return 0.16
+    if "Load AudioLDM" in line:
+        return 0.18
+    if "Generate audio using text" in line:
+        return 0.24
+    if "Save audio to" in line:
+        return 0.94
+
+    match = re.search(r"(\d+(?:\.\d+)?)%\s*\|", line)
+    if not match:
+        return None
+
+    pct = max(0.0, min(100.0, float(match.group(1)))) / 100.0
+    if "DDIM Sampler" in line:
+        return 0.25 + pct * 0.65
+    return 0.04 + pct * 0.12
+
+
+async def _pump_subprocess_stream(
+    stream,
+    label: str,
+    buffer: list[str],
+    on_line: Callable[[str], None] | None = None,
+) -> None:
     """Forward subprocess output to logs while retaining tail text for errors."""
     if stream is None:
         return
@@ -276,6 +304,8 @@ async def _pump_subprocess_stream(stream, label: str, buffer: list[str]) -> None
                 continue
             buffer.append(line)
             del buffer[:-80]
+            if on_line is not None:
+                on_line(line)
             log.info("AudioLDM %s: %s", label, line)
 
 
@@ -542,16 +572,31 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
                 stderr=asyncio.subprocess.PIPE,
             )
             output_tail: list[str] = []
-            stdout_task = asyncio.create_task(_pump_subprocess_stream(proc.stdout, "stdout", output_tail))
-            stderr_task = asyncio.create_task(_pump_subprocess_stream(proc.stderr, "stderr", output_tail))
+            progress_state = {"value": 0.08}
+
+            def update_progress_from_output(line: str) -> None:
+                parsed = _native_audioldm_output_progress(line)
+                if parsed is None or parsed <= progress_state["value"]:
+                    return
+                progress_state["value"] = parsed
+                jobs.update(job_id, progress=parsed)
+
+            stdout_task = asyncio.create_task(
+                _pump_subprocess_stream(proc.stdout, "stdout", output_tail, update_progress_from_output)
+            )
+            stderr_task = asyncio.create_task(
+                _pump_subprocess_stream(proc.stderr, "stderr", output_tail, update_progress_from_output)
+            )
             wait_task = asyncio.create_task(proc.wait())
 
-            progress = 0.10
             while not wait_task.done():
-                await asyncio.sleep(1.0)
-                progress = min(progress + 0.01, 0.92)
-                jobs.update(job_id, progress=progress)
-                log.info("AudioLDM job %s still running (progress %.0f%%)", job_id, progress * 100)
+                await asyncio.sleep(5.0)
+                jobs.update(job_id, progress=progress_state["value"])
+                log.info(
+                    "AudioLDM job %s still running (progress %.0f%%)",
+                    job_id,
+                    progress_state["value"] * 100,
+                )
 
             returncode = await wait_task
             await asyncio.gather(stdout_task, stderr_task, return_exceptions=True)
