@@ -398,7 +398,7 @@ async fn generate_sfx(
     let params = SfxT2ARequest {
         prompt: row.prompt.clone(),
         duration_seconds,
-        model_variant: if use_audioldm { "AudioLDM-S-Full-V2".into() } else { "Woosh-DFlow".into() },
+        model_variant: if use_audioldm { "AudioLDM-M-Full".into() } else { "Woosh-DFlow".into() },
         backend: Some(if use_audioldm { "audioldm" } else { "woosh" }.into()),
         steps: if use_audioldm { 200 } else { 4 },
         seed: random_seed(),

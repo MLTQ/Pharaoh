@@ -13,10 +13,10 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ### AudioLDM backend
 - **Does**: Runs the upstream `audioldm` CLI from `inference/.venv-audioldm` when a request uses `backend="audioldm"` or an AudioLDM model variant, then copies the generated WAV to Pharaoh's requested output path.
 - **Interacts with**: `requirements-sfx-audioldm.txt`, `PHARAOH_AUDIOLDM_PYTHON`, `/generate/t2a`.
-- **Rationale**: The diffusers AudioLDM pipeline is deprecated and produced unusable diffusion artifacts inside the Woosh dependency stack. The native runner matches the upstream examples more closely and keeps AudioLDM isolated from Woosh.
+- **Rationale**: The diffusers AudioLDM pipeline is deprecated and produced unusable diffusion artifacts inside the Woosh dependency stack. The native runner matches the upstream examples more closely, defaults to upstream's recommended `audioldm-m-full`, and keeps AudioLDM isolated from Woosh.
 
 ### AudioLDM prompt normalization
-- **Does**: Converts Pharaoh's bracketed director markup into concise prose, prefixes it as a realistic field recording, and asks for no speech/music.
+- **Does**: Converts Pharaoh's bracketed director markup into concise prose and sanitizes it for the upstream CLI.
 - **Interacts with**: `SFXPanel.tsx`, script rows, headless CLI SFX generation.
 - **Rationale**: AudioLDM quality drops when fed long screenplay-style directions. The upstream examples are short natural-language audio captions, and the CLI also uses prompt text as a filename, so Pharaoh caps and sanitizes the text before invoking it.
 
@@ -44,6 +44,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 
 ## Notes
 - AudioLDM dependencies are optional so basic Woosh SFX setup stays unchanged.
+- Native AudioLDM defaults to `PHARAOH_AUDIOLDM_NATIVE_MODEL=audioldm-m-full`. The previous `audioldm-s-full-v2` default was a mismatch with upstream CLI defaults and produced poor results.
 - `PHARAOH_AUDIOLDM_ENGINE=diffusers` keeps the old diffusers path available for debugging only; native is the production default.
 - AudioLDM defaults use 200 diffusion steps. Candidate count defaults to 1 for cross-platform reliability; CUDA users may request more candidates explicitly.
 - Long AudioLDM generations can be slow and memory-heavy. Agents should prefer Woosh for short, isolated foley and AudioLDM for beds/soundscapes.

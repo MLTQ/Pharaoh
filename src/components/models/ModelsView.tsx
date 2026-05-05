@@ -13,7 +13,8 @@ const TTS_VARIANTS = [
 
 const SFX_VARIANTS = [
   { id: "Woosh-DFlow", desc: "short foley, highest quality" },
-  { id: "AudioLDM-S-Full-V2", desc: "long effects and soundscapes" },
+  { id: "AudioLDM-M-Full", desc: "long effects and soundscapes, upstream default" },
+  { id: "AudioLDM-S-Full-V2", desc: "smaller AudioLDM checkpoint" },
 ];
 
 const SERVERS = [

@@ -22,7 +22,7 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 - **Does**: Generates `SFX` rows with Woosh by default and `BED` or >5-second rows with AudioLDM.
 - **Interacts with**: `SfxT2ARequest`, SFX server `/generate/t2a`.
 - **Rationale**: Headless agents should not have to stitch many short Woosh chunks for rain, wind, traffic, or room-tone beds.
-- **AudioLDM defaults**: Uses 200 diffusion steps and one candidate for cross-platform reliability. Upstream multi-candidate ranking requires CUDA.
+- **AudioLDM defaults**: Uses upstream's recommended `audioldm-m-full` checkpoint, 200 diffusion steps, and one candidate for cross-platform reliability. Upstream multi-candidate ranking requires CUDA.
 
 ### `generate_dialogue`
 - **Does**: Builds CustomVoice TTS requests from script row `prompt` text, row `instruct` direction, and project character voice assignments.

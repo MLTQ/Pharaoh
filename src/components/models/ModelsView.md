@@ -10,9 +10,9 @@ Model lifecycle panel for checking server health and preloading local inference 
 - **Interacts with**: `modelStore.ts`, Tauri `load_model`.
 
 ### SFX variant picker
-- **Does**: Selects between `Woosh-DFlow` and `AudioLDM-S-Full-V2` before loading the SFX server.
+- **Does**: Selects between `Woosh-DFlow`, `AudioLDM-M-Full`, and smaller AudioLDM variants before loading the SFX server.
 - **Interacts with**: `sfx_server.py` `/load`.
-- **Rationale**: AudioLDM is an optional backend on the same SFX server. It should be preloadable without introducing a fourth top-level model kind.
+- **Rationale**: AudioLDM is an optional backend on the same SFX server. The native runner defaults to upstream's recommended `audioldm-m-full` checkpoint without introducing a fourth top-level model kind.
 
 ## Contracts
 

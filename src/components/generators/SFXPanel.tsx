@@ -35,7 +35,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
         prompt: value,
         durationSeconds: duration,
         backend,
-        modelVariant: backend === "audioldm" ? "AudioLDM-S-Full-V2" : "Woosh-DFlow",
+        modelVariant: backend === "audioldm" ? "AudioLDM-M-Full" : "Woosh-DFlow",
       });
     } catch (e) {
       setGenError(String(e));

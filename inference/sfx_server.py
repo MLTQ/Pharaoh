@@ -8,6 +8,7 @@ Model directory: PHARAOH_WOOSH_DIR (default ~/Code/Woosh)
 import asyncio
 import shutil
 import logging
+import math
 import os
 import re
 import sys
@@ -35,6 +36,7 @@ AUDIO_LDM_MODEL = os.environ.get(
     "PHARAOH_AUDIOLDM_MODEL",
     str(AUDIO_LDM_LOCAL_DIR) if AUDIO_LDM_LOCAL_DIR.exists() else AUDIO_LDM_MODEL_ID,
 )
+AUDIOLDM_NATIVE_MODEL = os.environ.get("PHARAOH_AUDIOLDM_NATIVE_MODEL", "audioldm-m-full")
 AUDIOLDM_PYTHON = Path(
     os.environ.get("PHARAOH_AUDIOLDM_PYTHON", Path(__file__).parent / ".venv-audioldm/bin/python3")
 ).expanduser()
@@ -290,6 +292,25 @@ def _resolve_audioldm_model_id(params: dict | None = None) -> str:
     return aliases.get(raw, raw)
 
 
+def _native_audioldm_model_name(params: dict | None = None) -> str:
+    raw = str((params or {}).get("model_variant") or AUDIOLDM_NATIVE_MODEL)
+    aliases = {
+        "AudioLDM-M-Full": "audioldm-m-full",
+        "audioldm-m-full": "audioldm-m-full",
+        "AudioLDM-S-Full-V2": "audioldm-s-full-v2",
+        "audioldm-s-full-v2": "audioldm-s-full-v2",
+        "AudioLDM-S-Full": "audioldm-s-full",
+        "audioldm-s-full": "audioldm-s-full",
+        "AudioLDM-L-Full": "audioldm-l-full",
+        "audioldm-l-full": "audioldm-l-full",
+        "AudioLDM-M-Text-FT": "audioldm-m-text-ft",
+        "audioldm-m-text-ft": "audioldm-m-text-ft",
+        "AudioLDM-S-Text-FT": "audioldm-s-text-ft",
+        "audioldm-s-text-ft": "audioldm-s-text-ft",
+    }
+    return aliases.get(raw, AUDIOLDM_NATIVE_MODEL)
+
+
 def _load_audioldm_model(model_id: str) -> None:
     global _audioldm_pipe, _audioldm_loaded_model_id, _audioldm_device
     import torch
@@ -354,7 +375,12 @@ def _native_audioldm_cli_text(prompt: str) -> str:
     prompt = re.sub(r"\s+", " ", prompt).strip(" .,")
     if len(prompt) > 80:
         prompt = prompt[:80].rsplit(" ", 1)[0].strip(" .,")
-    return f"realistic field recording of {prompt or 'natural ambience'}"
+    return prompt or "natural ambience"
+
+
+def _native_audioldm_duration(seconds: float) -> float:
+    """Native AudioLDM requires duration to be a multiple of 2.5 seconds."""
+    return max(2.5, math.ceil(seconds / 2.5) * 2.5)
 
 
 def _select_audioldm_candidate(audios) -> object:
@@ -483,7 +509,7 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
     jobs.update(job_id, progress=0.08)
     try:
         prompt = _native_audioldm_cli_text(_prepare_audioldm_prompt(params["prompt"]))
-        duration = float(params.get("duration_seconds", 30.0))
+        duration = _native_audioldm_duration(float(params.get("duration_seconds", 30.0)))
         steps = int(params.get("steps", 200))
         seed = int(params.get("seed", 0))
         guidance_scale = float(params.get("guidance_scale", 2.5))
@@ -495,13 +521,14 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
             waveforms = 1
         out_path = Path(params["output_path"])
         cli = _native_audioldm_cli()
+        model_name = _native_audioldm_model_name(params)
 
         with tempfile.TemporaryDirectory(prefix="pharaoh-audioldm-") as tmp:
             cmd = [
                 str(cli),
                 "-t", prompt,
                 "-s", tmp,
-                "--model_name", "audioldm-s-full-v2",
+                "--model_name", model_name,
                 "--ddim_steps", str(steps),
                 "-gs", str(guidance_scale),
                 "-dur", str(duration),
@@ -631,7 +658,7 @@ async def health() -> dict:
         "woosh_error": ws["reason"],
         "audioldm_ready": als["ok"],
         "audioldm_error": als["reason"],
-        "audioldm_model": _audioldm_loaded_model_id or AUDIO_LDM_MODEL,
+        "audioldm_model": _audioldm_loaded_model_id or (AUDIOLDM_NATIVE_MODEL if AUDIOLDM_ENGINE == "native" else AUDIO_LDM_MODEL),
         "audioldm_local_dir": str(AUDIO_LDM_LOCAL_DIR),
         "audioldm_engine": AUDIOLDM_ENGINE,
         "audioldm_cuda": _native_audioldm_has_cuda() if AUDIOLDM_ENGINE == "native" and als["ok"] else None,
@@ -666,7 +693,7 @@ async def load(params: Optional[LoadParams] = None) -> dict:
         if err:
             return {"status": "error", "error": err}
         if AUDIOLDM_ENGINE == "native":
-            return {"status": "loaded", "backend": "audioldm", "engine": "native", "model": "audioldm-s-full-v2"}
+            return {"status": "loaded", "backend": "audioldm", "engine": "native", "model": _native_audioldm_model_name({"model_variant": variant})}
         return {"status": "loaded", "backend": "audioldm", "model": _audioldm_loaded_model_id}
 
     ws = _woosh_status()

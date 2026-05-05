@@ -319,8 +319,9 @@ function SfxDownloads() {
           marginBottom: 6,
         }}>
           AudioLDM is optional. Pharaoh uses the upstream AudioLDM runner by default;
-          install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. This Hugging Face
-          download is only needed if you explicitly use the diffusers fallback engine.
+          install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. The native runner
+          downloads its recommended <code>audioldm-m-full</code> checkpoint into the AudioLDM cache on first use.
+          This Hugging Face command is only for the explicit diffusers fallback engine.
         </div>
         <CopyableCommand command="hf download cvssp/audioldm-s-full-v2 --local-dir ~/pharaoh-models/sfx/audioldm-s-full-v2" />
       </div>

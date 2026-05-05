@@ -102,7 +102,7 @@ export function useGenerateJob() {
     const durationSeconds = params.durationSeconds ?? 3.0;
     const backend = params.backend ?? (durationSeconds > 5 ? "audioldm" : "woosh");
     const modelVariant = params.modelVariant
-      ?? (backend === "audioldm" ? "AudioLDM-S-Full-V2" : "Woosh-DFlow");
+      ?? (backend === "audioldm" ? "AudioLDM-M-Full" : "Woosh-DFlow");
 
     const jobId = await submitSfxT2a({
       projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
