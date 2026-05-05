@@ -7,7 +7,8 @@ import {
   listGeneratedAudioAssets,
   upscaleAudioAsset,
 } from "../../lib/tauriCommands";
-import type { AssetKind, GeneratedAudioAsset } from "../../lib/types";
+import { useJobStore } from "../../store/jobStore";
+import type { AssetKind, GeneratedAudioAsset, Job } from "../../lib/types";
 
 const KIND_COLOR: Record<AssetKind, string> = {
   tts: "var(--tts)",
@@ -27,6 +28,10 @@ function formatDuration(ms: number | null): string {
   const m = Math.floor(total / 60).toString().padStart(2, "0");
   const s = (total % 60).toString().padStart(2, "0");
   return `${m}:${s}`;
+}
+
+function now() {
+  return new Date().toLocaleTimeString("en", { hour: "2-digit", minute: "2-digit", hour12: false });
 }
 
 function CopyableCommand({ command }: { command: string }) {
@@ -66,6 +71,7 @@ function CopyableCommand({ command }: { command: string }) {
 
 export const UpscaleView: React.FC = () => {
   const { realProjectId } = useProjectStore();
+  const { addJob, updateJob } = useJobStore();
   const [assets, setAssets] = useState<GeneratedAudioAsset[]>([]);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [peaks, setPeaks] = useState<Record<string, number[]>>({});
@@ -102,21 +108,55 @@ export const UpscaleView: React.FC = () => {
 
   const runUpscale = async () => {
     if (!selected) return;
+    const jobId = `audiosr-${Date.now()}`;
+    const job: Job = {
+      id: jobId,
+      model: "post",
+      description: `AudioSR · ${basename(selected.audio_path)}`,
+      status: "running",
+      progress: 0,
+      eta: "starting",
+      started_at: now(),
+      scene_id: null,
+      scene_slug: selected.scene_slug,
+      row_index: null,
+      output_path: null,
+      peaks: null,
+      qa_status: "unreviewed",
+      error: null,
+    };
+
+    addJob(job);
     setBusy(true);
     setError(null);
     setLastOutput(null);
     try {
       const output = await upscaleAudioAsset({
         inputPath: selected.audio_path,
+        jobId,
         modelName,
         ddimSteps: steps,
         guidanceScale: guidance,
         seed,
       });
+      const outputPeaks = await getWaveformPeaks(output, 120).catch(() => null);
+      updateJob(jobId, {
+        status: "complete",
+        progress: 100,
+        eta: "done",
+        output_path: output,
+        peaks: outputPeaks,
+      });
       setLastOutput(output);
       refresh();
     } catch (e) {
-      setError(String(e));
+      const message = String(e);
+      updateJob(jobId, {
+        status: "failed",
+        eta: "failed",
+        error: message,
+      });
+      setError(message);
     } finally {
       setBusy(false);
     }

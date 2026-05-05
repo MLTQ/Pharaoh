@@ -11,7 +11,7 @@ Shared TypeScript contracts for project data, script rows, jobs, server health, 
 - **Rationale**: TTS, SFX, and music share one health polling path, but only SFX reports `audioldm_*` optional fields such as engine, CUDA support, and local model path.
 
 ### Script and job types
-- **Does**: Keep frontend data structures aligned with Rust models and CSV parsing.
+- **Does**: Keep frontend data structures aligned with Rust models and CSV parsing; `ModelKind` includes `post` for non-server processing jobs such as AudioSR.
 - **Interacts with**: `csvParser.ts`, stores, timeline, asset browser.
 
 ### `GeneratedAudioAsset`

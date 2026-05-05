@@ -1,9 +1,11 @@
 use super::sidecar::{read_sidecar, write_sidecar};
 use crate::error::{Error, Result};
-use crate::models::SidecarMeta;
+use crate::models::{JobProgressEvent, SidecarMeta};
 use chrono::Utc;
 use std::path::{Path, PathBuf};
-use tauri::AppHandle;
+use std::process::Stdio;
+use tauri::{AppHandle, Emitter};
+use tokio::io::{AsyncRead, AsyncReadExt};
 
 fn audiosr_cli_name() -> &'static str {
     if cfg!(target_os = "windows") {
@@ -112,19 +114,113 @@ fn wav_duration_ms(path: &Path) -> Option<u64> {
     Some((reader.duration() as u64 * 1000) / spec.sample_rate as u64)
 }
 
+fn emit_progress(app: Option<&AppHandle>, job_id: &str, progress: f32) {
+    if let Some(app) = app {
+        let _ = app.emit(
+            "job-progress",
+            &JobProgressEvent {
+                job_id: job_id.into(),
+                model: "post".into(),
+                status: "running".into(),
+                progress,
+            },
+        );
+    }
+}
+
+fn extract_last_percent(text: &str) -> Option<f32> {
+    let bytes = text.as_bytes();
+    let mut found = None;
+    for (i, b) in bytes.iter().enumerate() {
+        if *b != b'%' {
+            continue;
+        }
+        let mut start = i;
+        while start > 0 && bytes[start - 1].is_ascii_digit() {
+            start -= 1;
+        }
+        if start < i {
+            if let Ok(n) = text[start..i].parse::<f32>() {
+                found = Some((n / 100.0).clamp(0.0, 1.0));
+            }
+        }
+    }
+    found
+}
+
+async fn capture_audiosr_stream<R>(mut reader: R, app: Option<AppHandle>, job_id: String) -> String
+where
+    R: AsyncRead + Unpin,
+{
+    let mut captured = Vec::new();
+    let mut buf = [0_u8; 1024];
+    let mut max_progress = 0.1_f32;
+
+    loop {
+        match reader.read(&mut buf).await {
+            Ok(0) => break,
+            Ok(n) => {
+                captured.extend_from_slice(&buf[..n]);
+                let chunk = String::from_utf8_lossy(&buf[..n]);
+                if let Some(percent) = extract_last_percent(&chunk) {
+                    let progress = 0.1 + percent * 0.8;
+                    if progress > max_progress {
+                        max_progress = progress;
+                        emit_progress(app.as_ref(), &job_id, progress);
+                    }
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    String::from_utf8_lossy(&captured).into_owned()
+}
+
 #[tauri::command]
 pub async fn upscale_audio_asset(
-    _app: AppHandle,
+    app: AppHandle,
+    input_path: String,
+    job_id: Option<String>,
+    model_name: String,
+    ddim_steps: u32,
+    guidance_scale: f32,
+    seed: i64,
+) -> Result<String> {
+    upscale_audio_asset_path_with_progress(
+        Some(app),
+        job_id.unwrap_or_else(|| format!("audiosr-{}", uuid::Uuid::new_v4())),
+        input_path,
+        model_name,
+        ddim_steps,
+        guidance_scale,
+        seed,
+    )
+    .await
+}
+
+pub async fn upscale_audio_asset_path(
     input_path: String,
     model_name: String,
     ddim_steps: u32,
     guidance_scale: f32,
     seed: i64,
 ) -> Result<String> {
-    upscale_audio_asset_path(input_path, model_name, ddim_steps, guidance_scale, seed).await
+    upscale_audio_asset_path_with_progress(
+        None,
+        format!("audiosr-{}", uuid::Uuid::new_v4()),
+        input_path,
+        model_name,
+        ddim_steps,
+        guidance_scale,
+        seed,
+    )
+    .await
 }
 
-pub async fn upscale_audio_asset_path(
+async fn upscale_audio_asset_path_with_progress(
+    app: Option<AppHandle>,
+    job_id: String,
     input_path: String,
     model_name: String,
     ddim_steps: u32,
@@ -140,11 +236,12 @@ pub async fn upscale_audio_asset_path(
     }
 
     let cli = find_audiosr_cli()?;
+    emit_progress(app.as_ref(), &job_id, 0.03);
     let output = output_path_for(&input, &model_name)?;
     let tmp = std::env::temp_dir().join(format!("pharaoh-audiosr-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&tmp)?;
 
-    let result = tokio::process::Command::new(&cli)
+    let mut child = tokio::process::Command::new(&cli)
         .arg("-i")
         .arg(&input)
         .arg("-s")
@@ -159,18 +256,47 @@ pub async fn upscale_audio_asset_path(
         .arg(seed.to_string())
         .arg("--suffix")
         .arg("pharaoh")
-        .output()
-        .await
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
         .map_err(|e| Error::Other(format!("failed to run AudioSR: {}", e)))?;
 
-    if !result.status.success() {
-        let stderr = String::from_utf8_lossy(&result.stderr);
-        return Err(Error::Other(format!(
-            "AudioSR failed:\n{}",
-            &stderr[..stderr.len().min(4000)]
-        )));
+    emit_progress(app.as_ref(), &job_id, 0.08);
+
+    let stdout = child
+        .stdout
+        .take()
+        .map(|r| tokio::spawn(capture_audiosr_stream(r, app.clone(), job_id.clone())));
+    let stderr = child
+        .stderr
+        .take()
+        .map(|r| tokio::spawn(capture_audiosr_stream(r, app.clone(), job_id.clone())));
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| Error::Other(format!("failed to wait for AudioSR: {}", e)))?;
+
+    let stdout_text = match stdout {
+        Some(task) => task.await.unwrap_or_default(),
+        None => String::new(),
+    };
+    let stderr_text = match stderr {
+        Some(task) => task.await.unwrap_or_default(),
+        None => String::new(),
+    };
+
+    if !status.success() {
+        let err = if stderr_text.trim().is_empty() {
+            stdout_text
+        } else {
+            stderr_text
+        };
+        let snippet: String = err.chars().take(4000).collect();
+        return Err(Error::Other(format!("AudioSR failed:\n{}", snippet)));
     }
 
+    emit_progress(app.as_ref(), &job_id, 0.92);
     let generated = newest_wav(&tmp)?;
     std::fs::copy(&generated, &output)?;
     let _ = std::fs::remove_dir_all(&tmp);

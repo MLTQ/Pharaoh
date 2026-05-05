@@ -255,6 +255,7 @@ export const renderScene = (projectId: string, sceneSlug: string): Promise<strin
 
 export const upscaleAudioAsset = (args: {
   inputPath: string;
+  jobId?: string;
   modelName: "basic" | "speech";
   ddimSteps: number;
   guidanceScale: number;

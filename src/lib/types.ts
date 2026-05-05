@@ -151,7 +151,7 @@ export interface GeneratedAudioAsset {
 
 // ── Jobs (frontend state) ───────────────────────────────────────────────────
 
-export type ModelKind = "tts" | "sfx" | "music";
+export type ModelKind = "tts" | "sfx" | "music" | "post";
 export type JobStatus = "pending" | "running" | "complete" | "failed";
 
 export type QaJobStatus = "unreviewed" | "approved" | "rejected";

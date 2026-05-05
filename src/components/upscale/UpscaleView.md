@@ -10,8 +10,8 @@ Dedicated post-processing page for reviewing generated WAV assets and running ne
 - **Interacts with**: `listGeneratedAudioAssets`, `getWaveformPeaks`, `PlayButton`.
 
 ### AudioSR controls
-- **Does**: Exposes AudioSR model, DDIM steps, guidance, and seed before invoking upscaling.
-- **Interacts with**: `upscaleAudioAsset`.
+- **Does**: Exposes AudioSR model, DDIM steps, guidance, and seed before invoking upscaling; creates a visible `post` job while the subprocess runs.
+- **Interacts with**: `upscaleAudioAsset`, `useJobStore`.
 - **Rationale**: AudioSR has a general model and a speech model; users need to pick based on ambience/SFX/music versus dialogue.
 
 ### Result and error panels
@@ -28,7 +28,7 @@ Dedicated post-processing page for reviewing generated WAV assets and running ne
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `App.tsx` | `UpscaleView` renders as a full canvas page | Requiring props not supplied by the app shell |
-| `tauriCommands.ts` | `upscaleAudioAsset` returns the output WAV path | Changing return type |
+| `tauriCommands.ts` | `upscaleAudioAsset` accepts an optional job id and returns the output WAV path | Changing return type |
 | Users | Upscaled output appears in the asset list after completion | Not refreshing after success |
 
 ## Notes

@@ -9,6 +9,7 @@ const MODEL_LABEL: Record<string, string> = {
   tts: "TTS",
   sfx: "SFX",
   music: "Music",
+  post: "Post",
 };
 
 interface JobProgressEvent {

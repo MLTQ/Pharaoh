@@ -332,6 +332,7 @@ input:focus, textarea:focus, select:focus { outline: none; }
 .job-row .model.tts { color: var(--tts); border-color: var(--tts-d); background: color-mix(in oklch, var(--tts) 10%, transparent); }
 .job-row .model.sfx { color: var(--sfx); border-color: var(--sfx-d); background: color-mix(in oklch, var(--sfx) 10%, transparent); }
 .job-row .model.music { color: var(--music); border-color: var(--music-d); background: color-mix(in oklch, var(--music) 10%, transparent); }
+.job-row .model.post { color: var(--sfx); border-color: var(--sfx-d); background: color-mix(in oklch, var(--sfx) 10%, transparent); }
 .job-row .desc { color: var(--fg-1); font-size: 11.5px; line-height: 1.4; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .job-row .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); display: flex; gap: 12px; }
 .bar { height: 2px; background: var(--line-1); overflow: hidden; border-radius: 1px; }
