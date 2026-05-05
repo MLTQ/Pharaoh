@@ -18,7 +18,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 ### AudioLDM prompt normalization
 - **Does**: Converts Pharaoh's bracketed director markup into concise prose, prefixes it as a realistic field recording, and asks for no speech/music.
 - **Interacts with**: `SFXPanel.tsx`, script rows, headless CLI SFX generation.
-- **Rationale**: AudioLDM quality drops when fed long screenplay-style directions. The upstream examples are short natural-language audio captions.
+- **Rationale**: AudioLDM quality drops when fed long screenplay-style directions. The upstream examples are short natural-language audio captions, and the CLI also uses prompt text as a filename, so Pharaoh caps and sanitizes the text before invoking it.
 
 ### Health and lifecycle
 - **Does**: Reports Woosh and AudioLDM readiness independently, and lets `/load` preload AudioLDM when `variant` starts with `AudioLDM`.

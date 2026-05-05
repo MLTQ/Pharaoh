@@ -341,11 +341,20 @@ def _prepare_audioldm_prompt(prompt: str) -> str:
     prompt = re.sub(r"\[[^\]]+\]", " ", prompt)
     prompt = re.sub(r"\s+", " ", prompt.replace("\n", ". ")).strip(" .")
     prompt = re.sub(r"\.{2,}", ".", prompt).strip(" .")
-    if len(prompt) > 320:
-        prompt = prompt[:320].rsplit(" ", 1)[0].strip(" .,")
+    if len(prompt) > 120:
+        prompt = prompt[:120].rsplit(" ", 1)[0].strip(" .,")
     if not prompt:
         prompt = "natural environmental ambience"
-    return f"High quality realistic field recording of {prompt}. No speech, no music, no melody."
+    return prompt
+
+
+def _native_audioldm_cli_text(prompt: str) -> str:
+    """Keep prompt useful but short because upstream AudioLDM uses it as a filename."""
+    prompt = re.sub(r"[^A-Za-z0-9 ,.'-]+", " ", prompt)
+    prompt = re.sub(r"\s+", " ", prompt).strip(" .,")
+    if len(prompt) > 80:
+        prompt = prompt[:80].rsplit(" ", 1)[0].strip(" .,")
+    return f"realistic field recording of {prompt or 'natural ambience'}"
 
 
 def _select_audioldm_candidate(audios) -> object:
@@ -473,7 +482,7 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
 
     jobs.update(job_id, progress=0.08)
     try:
-        prompt = _prepare_audioldm_prompt(params["prompt"])
+        prompt = _native_audioldm_cli_text(_prepare_audioldm_prompt(params["prompt"]))
         duration = float(params.get("duration_seconds", 30.0))
         steps = int(params.get("steps", 200))
         seed = int(params.get("seed", 0))
