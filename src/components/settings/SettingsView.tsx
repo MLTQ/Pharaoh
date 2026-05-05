@@ -24,6 +24,8 @@ function useHardwareProfile(): HardwareProfile | null {
 
 // Woosh install commands per GPU backend
 const WOOSH_CLONE = "git clone https://github.com/SonyResearch/Woosh && cd Woosh";
+const AUDIOLDM_M_FULL_URL = "https://zenodo.org/record/7813012/files/audioldm-m-full.ckpt?download=1";
+const AUDIOLDM_M_FULL_DOWNLOAD = `mkdir -p "$HOME/.cache/audioldm" && curl -L -C - -o "$HOME/.cache/audioldm/audioldm-m-full.ckpt" "${AUDIOLDM_M_FULL_URL}"`;
 const WOOSH_VARIANTS: Record<string, { label: string; cmd: string }> = {
   cuda: { label: "NVIDIA CUDA",      cmd: `${WOOSH_CLONE} && uv sync --extra cuda` },
   mps:  { label: "Apple Silicon MPS", cmd: `${WOOSH_CLONE} && uv sync` },
@@ -319,11 +321,26 @@ function SfxDownloads() {
           marginBottom: 6,
         }}>
           AudioLDM is optional. Pharaoh uses the upstream AudioLDM runner by default;
-          install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. The native runner
-          downloads its recommended <code>audioldm-m-full</code> checkpoint into the AudioLDM cache on first use.
-          This Hugging Face command is only for the explicit diffusers fallback engine.
+          install it below with <code>PHARAOH_INSTALL_AUDIOLDM=1</code>. Download the native
+          <code>audioldm-m-full</code> checkpoint manually if the first-run downloader fails;
+          the command is resumable and writes to the cache path the upstream CLI expects.
         </div>
-        <CopyableCommand command="hf download cvssp/audioldm-s-full-v2 --local-dir ~/pharaoh-models/sfx/audioldm-s-full-v2" />
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+              <span style={{ color: "var(--sfx)", fontFamily: "var(--font-mono)" }}>Native AudioLDM-M-Full</span>
+              {" — "}recommended checkpoint, resumable download
+            </div>
+            <CopyableCommand command={AUDIOLDM_M_FULL_DOWNLOAD} />
+          </div>
+          <div>
+            <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
+              <span style={{ color: "var(--fg-4)", fontFamily: "var(--font-mono)" }}>Diffusers fallback only</span>
+              {" — "}not used by the default native runner
+            </div>
+            <CopyableCommand command="hf download cvssp/audioldm-s-full-v2 --local-dir ~/pharaoh-models/sfx/audioldm-s-full-v2" />
+          </div>
+        </div>
       </div>
     </div>
   );
