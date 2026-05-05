@@ -55,8 +55,14 @@ def _audiosr_status() -> dict:
     return {"ok": True, "reason": ""}
 
 
-def _newest_wav(root: Path) -> Path | None:
-    newest: tuple[float, Path] | None = None
+def _model_dump(model: BaseModel) -> dict:
+    if hasattr(model, "model_dump"):
+        return model.model_dump()
+    return model.dict()
+
+
+def _newest_wav(root: Path) -> Optional[Path]:
+    newest: Optional[tuple[float, Path]] = None
     for path in root.rglob("*.wav"):
         mtime = path.stat().st_mtime
         if newest is None or mtime > newest[0]:
@@ -64,7 +70,7 @@ def _newest_wav(root: Path) -> Path | None:
     return newest[1] if newest else None
 
 
-def _extract_last_percent(text: str) -> float | None:
+def _extract_last_percent(text: str) -> Optional[float]:
     found = None
     for match in re.finditer(r"(\d{1,3})%", text):
         found = min(1.0, max(0.0, int(match.group(1)) / 100.0))
@@ -154,7 +160,7 @@ async def _run_upscale(job_id: str, params: UpscaleParams) -> None:
 
 def _submit(params: UpscaleParams) -> dict:
     job_id = params.job_id or new_job_id()
-    jobs.create(job_id, "post", "upscale", params.model_dump())
+    jobs.create(job_id, "post", "upscale", _model_dump(params))
     asyncio.create_task(_run_upscale(job_id, params))
     return {"job_id": job_id, "status": "queued"}
 

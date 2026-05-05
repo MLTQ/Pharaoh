@@ -1,7 +1,7 @@
 """Shared helpers for Pharaoh inference servers."""
 import time
 import uuid
-from typing import Any
+from typing import Any, Optional
 
 
 def new_job_id() -> str:
@@ -29,7 +29,7 @@ class JobStore:
         self._jobs[job_id] = job
         return job
 
-    def get(self, job_id: str) -> dict | None:
+    def get(self, job_id: str) -> Optional[dict]:
         return self._jobs.get(job_id)
 
     def update(self, job_id: str, **kwargs) -> None:
