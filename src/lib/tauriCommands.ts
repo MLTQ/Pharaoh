@@ -1,5 +1,5 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Project, Scene, ScriptRow, AppConfig, AllServerHealth } from "./types";
+import type { Project, Scene, ScriptRow, AppConfig, AllServerHealth, GeneratedAudioAsset } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
@@ -216,6 +216,9 @@ export const readSidecar = (audioPath: string): Promise<SidecarMeta | null> =>
 export const getTakes = (baseAudioPath: string): Promise<SidecarMeta[]> =>
   invoke("get_takes", { baseAudioPath });
 
+export const listGeneratedAudioAssets = (projectId: string): Promise<GeneratedAudioAsset[]> =>
+  invoke("list_generated_audio_assets", { projectId });
+
 export const updateSidecarQa = (args: {
   audioPath: string;
   qaStatus: string;
@@ -247,3 +250,13 @@ export const resampleTo48k = (path: string, outputPath: string): Promise<void> =
  *  Returns the output file path. */
 export const renderScene = (projectId: string, sceneSlug: string): Promise<string> =>
   invoke("render_scene", { projectId, sceneSlug });
+
+// ── Neural audio enhancement ────────────────────────────────────────────────
+
+export const upscaleAudioAsset = (args: {
+  inputPath: string;
+  modelName: "basic" | "speech";
+  ddimSteps: number;
+  guidanceScale: number;
+  seed: number;
+}): Promise<string> => invoke("upscale_audio_asset", args);

@@ -1,13 +1,13 @@
 # cli.rs
 
 ## Purpose
-Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usable surface for project inspection, row generation, and scene rendering without requiring the Tauri GUI.
+Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usable surface for project inspection, row generation, scene rendering, and post-processing without requiring the Tauri GUI.
 
 ## Components
 
 ### `run`
 - **Does**: Parses top-level CLI commands, loads shared app config, and dispatches to subcommands.
-- **Interacts with**: `app_support.rs`, `audio_engine.rs`, `inference.rs`.
+- **Interacts with**: `app_support.rs`, `audio_engine.rs`, `audio_enhance.rs`, `inference.rs`.
 
 ### `project_list`, `project_status`, `project_create`
 - **Does**: Provides non-GUI project management and visibility commands.
@@ -33,6 +33,11 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 - **Does**: Renders a scene using the same Rust audio engine used by the GUI.
 - **Interacts with**: `render_scene_with_projects_dir` in `commands/audio_engine.rs`.
 
+### `post_upscale`
+- **Does**: Runs AudioSR upscaling on a generated WAV and prints the new output path as JSON.
+- **Interacts with**: `upscale_audio_asset_path` in `commands/audio_enhance.rs`.
+- **Rationale**: Agents need the same post-production upscaling path as the GUI.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
@@ -40,6 +45,7 @@ Headless command entrypoint for Pharaoh. It exposes a minimal but real agent-usa
 | `main.rs` | `run(args)` handles all CLI behavior and returns `Result<()>` | Signature or error semantics |
 | Agents/scripts | JSON is emitted on stdout for successful commands | Switching to plain text output |
 | `inference.rs` | Generation finalization writes sidecars and optional script bindings | Changing finalization payload semantics |
+| `audio_enhance.rs` | CLI upscaling can run without `AppHandle` | Making helper GUI-only |
 
 ## Notes
 - This is intentionally narrower than the architecture aspirational CLI. It covers the implemented generation and render path without inventing unfinished story/LLM stages.

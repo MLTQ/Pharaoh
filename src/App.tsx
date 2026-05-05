@@ -12,6 +12,7 @@ import { AssetBrowser } from "./components/shared/AssetBrowser";
 import { JobQueue } from "./components/shared/JobQueue";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ModelsView } from "./components/models/ModelsView";
+import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
@@ -29,6 +30,7 @@ const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label:
   { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
   { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
+  { id: "upscale",     icon: "sparkle",   label: "Audio Upscale" },
   { id: "models",      icon: "settings",  label: "Models" },
 ];
 
@@ -125,6 +127,7 @@ export default function App() {
     if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
     if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
     if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
+    if (view === "upscale")     return [{ k: "Project", v: project.title }, { k: "Post", v: "Audio Upscale", active: true }];
     if (view === "composition" && scene) {
       return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
     }
@@ -142,6 +145,7 @@ export default function App() {
     tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
     sfx:         { eyebrow: "Generation", title: "Sound design" },
     music:       { eyebrow: "Generation", title: "Score" },
+    upscale:     { eyebrow: "Post",       title: "Audio Upscale" },
     settings:    { eyebrow: "App",        title: "Settings" },
     models:      { eyebrow: "App",        title: "Models" },
   };
@@ -312,6 +316,12 @@ export default function App() {
             <span className="num">{jobs.filter(j => j.model === "music" && j.status === "running").length || ""}</span>
           </div>
 
+          <div className="side-section">Post · Polish</div>
+          <div className={`side-item ${view === "upscale" ? "active" : ""}`} onClick={() => setView("upscale")}>
+            <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
+            <span>Audio Upscale</span>
+          </div>
+
           <div className="side-section">Cast · {characters.length}</div>
           {characters.map((c) => (
             <div key={c.id} className="side-item" onClick={() => { setView("characters"); }}>
@@ -332,6 +342,7 @@ export default function App() {
       <div className="canvas">
         {view === "settings" && <SettingsView />}
         {view === "models"   && <ModelsView />}
+        {view === "upscale"  && <UpscaleView />}
         {view === "pyramid" && (
           <PyramidView
             project={project}

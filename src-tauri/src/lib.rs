@@ -4,8 +4,8 @@ mod commands;
 mod error;
 mod models;
 
-use tauri::Manager;
 use models::{AppConfig, AppState};
+use tauri::Manager;
 use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
 
 pub fn run() {
@@ -63,12 +63,14 @@ pub fn run() {
             // Sidecar
             commands::sidecar::write_sidecar,
             commands::sidecar::read_sidecar,
+            commands::sidecar::list_generated_audio_assets,
             commands::sidecar::get_takes,
             commands::sidecar::update_sidecar_qa,
             // Audio utilities
             commands::audio::get_waveform_peaks,
             commands::audio::get_duration_ms,
             commands::audio::find_zero_crossings,
+            commands::audio_enhance::upscale_audio_asset,
             // Audio engine (ffmpeg)
             commands::audio_engine::normalize_clip,
             commands::audio_engine::resample_to_48k,

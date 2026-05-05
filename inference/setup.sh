@@ -5,6 +5,7 @@
 #   inference/.venv-tts   → qwen-tts (transformers 4.57.3)
 #   inference/.venv-music → ace-step (transformers 4.50.0)
 #   inference/.venv-audioldm → optional upstream AudioLDM runner
+#   inference/.venv-audiosr → optional AudioSR upscaler
 #
 # SFX continues to use the existing ~/Code/Woosh/.venv (which Woosh manages).
 # AudioLDM long-soundscape support is optional and isolated from Woosh because
@@ -18,8 +19,10 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_VENV="${SCRIPT_DIR}/.venv-tts"
 MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
 AUDIOLDM_VENV="${SCRIPT_DIR}/.venv-audioldm"
+AUDIOSR_VENV="${SCRIPT_DIR}/.venv-audiosr"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
 INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
+INSTALL_AUDIOSR="${PHARAOH_INSTALL_AUDIOSR:-0}"
 AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -113,6 +116,21 @@ else
     hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
 fi
 
+# ── Optional post (AudioSR) ──────────────────────────────────────────────────
+step "Post env (AudioSR)"
+if [ "${INSTALL_AUDIOSR}" = "1" ]; then
+    if [ ! -d "${AUDIOSR_VENV}" ]; then
+        uv venv --python 3.9 "${AUDIOSR_VENV}"
+        ok "Created ${AUDIOSR_VENV}"
+    else
+        ok "Reusing ${AUDIOSR_VENV}"
+    fi
+    uv pip install --python "${AUDIOSR_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-audiosr.txt"
+    ok "AudioSR deps synced"
+else
+    hint "Optional neural upscaling: PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 step "Done"
 ok "Run all three servers with:  ./inference/start_servers.sh"
@@ -122,5 +140,6 @@ echo "  TTS    → \$HOME/pharaoh-models/tts/{voice_design,base,custom_voice,tok
 echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
+echo "  Post   → AudioSR downloads its own checkpoints on first upscale"
 echo ""
 echo "See the Models page in the app for the exact model download commands."

@@ -133,6 +133,22 @@ export interface SidecarMeta {
   qa_notes: string;
 }
 
+export interface GeneratedAudioAsset {
+  audio_path: string;
+  meta_path: string;
+  scene_slug: string;
+  kind: AssetKind;
+  name: string;
+  duration_ms: number | null;
+  sample_rate: number;
+  model: string;
+  model_variant: string | null;
+  prompt: string;
+  generated_at: string;
+  parent: string | null;
+  qa_status: QaStatus;
+}
+
 // ── Jobs (frontend state) ───────────────────────────────────────────────────
 
 export type ModelKind = "tts" | "sfx" | "music";
@@ -175,7 +191,7 @@ export interface AssetItem {
 
 // ── UI state ────────────────────────────────────────────────────────────────
 
-export type ViewId = "pyramid" | "composition" | "bible" | "characters" | "tts" | "sfx" | "music" | "settings" | "models";
+export type ViewId = "pyramid" | "composition" | "bible" | "characters" | "tts" | "sfx" | "music" | "upscale" | "settings" | "models";
 export type RightTab = "agent" | "assets" | "jobs";
 export type ColorTemp = "forest" | "warm" | "neutral";
 export type Density = "comfortable" | "compact";

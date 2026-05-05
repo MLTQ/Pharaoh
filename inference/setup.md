@@ -1,7 +1,7 @@
 # setup.sh
 
 ## Purpose
-One-shot setup script for Pharaoh's local inference environment. It creates isolated TTS and music virtualenvs, checks the Woosh environment, and reports missing local tools needed by model dependencies.
+One-shot setup script for Pharaoh's local inference environment. It creates isolated TTS and music virtualenvs, checks the Woosh environment, and can install optional AudioLDM/AudioSR environments.
 
 ## Components
 
@@ -23,6 +23,11 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Interacts with**: `PHARAOH_WOOSH_DIR`, `PHARAOH_AUDIOLDM_CACHE_DIR`, Woosh checkpoints, `requirements-sfx-audioldm.txt`.
 - **Rationale**: Woosh remains the default high-quality short-foley backend. AudioLDM is isolated because the Woosh dependency stack makes the diffusers AudioLDM path unreliable.
 
+### AudioSR env section
+- **Does**: Optionally creates `inference/.venv-audiosr` and installs the AudioSR CLI when `PHARAOH_INSTALL_AUDIOSR=1`.
+- **Interacts with**: `audio_enhance.rs`, `UpscaleView.tsx`, `requirements-audiosr.txt`.
+- **Rationale**: Neural upscaling is a post-processing concern with another heavy dependency stack, so it stays separate from generation servers.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
@@ -31,6 +36,7 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 | Users | Missing SoX is reported with install guidance | Removing the preflight warning |
 | Woosh setup | SFX env remains managed by the Woosh repo | Creating a conflicting Pharaoh SFX env |
 | AudioLDM setup | Optional deps install into `.venv-audioldm`; native checkpoints are reported under `~/pharaoh-models/sfx/audioldm` by default | Installing AudioLDM into the Woosh interpreter |
+| AudioSR setup | Optional deps install into `.venv-audiosr` | Installing AudioSR into generation envs |
 
 ## Notes
 - SoX is a system dependency, not a Python package. On macOS the expected install command is `brew install sox`.

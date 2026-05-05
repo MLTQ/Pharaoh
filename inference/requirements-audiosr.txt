@@ -1,0 +1,4 @@
+# Optional AudioSR post-processing environment.
+# Installed into inference/.venv-audiosr by setup.sh when:
+#   PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh
+audiosr==0.0.7

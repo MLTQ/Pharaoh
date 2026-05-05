@@ -282,6 +282,23 @@ pub struct SidecarMeta {
     pub qa_notes: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GeneratedAudioAsset {
+    pub audio_path: String,
+    pub meta_path: String,
+    pub scene_slug: String,
+    pub kind: String,
+    pub name: String,
+    pub duration_ms: Option<u64>,
+    pub sample_rate: u32,
+    pub model: String,
+    pub model_variant: Option<String>,
+    pub prompt: String,
+    pub generated_at: DateTime<Utc>,
+    pub parent: Option<String>,
+    pub qa_status: String,
+}
+
 // ── Progress event payloads (emitted to frontend) ────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

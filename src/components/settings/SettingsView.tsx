@@ -68,6 +68,14 @@ const MODELS = [
     variants: null as null,
     install: "./inference/setup.sh",
   },
+  {
+    kind: "post" as const,
+    label: "AudioSR",
+    description: "Post-processing — neural audio upscaling to 48 kHz",
+    port: null as null,
+    variants: null as null,
+    install: "PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh",
+  },
 ];
 
 // ── Colours ───────────────────────────────────────────────────────────────────
@@ -76,6 +84,7 @@ const KIND_COLOR: Record<string, string> = {
   tts:   "var(--tts)",
   sfx:   "var(--sfx)",
   music: "var(--music)",
+  post:  "var(--sfx)",
 };
 
 const STATUS_COLOR: Record<string, string> = {
@@ -544,8 +553,8 @@ export const SettingsView: React.FC = () => {
   const hw = useHardwareProfile();
   const { tts, sfx, music, health, updateServerConfig } = useModelStore();
 
-  const statusMap = { tts, sfx, music };
-  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music };
+  const statusMap = { tts, sfx, music, post: "unknown" as const };
+  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: null };
 
   const [urls, setUrls] = useState({
     tts:   `http://127.0.0.1:18001`,
@@ -632,12 +641,14 @@ export const SettingsView: React.FC = () => {
                   flexShrink: 0,
                 }} />
                 <span style={{ fontWeight: 600, fontSize: 13 }}>{m.label}</span>
-                <span style={{
-                  fontFamily: "var(--font-mono)",
-                  fontSize: 9.5,
-                  color: "var(--fg-3)",
-                  marginLeft: 2,
-                }}>:{m.port}</span>
+                {m.port && (
+                  <span style={{
+                    fontFamily: "var(--font-mono)",
+                    fontSize: 9.5,
+                    color: "var(--fg-3)",
+                    marginLeft: 2,
+                  }}>:{m.port}</span>
+                )}
                 <span style={{ flex: 1 }} />
                 <span style={{ fontSize: 11, color: "var(--fg-3)" }}>{m.description}</span>
               </div>
@@ -645,7 +656,7 @@ export const SettingsView: React.FC = () => {
               {/* Body */}
               <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
                 {/* URL + health */}
-                <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                {m.kind !== "post" && <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}>
                     <Label>Server URL</Label>
                     <input
@@ -681,7 +692,7 @@ export const SettingsView: React.FC = () => {
                       {h?.vram_mb ? ` · ${h.vram_mb} MB` : ""}
                     </span>
                   </div>
-                </div>
+                </div>}
 
                 {/* Woosh directory (SFX only) */}
                 {m.kind === "sfx" && (
@@ -798,6 +809,11 @@ export const SettingsView: React.FC = () => {
                     </div>
                   ) : m.kind === "sfx" ? (
                     <SfxDownloads />
+                  ) : m.kind === "post" ? (
+                    <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                      AudioSR downloads its own checkpoints on first upscale. Use the Audio Upscale page to
+                      select generated WAVs and run the optional post-processing pass.
+                    </div>
                   ) : (
                     <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
                   )}

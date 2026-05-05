@@ -22,6 +22,10 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 - **Does**: Define frontend event payloads for live generation state.
 - **Interacts with**: `jobStore.ts`.
 
+### `SidecarMeta`, `GeneratedAudioAsset`
+- **Does**: Represent persisted generated-asset metadata and the flattened asset list returned to the UI.
+- **Interacts with**: `sidecar.rs`, `UpscaleView.tsx`.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
@@ -29,6 +33,7 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 | Frontend TypeScript stores | Rust event payloads stay shape-compatible | Event field rename/removal |
 | `cli.rs` | Request models serialize directly to inference server JSON | Payload shape changes |
 | `app_support.rs` | `ScriptRow` fields remain stringly-typed CSV mirrors | Type changes |
+| `UpscaleView.tsx` | Generated assets include path, kind, prompt, model, and timing metadata | Removing `GeneratedAudioAsset` fields |
 
 ## Notes
 - `JobCompleteEvent` now carries duration and binding metadata so the UI can react to automatic row binding.

@@ -10,6 +10,7 @@ use crate::app_support::{
     read_script_rows, scene_dir, script_path, write_json,
 };
 use crate::commands::audio_engine::render_scene_with_projects_dir;
+use crate::commands::audio_enhance::upscale_audio_asset_path;
 use crate::commands::inference::finalize_generation_output;
 use crate::error::{Error, Result};
 use crate::models::{
@@ -23,9 +24,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
     ensure_app_dirs(&config)?;
 
     match args.as_slice() {
-        [group, action] if group == "project" && action == "list" => {
-            project_list(&config).await
-        }
+        [group, action] if group == "project" && action == "list" => project_list(&config).await,
         [group, action, project_id] if group == "project" && action == "status" => {
             project_status(&config, project_id).await
         }
@@ -36,6 +35,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             if group == "compose" && action == "render" && subaction == "scene" =>
         {
             compose_render_scene(&config, project_id, scene_slug).await
+        }
+        [group, action, input_path, rest @ ..] if group == "post" && action == "upscale" => {
+            post_upscale(input_path, rest).await
         }
         [group, action, subaction, project_id, scene_slug, row_index]
             if group == "generate" && action == "row" && subaction == "scene" =>
@@ -60,6 +62,7 @@ fn usage() -> &'static str {
   pharaoh project status <project_id>
   pharaoh project create --title <title> [--logline <text>] [--tone <text>]
   pharaoh compose render scene <project_id> <scene_slug>
+  pharaoh post upscale <input_wav> [--model basic|speech] [--steps 50] [--guidance 3.5] [--seed 0]
   pharaoh generate row scene <project_id> <scene_slug> <row_index>
   pharaoh generate all scene <project_id> <scene_slug>"
 }
@@ -208,6 +211,63 @@ async fn compose_render_scene(
     }))
 }
 
+async fn post_upscale(input_path: &str, rest: &[String]) -> Result<()> {
+    let mut model = "basic".to_string();
+    let mut steps = 50u32;
+    let mut guidance = 3.5f32;
+    let mut seed = 0i64;
+
+    let mut i = 0usize;
+    while i < rest.len() {
+        match rest[i].as_str() {
+            "--model" => {
+                i += 1;
+                model = rest
+                    .get(i)
+                    .cloned()
+                    .ok_or_else(|| Error::Other("missing --model value".into()))?;
+            }
+            "--steps" => {
+                i += 1;
+                steps = rest
+                    .get(i)
+                    .ok_or_else(|| Error::Other("missing --steps value".into()))?
+                    .parse()
+                    .map_err(|_| Error::Other("invalid --steps value".into()))?;
+            }
+            "--guidance" => {
+                i += 1;
+                guidance = rest
+                    .get(i)
+                    .ok_or_else(|| Error::Other("missing --guidance value".into()))?
+                    .parse()
+                    .map_err(|_| Error::Other("invalid --guidance value".into()))?;
+            }
+            "--seed" => {
+                i += 1;
+                seed = rest
+                    .get(i)
+                    .ok_or_else(|| Error::Other("missing --seed value".into()))?
+                    .parse()
+                    .map_err(|_| Error::Other("invalid --seed value".into()))?;
+            }
+            other => return Err(Error::Other(format!("unknown flag: {}", other))),
+        }
+        i += 1;
+    }
+
+    if model != "basic" && model != "speech" {
+        return Err(Error::Other("--model must be basic or speech".into()));
+    }
+
+    let output_path =
+        upscale_audio_asset_path(input_path.to_string(), model, steps, guidance, seed).await?;
+    print_json(&json!({
+        "input_path": input_path,
+        "output_path": output_path,
+    }))
+}
+
 async fn generate_row(
     config: &crate::models::AppConfig,
     project_id: &str,
@@ -221,7 +281,16 @@ async fn generate_row(
         .get(row_index)
         .cloned()
         .ok_or_else(|| Error::Other(format!("row {} out of range", row_index)))?;
-    let result = generate_script_row(config, &projects_dir, &project, project_id, scene_slug, row_index, row).await?;
+    let result = generate_script_row(
+        config,
+        &projects_dir,
+        &project,
+        project_id,
+        scene_slug,
+        row_index,
+        row,
+    )
+    .await?;
     print_json(&result)
 }
 
@@ -240,8 +309,16 @@ async fn generate_all(
             continue;
         }
         outputs.push(
-            generate_script_row(config, &projects_dir, &project, project_id, scene_slug, row_index, row)
-                .await?,
+            generate_script_row(
+                config,
+                &projects_dir,
+                &project,
+                project_id,
+                scene_slug,
+                row_index,
+                row,
+            )
+            .await?,
         );
     }
 
@@ -270,9 +347,43 @@ async fn generate_script_row(
 ) -> Result<GeneratedRowResult> {
     let http = reqwest::Client::new();
     match row.track_type.as_str() {
-        "DIALOGUE" => generate_dialogue(config, projects_dir, project, project_id, scene_slug, row_index, row, http).await,
-        "SFX" | "BED" => generate_sfx(config, projects_dir, project_id, scene_slug, row_index, row, http).await,
-        "MUSIC" => generate_music(config, projects_dir, project_id, scene_slug, row_index, row, http).await,
+        "DIALOGUE" => {
+            generate_dialogue(
+                config,
+                projects_dir,
+                project,
+                project_id,
+                scene_slug,
+                row_index,
+                row,
+                http,
+            )
+            .await
+        }
+        "SFX" | "BED" => {
+            generate_sfx(
+                config,
+                projects_dir,
+                project_id,
+                scene_slug,
+                row_index,
+                row,
+                http,
+            )
+            .await
+        }
+        "MUSIC" => {
+            generate_music(
+                config,
+                projects_dir,
+                project_id,
+                scene_slug,
+                row_index,
+                row,
+                http,
+            )
+            .await
+        }
         other => Err(Error::Other(format!("cannot generate row type {}", other))),
     }
 }
@@ -298,7 +409,12 @@ async fn generate_dialogue(
             .or_else(|| (!row.character.is_empty()).then_some(row.character.as_str()))
             .unwrap_or("dialogue"),
     );
-    let output_path = asset_output_path(projects_dir, project_id, scene_slug, &format!("{stem}_{}", Utc::now().timestamp_millis()));
+    let output_path = asset_output_path(
+        projects_dir,
+        project_id,
+        scene_slug,
+        &format!("{stem}_{}", Utc::now().timestamp_millis()),
+    );
 
     let speaker = character
         .and_then(|character| character.voice_assignment.speaker.clone())
@@ -386,7 +502,12 @@ async fn generate_sfx(
     http: reqwest::Client,
 ) -> Result<GeneratedRowResult> {
     let stem = sanitized_stem(&row.track.to_lowercase());
-    let output_path = asset_output_path(projects_dir, project_id, scene_slug, &format!("{stem}_{}", Utc::now().timestamp_millis()));
+    let output_path = asset_output_path(
+        projects_dir,
+        project_id,
+        scene_slug,
+        &format!("{stem}_{}", Utc::now().timestamp_millis()),
+    );
     let duration_seconds = row
         .duration_ms
         .parse::<f32>()
@@ -398,13 +519,19 @@ async fn generate_sfx(
     let params = SfxT2ARequest {
         prompt: row.prompt.clone(),
         duration_seconds,
-        model_variant: if use_audioldm { "AudioLDM-M-Full".into() } else { "Woosh-DFlow".into() },
+        model_variant: if use_audioldm {
+            "AudioLDM-M-Full".into()
+        } else {
+            "Woosh-DFlow".into()
+        },
         backend: Some(if use_audioldm { "audioldm" } else { "woosh" }.into()),
         steps: if use_audioldm { 200 } else { 4 },
         seed: random_seed(),
         guidance_scale: use_audioldm.then_some(2.5),
-        negative_prompt: use_audioldm
-            .then_some("speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts".into()),
+        negative_prompt: use_audioldm.then_some(
+            "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts"
+                .into(),
+        ),
         num_waveforms_per_prompt: use_audioldm.then_some(1),
         output_path: output_path.clone(),
     };
@@ -504,7 +631,13 @@ async fn generate_music(
     )
     .await?;
 
-    let status = poll_job(&http, format!("{}/jobs", config.music_url), &job_id, "Music").await?;
+    let status = poll_job(
+        &http,
+        format!("{}/jobs", config.music_url),
+        &job_id,
+        "Music",
+    )
+    .await?;
     let output_path = status
         .output_path
         .ok_or_else(|| Error::Other("Music job completed without output_path".into()))?;
@@ -599,7 +732,12 @@ async fn poll_job(
     }
 }
 
-fn asset_output_path(projects_dir: &Path, project_id: &str, scene_slug: &str, stem: &str) -> String {
+fn asset_output_path(
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+    stem: &str,
+) -> String {
     scene_dir(projects_dir, project_id, scene_slug)
         .join("assets")
         .join(format!("{stem}.wav"))

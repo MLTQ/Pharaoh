@@ -1,5 +1,6 @@
 pub mod audio;
 pub mod audio_engine;
+pub mod audio_enhance;
 pub mod inference;
 pub mod project;
 pub mod script;
