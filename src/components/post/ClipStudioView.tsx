@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
+import { useAudioStore } from "../../store/audioStore";
 import {
   getWaveformPeaks,
   listGeneratedAudioAssets,
@@ -35,6 +36,138 @@ function rowLabel(row: ScriptRow, index: number): string {
   return `${index + 1}. ${row.type} · ${who} · ${text}`;
 }
 
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+interface CropWaveformProps {
+  peaks: number[] | null;
+  durationMs: number | null;
+  startMs: number;
+  endMs: number;
+  color: string;
+  fallbackSeed: number;
+  onStartChange: (ms: number) => void;
+  onEndChange: (ms: number) => void;
+}
+
+const CropWaveform: React.FC<CropWaveformProps> = ({
+  peaks,
+  durationMs,
+  startMs,
+  endMs,
+  color,
+  fallbackSeed,
+  onStartChange,
+  onEndChange,
+}) => {
+  const ref = useRef<HTMLDivElement | null>(null);
+  const duration = durationMs ?? 0;
+  const active = duration > 0;
+  const minGapMs = Math.min(100, Math.max(10, duration * 0.01));
+  const startPct = active ? (clamp(startMs, 0, duration) / duration) * 100 : 0;
+  const endPct = active ? (clamp(endMs, 0, duration) / duration) * 100 : 100;
+
+  const msFromPointer = (clientX: number) => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect || !active) return 0;
+    const pct = clamp((clientX - rect.left) / rect.width, 0, 1);
+    return Math.round(pct * duration);
+  };
+
+  const startDrag = (handle: "start" | "end", e: React.PointerEvent<HTMLDivElement>) => {
+    if (!active) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (clientX: number) => {
+      const next = msFromPointer(clientX);
+      if (handle === "start") onStartChange(clamp(next, 0, Math.max(0, endMs - minGapMs)));
+      else onEndChange(clamp(next, Math.min(duration, startMs + minGapMs), duration));
+    };
+    move(e.clientX);
+    const onMove = (ev: PointerEvent) => move(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+
+  return (
+    <div
+      ref={ref}
+      style={{
+        position: "relative",
+        minHeight: 82,
+        border: "1px solid var(--line-1)",
+        background: "var(--bg-0)",
+        borderRadius: 2,
+        padding: 10,
+        overflow: "hidden",
+        userSelect: "none",
+      }}
+    >
+      {peaks ? (
+        <PeaksWave peaks={peaks} width={1000} height={70} color={color} opacity={0.9} />
+      ) : (
+        <Wave width={1000} height={70} seed={fallbackSeed} count={180} color={color} opacity={0.75} />
+      )}
+      {active && (
+        <>
+          <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none" }} />
+          {(["start", "end"] as const).map((handle) => {
+            const pct = handle === "start" ? startPct : endPct;
+            return (
+              <div
+                key={handle}
+                onPointerDown={(e) => startDrag(handle, e)}
+                title={handle === "start" ? "Drag crop start" : "Drag crop end"}
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  bottom: 0,
+                  left: `${pct}%`,
+                  width: 18,
+                  transform: "translateX(-50%)",
+                  cursor: "ew-resize",
+                  display: "flex",
+                  alignItems: "stretch",
+                  justifyContent: "center",
+                  touchAction: "none",
+                }}
+              >
+                <div style={{ width: 2, background: "var(--fg-1)", boxShadow: `0 0 12px ${color}` }} />
+                <div style={{
+                  position: "absolute",
+                  top: 6,
+                  width: 10,
+                  height: 10,
+                  borderRadius: 2,
+                  background: "var(--fg-1)",
+                  border: `1px solid ${color}`,
+                }} />
+              </div>
+            );
+          })}
+          <div style={{
+            position: "absolute",
+            left: `${startPct}%`,
+            right: `${100 - endPct}%`,
+            bottom: 5,
+            height: 2,
+            background: color,
+            boxShadow: `0 0 10px ${color}`,
+            pointerEvents: "none",
+          }} />
+        </>
+      )}
+    </div>
+  );
+};
+
 export const ClipStudioView: React.FC = () => {
   const { realProjectId, scenes, activeSceneNo } = useProjectStore();
   const [assets, setAssets] = useState<GeneratedAudioAsset[]>([]);
@@ -56,6 +189,7 @@ export const ClipStudioView: React.FC = () => {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastOutput, setLastOutput] = useState<string | null>(null);
+  const playAudio = useAudioStore((state) => state.play);
 
   const selected = assets.find((asset) => asset.audio_path === selectedPath) ?? assets[0] ?? null;
   const visibleAssets = useMemo(
@@ -69,6 +203,7 @@ export const ClipStudioView: React.FC = () => {
     .filter(({ row }) => row.type !== "DIRECTION");
   const selectedDuration = selected?.duration_ms ?? null;
   const safeEndMs = endMs ?? selectedDuration ?? 0;
+  const selectedColor = selected ? KIND_COLOR[selected.kind] : "var(--fg-1)";
 
   const refreshAssets = () => {
     if (!realProjectId) return;
@@ -111,6 +246,28 @@ export const ClipStudioView: React.FC = () => {
       })
       .catch(() => setScriptRows([]));
   }, [realProjectId, targetSceneSlug]);
+
+  const playSelection = () => {
+    if (!selected) return;
+    playAudio(
+      selected.audio_path,
+      Math.max(0, startMs) / 1000,
+      safeEndMs > startMs ? safeEndMs / 1000 : null,
+    );
+  };
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.code !== "Space" || event.repeat) return;
+      const target = event.target as HTMLElement | null;
+      const tagName = target?.tagName.toLowerCase();
+      if (target?.isContentEditable || tagName === "input" || tagName === "textarea" || tagName === "select") return;
+      event.preventDefault();
+      playSelection();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [selected?.audio_path, startMs, safeEndMs]);
 
   const saveClip = async (sendToScene: boolean) => {
     if (!selected) return;
@@ -251,16 +408,25 @@ export const ClipStudioView: React.FC = () => {
                   <PlayButton path={selected.audio_path} size={14} />
                 </div>
 
-                <div style={{ minHeight: 82, border: "1px solid var(--line-1)", background: "var(--bg-0)", borderRadius: 2, padding: 10, overflow: "hidden" }}>
-                  {peaks[selected.audio_path] ? (
-                    <PeaksWave peaks={peaks[selected.audio_path]} width={1000} height={70} color={KIND_COLOR[selected.kind]} opacity={0.9} />
-                  ) : (
-                    <Wave width={1000} height={70} seed={selected.name.charCodeAt(0)} count={180} color={KIND_COLOR[selected.kind]} opacity={0.75} />
-                  )}
-                </div>
+                <CropWaveform
+                  peaks={peaks[selected.audio_path] ?? null}
+                  durationMs={selectedDuration}
+                  startMs={startMs}
+                  endMs={safeEndMs}
+                  color={selectedColor}
+                  fallbackSeed={selected.name.charCodeAt(0)}
+                  onStartChange={setStartMs}
+                  onEndChange={setEndMs}
+                />
 
-                <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, marginTop: 12 }}>
-                  {selected.prompt || "No prompt recorded."}
+                <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: 12 }}>
+                  <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, flex: 1 }}>
+                    {selected.prompt || "No prompt recorded."}
+                  </div>
+                  <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
+                    <Icon name="play" style={{ width: 11, height: 11 }} />
+                    play crop
+                  </button>
                 </div>
               </div>
 

@@ -5,6 +5,8 @@ import { create } from "zustand";
 let _ctx: AudioContext | null = null;
 let _source: AudioBufferSourceNode | null = null;
 let _startTime = 0;
+let _offset = 0;
+let _stopAt: number | null = null;
 let _rafId: number | null = null;
 
 function getCtx(): AudioContext {
@@ -30,7 +32,7 @@ interface AudioState {
   playing: string | null;  // path of active file
   duration: number;        // seconds
   position: number;        // seconds, raf-updated
-  play: (path: string) => Promise<void>;
+  play: (path: string, offsetSeconds?: number, stopAtSeconds?: number | null) => Promise<void>;
   stop: () => void;
   toggle: (path: string) => Promise<void>;
 }
@@ -58,9 +60,9 @@ export const useAudioStore = create<AudioState>((set, get) => ({
     set({ playing: null, position: 0 });
   },
 
-  play: async (path: string) => {
+  play: async (path: string, offsetSeconds = 0, stopAtSeconds: number | null = null) => {
     stopCurrent();
-    set({ playing: path, position: 0, duration: 0 });
+    set({ playing: path, position: offsetSeconds, duration: 0 });
     try {
       const ctx = getCtx();
       if (ctx.state === "suspended") await ctx.resume();
@@ -73,6 +75,8 @@ export const useAudioStore = create<AudioState>((set, get) => ({
       source.connect(ctx.destination);
       _source = source;
       _startTime = ctx.currentTime;
+      _offset = Math.max(0, Math.min(offsetSeconds, audioBuffer.duration));
+      _stopAt = stopAtSeconds == null ? null : Math.max(_offset, Math.min(stopAtSeconds, audioBuffer.duration));
 
       set({ duration: audioBuffer.duration });
 
@@ -82,12 +86,18 @@ export const useAudioStore = create<AudioState>((set, get) => ({
           set({ playing: null, position: 0 });
         }
       };
-      source.start(0);
+      source.start(0, _offset);
 
       // Update position via requestAnimationFrame
       const tick = () => {
         if (_source !== source) return;
-        set({ position: Math.min(ctx.currentTime - _startTime, audioBuffer.duration) });
+        const position = Math.min(_offset + (ctx.currentTime - _startTime), audioBuffer.duration);
+        if (_stopAt !== null && position >= _stopAt) {
+          stopCurrent();
+          set({ playing: null, position: _stopAt });
+          return;
+        }
+        set({ position });
         _rafId = requestAnimationFrame(tick);
       };
       _rafId = requestAnimationFrame(tick);

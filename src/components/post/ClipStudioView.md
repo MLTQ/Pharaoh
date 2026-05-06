@@ -6,9 +6,14 @@ Post-production clip editor for generated Pharaoh audio assets. It lets users se
 ## Components
 
 ### `ClipStudioView`
-- **Does**: Lists generated assets, previews waveform peaks, exposes trim/gain/fade/filter/normalize controls, and calls `processClipAsset`.
-- **Interacts with**: `listGeneratedAudioAssets`, `getWaveformPeaks`, `processClipAsset`, `readScript`, `updateScriptRow`, `useProjectStore`.
+- **Does**: Lists generated assets, previews waveform peaks, exposes trim/gain/fade/filter/normalize controls, handles Space-bar crop preview, and calls `processClipAsset`.
+- **Interacts with**: `listGeneratedAudioAssets`, `getWaveformPeaks`, `processClipAsset`, `readScript`, `updateScriptRow`, `useProjectStore`, `useAudioStore`.
 - **Rationale**: Clip editing is post-production but not neural upscaling, so it stays separate from `UpscaleView`.
+
+### `CropWaveform`
+- **Does**: Renders the waveform with draggable vertical crop handles tied to `startMs` and `endMs`.
+- **Interacts with**: `PeaksWave`, `Wave`, Clip Studio trim state.
+- **Rationale**: Cropping needs direct manipulation rather than only numeric fields.
 
 ### `saveClip`
 - **Does**: Processes the selected asset into a child WAV and, when requested, writes that output path back to the selected script row.
@@ -20,6 +25,7 @@ Post-production clip editor for generated Pharaoh audio assets. It lets users se
 |-----------|---------|------------------|
 | `App.tsx` | Component renders as the `clip-studio` page | Renaming the exported component |
 | `tauriCommands.ts` | `processClipAsset` returns the written WAV path | Changing command return type |
+| `audioStore.ts` | `play(path, offset, stopAt)` previews crop regions | Removing region playback support |
 | Script rows | Row indexes are zero-based and scene-local | Passing display row numbers instead |
 
 ## Notes
