@@ -238,6 +238,18 @@ export const getDurationMs = (path: string): Promise<number> =>
 export const findZeroCrossings = (path: string, nearMs: number): Promise<number[]> =>
   invoke("find_zero_crossings", { path, nearMs });
 
+export const processClipAsset = (args: {
+  inputPath: string;
+  startMs: number;
+  endMs?: number | null;
+  gainDb: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  normalizeLufs?: number | null;
+  highpassHz?: number | null;
+  lowpassHz?: number | null;
+}): Promise<string> => invoke("process_clip_asset", { params: args });
+
 // ── Audio engine (ffmpeg) ────────────────────────────────────────────────────
 
 /** Normalize a clip in-place to targetLufs LUFS; returns path to .norm.wav file. */

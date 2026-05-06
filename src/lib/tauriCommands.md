@@ -16,7 +16,7 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 
 ### Sidecar and audio wrappers
 - **Does**: Read/write sidecars and call audio utility/render commands.
-- **Interacts with**: asset browser, timeline, playback helpers.
+- **Interacts with**: asset browser, timeline, Clip Studio, playback helpers.
 
 ### Enhancement wrappers
 - **Does**: List persistent generated assets and submit AudioSR upscaling to the Post server with an optional frontend job id for progress events.
@@ -29,6 +29,7 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 | React components | Function argument shapes match Rust serde models | Payload field rename/removal |
 | `commands/inference.rs` | TTS clone payload includes generation cap | Omitting `max_new_tokens` |
 | `CompositionView.tsx` | `renderScene` returns an output path string | Return type changes |
+| `ClipStudioView.tsx` | `processClipAsset` returns a sidecar-indexed child WAV path | Returning void or skipping sidecar creation |
 | `UpscaleView.tsx` | AudioSR returns the queued job id or an actionable setup error, and accepts a caller-owned job id | Swallowing backend errors |
 
 ## Notes

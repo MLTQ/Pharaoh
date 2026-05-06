@@ -16,7 +16,7 @@ Shared TypeScript contracts for project data, script rows, jobs, server health, 
 
 ### `GeneratedAudioAsset`
 - **Does**: Represents sidecar-indexed WAV files available for review and upscaling.
-- **Interacts with**: `UpscaleView.tsx`, `list_generated_audio_assets`.
+- **Interacts with**: `ClipStudioView.tsx`, `UpscaleView.tsx`, `list_generated_audio_assets`.
 - **Rationale**: Generated assets must be discoverable after app restart, independent of the transient job queue.
 
 ## Contracts
@@ -25,7 +25,7 @@ Shared TypeScript contracts for project data, script rows, jobs, server health, 
 |-----------|---------|------------------|
 | Store code | Optional health extensions remain optional | Making SFX-only fields mandatory |
 | Tauri wrappers | Field names mirror Rust serde payloads | Renaming shared fields |
-| App navigation | `ViewId` includes every page rendered by `App.tsx` | Adding pages without updating the union |
+| App navigation | `ViewId` includes every page rendered by `App.tsx`, including Post pages | Adding pages without updating the union |
 
 ## Notes
 - Keep this file declarative. Model routing decisions belong in hooks, stores, or backend commands.

@@ -1,8 +1,11 @@
-use std::path::Path;
-use tauri::AppHandle;
 use crate::app_support::{app_projects_dir, read_script_rows, scene_dir};
+use crate::commands::sidecar::{read_sidecar, write_sidecar};
 use crate::error::{Error, Result};
-use crate::models::ScriptRow;
+use crate::models::{ScriptRow, SidecarMeta};
+use chrono::Utc;
+use serde::Deserialize;
+use std::path::{Path, PathBuf};
+use tauri::AppHandle;
 
 fn db_to_linear(db: f32) -> f32 {
     10f32.powf(db / 20.0)
@@ -23,6 +26,172 @@ fn run_ffmpeg(args: &[&str]) -> Result<()> {
     Ok(())
 }
 
+fn run_ffmpeg_owned(args: &[String]) -> Result<()> {
+    let out = std::process::Command::new("ffmpeg")
+        .args(args)
+        .output()
+        .map_err(|e| Error::Other(format!("ffmpeg not found (install ffmpeg): {}", e)))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(Error::Other(format!(
+            "ffmpeg failed:\n{}",
+            &stderr[..stderr.len().min(1000)]
+        )));
+    }
+    Ok(())
+}
+
+fn wav_info(path: &str) -> Result<(Option<u64>, u32)> {
+    let reader = hound::WavReader::open(path)
+        .map_err(|e| Error::Other(format!("could not read processed WAV metadata: {}", e)))?;
+    let spec = reader.spec();
+    let samples = reader.duration() as u64;
+    let channels = u64::from(spec.channels.max(1));
+    let duration_ms = samples
+        .checked_mul(1000)
+        .and_then(|v| v.checked_div(channels))
+        .and_then(|v| v.checked_div(u64::from(spec.sample_rate)));
+    Ok((duration_ms, spec.sample_rate))
+}
+
+fn clip_output_path(input_path: &str) -> Result<String> {
+    let input = PathBuf::from(input_path);
+    let parent = input
+        .parent()
+        .ok_or_else(|| Error::Other("clip input has no parent directory".into()))?;
+    let stem = input
+        .file_stem()
+        .and_then(|s| s.to_str())
+        .ok_or_else(|| Error::Other("clip input has no valid filename stem".into()))?;
+    let stamped = format!("{}.clip.{}.wav", stem, Utc::now().format("%Y%m%d%H%M%S"));
+    Ok(parent.join(stamped).to_string_lossy().to_string())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ClipProcessRequest {
+    pub input_path: String,
+    pub start_ms: u64,
+    pub end_ms: Option<u64>,
+    pub gain_db: f32,
+    pub fade_in_ms: u64,
+    pub fade_out_ms: u64,
+    pub normalize_lufs: Option<f32>,
+    pub highpass_hz: Option<u32>,
+    pub lowpass_hz: Option<u32>,
+}
+
+/// Process a generated asset into a child WAV using ffmpeg, then write a child sidecar.
+#[tauri::command]
+pub fn process_clip_asset(params: ClipProcessRequest) -> Result<String> {
+    if !Path::new(&params.input_path).exists() {
+        return Err(Error::Other(format!(
+            "clip input not found: {}",
+            params.input_path
+        )));
+    }
+    if let Some(end_ms) = params.end_ms {
+        if end_ms <= params.start_ms {
+            return Err(Error::Other("clip end must be after clip start".into()));
+        }
+    }
+
+    let output = clip_output_path(&params.input_path)?;
+    let mut args = vec!["-y".to_string()];
+    if params.start_ms > 0 {
+        args.push("-ss".into());
+        args.push(format!("{:.3}", params.start_ms as f32 / 1000.0));
+    }
+    if let Some(end_ms) = params.end_ms {
+        args.push("-t".into());
+        args.push(format!("{:.3}", (end_ms - params.start_ms) as f32 / 1000.0));
+    }
+    args.push("-i".into());
+    args.push(params.input_path.clone());
+
+    let output_duration_ms = params.end_ms.map(|end_ms| end_ms - params.start_ms);
+    let mut filters = Vec::new();
+    if let Some(hz) = params.highpass_hz.filter(|hz| *hz > 0) {
+        filters.push(format!("highpass=f={}", hz));
+    }
+    if let Some(hz) = params.lowpass_hz.filter(|hz| *hz > 0) {
+        filters.push(format!("lowpass=f={}", hz));
+    }
+    if params.gain_db.abs() > f32::EPSILON {
+        filters.push(format!("volume={:.2}dB", params.gain_db));
+    }
+    if params.fade_in_ms > 0 {
+        filters.push(format!(
+            "afade=t=in:st=0:d={:.3}",
+            params.fade_in_ms as f32 / 1000.0
+        ));
+    }
+    if let (Some(duration_ms), fade_out_ms) = (output_duration_ms, params.fade_out_ms) {
+        if fade_out_ms > 0 && duration_ms > fade_out_ms {
+            filters.push(format!(
+                "afade=t=out:st={:.3}:d={:.3}",
+                (duration_ms - fade_out_ms) as f32 / 1000.0,
+                fade_out_ms as f32 / 1000.0
+            ));
+        }
+    }
+    if let Some(lufs) = params.normalize_lufs {
+        filters.push(format!("loudnorm=I={:.1}:TP=-1.5:LRA=11", lufs));
+    }
+    if !filters.is_empty() {
+        args.push("-af".into());
+        args.push(filters.join(","));
+    }
+    args.extend([
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "2".into(),
+        output.clone(),
+    ]);
+
+    run_ffmpeg_owned(&args)?;
+
+    let (duration_actual_ms, sample_rate) =
+        wav_info(&output).unwrap_or((output_duration_ms, 48000));
+    let parent_meta = read_sidecar(params.input_path.clone()).ok().flatten();
+    let prompt = parent_meta
+        .as_ref()
+        .map(|m| m.prompt.clone())
+        .unwrap_or_else(|| "Manual clip edit".into());
+    let meta = SidecarMeta {
+        model: "clip-studio".into(),
+        model_variant: Some("ffmpeg".into()),
+        prompt,
+        instruct: Some(format!(
+            "trim={}..{} ms; gain={:.2} dB; fade_in={} ms; fade_out={} ms; highpass={:?}; lowpass={:?}; normalize={:?}",
+            params.start_ms,
+            params.end_ms.map(|v| v.to_string()).unwrap_or_else(|| "end".into()),
+            params.gain_db,
+            params.fade_in_ms,
+            params.fade_out_ms,
+            params.highpass_hz,
+            params.lowpass_hz,
+            params.normalize_lufs
+        )),
+        speaker: parent_meta.as_ref().and_then(|m| m.speaker.clone()),
+        language: parent_meta.as_ref().and_then(|m| m.language.clone()),
+        seed: parent_meta.as_ref().map(|m| m.seed).unwrap_or(0),
+        temperature: None,
+        top_p: None,
+        duration_target_ms: output_duration_ms,
+        duration_actual_ms,
+        sample_rate,
+        generated_at: Utc::now(),
+        parent: Some(params.input_path),
+        take_index: parent_meta.as_ref().map(|m| m.take_index + 1).unwrap_or(0),
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    write_sidecar(output.clone(), meta)?;
+    Ok(output)
+}
+
 /// Normalize a single WAV file to `target_lufs` integrated loudness using ffmpeg loudnorm.
 /// Writes to `{stem}.norm.wav` next to the original and returns the new path.
 #[tauri::command]
@@ -30,9 +199,15 @@ pub fn normalize_clip(path: String, target_lufs: f32) -> Result<String> {
     let stem = path.trim_end_matches(".wav");
     let output = format!("{}.norm.wav", stem);
     run_ffmpeg(&[
-        "-y", "-i", &path,
-        "-af", &format!("loudnorm=I={}:TP=-1.5:LRA=11", target_lufs),
-        "-ar", "48000", "-ac", "2",
+        "-y",
+        "-i",
+        &path,
+        "-af",
+        &format!("loudnorm=I={}:TP=-1.5:LRA=11", target_lufs),
+        "-ar",
+        "48000",
+        "-ac",
+        "2",
         &output,
     ])?;
     Ok(output)

@@ -5,9 +5,9 @@ Rust-side ffmpeg rendering utilities for scene composition. This file mixes plac
 
 ## Components
 
-### `normalize_clip`, `resample_to_48k`
-- **Does**: Run simple ffmpeg transforms on individual clips.
-- **Interacts with**: Frontend utility wrappers in `tauriCommands.ts`.
+### `normalize_clip`, `resample_to_48k`, `process_clip_asset`
+- **Does**: Run ffmpeg transforms on individual clips. `process_clip_asset` trims, filters, fades, normalizes, writes 48 kHz stereo output, and creates a child sidecar.
+- **Interacts with**: Frontend utility wrappers in `tauriCommands.ts`, `ClipStudioView.tsx`, sidecar commands.
 
 ### `render_scene`
 - **Does**: Tauri command wrapper that resolves the configured projects root and delegates to the shared renderer.
@@ -23,6 +23,7 @@ Rust-side ffmpeg rendering utilities for scene composition. This file mixes plac
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `CompositionView.tsx` | Successful render returns output path as a string | Return type changes |
+| `ClipStudioView.tsx` | Clip processing returns a new WAV path and writes metadata next to it | Returning the parent path or skipping sidecar writes |
 | `cli.rs` | Rendering works without a Tauri window | Adding AppHandle-only dependencies |
 | Users/agents | Only placed rows with `file` and `start_ms` render | Changing row inclusion rules |
 

@@ -14,9 +14,9 @@ Top-level React shell for Pharaoh's project workspace. It wires navigation, glob
 - **Interacts with**: project/job/model/playback/UI stores and page components.
 
 ### Post-processing navigation
-- **Does**: Adds the Audio Upscale page to the rail, breadcrumbs, sidebar, and canvas.
-- **Interacts with**: `UpscaleView.tsx`.
-- **Rationale**: Upscaling is a project-wide post-production task rather than a scene generator, so it gets its own page.
+- **Does**: Adds Clip Studio and Audio Upscale pages to the rail, breadcrumbs, sidebar, and canvas.
+- **Interacts with**: `ClipStudioView.tsx`, `UpscaleView.tsx`.
+- **Rationale**: Clip editing and neural upscaling are separate post-production tasks, so each gets its own page.
 
 ## Contracts
 

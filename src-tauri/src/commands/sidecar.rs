@@ -65,7 +65,7 @@ fn collect_generated_assets(
             continue;
         }
 
-        let kind_model = if meta.model == "audiosr" {
+        let kind_model = if meta.model == "audiosr" || meta.model == "clip-studio" {
             meta.parent
                 .as_ref()
                 .and_then(|parent| read_sidecar(parent.clone()).ok().flatten())

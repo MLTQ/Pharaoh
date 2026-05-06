@@ -7,7 +7,7 @@ Library entrypoints for Pharaoh’s native application modes. This file boots th
 
 ### `run`
 - **Does**: Builds and runs the Tauri application, loading app config and registering commands.
-- **Interacts with**: `AppState` in `models.rs`, command modules in `commands/`, `UpscaleView.tsx`.
+- **Interacts with**: `AppState` in `models.rs`, command modules in `commands/`, `ClipStudioView.tsx`, `UpscaleView.tsx`.
 
 ### `run_cli`
 - **Does**: Starts a Tokio runtime and executes the headless CLI.

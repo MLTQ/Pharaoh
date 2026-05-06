@@ -11,7 +11,7 @@ Tauri commands for reading and writing generated-audio sidecar metadata. Sidecar
 
 ### `list_generated_audio_assets`
 - **Does**: Scans a project's `scenes/*/assets` folders for WAV sidecars and returns selectable generated assets.
-- **Interacts with**: `UpscaleView.tsx`.
+- **Interacts with**: `ClipStudioView.tsx`, `UpscaleView.tsx`.
 - **Rationale**: The upscale workflow must work across app restarts, so it cannot depend on the transient frontend job store.
 
 ### `get_takes`, `update_sidecar_qa`
@@ -22,9 +22,9 @@ Tauri commands for reading and writing generated-audio sidecar metadata. Sidecar
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
-| `UpscaleView.tsx` | `list_generated_audio_assets` returns existing WAV paths with sidecar-derived metadata | Filtering out completed sidecars |
+| Post pages | `list_generated_audio_assets` returns existing WAV paths with sidecar-derived metadata | Filtering out completed sidecars |
 | `AssetBrowser.tsx` | QA updates mutate the existing sidecar file | Changing sidecar path derivation |
 | `commands/inference.rs` | Sidecar path is `{audio_path}.meta.json` | Changing `meta_path` naming |
 
 ## Notes
-- Asset kind is inferred from the sidecar model string. AudioSR child assets inherit kind from their parent sidecar when available.
+- Asset kind is inferred from the sidecar model string. AudioSR and Clip Studio child assets inherit kind from their parent sidecar when available.

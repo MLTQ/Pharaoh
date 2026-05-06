@@ -13,6 +13,7 @@ import { JobQueue } from "./components/shared/JobQueue";
 import { SettingsView } from "./components/settings/SettingsView";
 import { ModelsView } from "./components/models/ModelsView";
 import { UpscaleView } from "./components/upscale/UpscaleView";
+import { ClipStudioView } from "./components/post/ClipStudioView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
@@ -30,6 +31,7 @@ const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label:
   { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
   { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
   { id: "music",       icon: "music",     label: "Score",          model: "music" },
+  { id: "clip-studio", icon: "fit",       label: "Clip Studio" },
   { id: "upscale",     icon: "sparkle",   label: "Audio Upscale" },
   { id: "models",      icon: "settings",  label: "Models" },
 ];
@@ -127,6 +129,7 @@ export default function App() {
     if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
     if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
     if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
+    if (view === "clip-studio") return [{ k: "Project", v: project.title }, { k: "Post", v: "Clip Studio", active: true }];
     if (view === "upscale")     return [{ k: "Project", v: project.title }, { k: "Post", v: "Audio Upscale", active: true }];
     if (view === "composition" && scene) {
       return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
@@ -145,6 +148,7 @@ export default function App() {
     tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
     sfx:         { eyebrow: "Generation", title: "Sound design" },
     music:       { eyebrow: "Generation", title: "Score" },
+    "clip-studio": { eyebrow: "Post",     title: "Clip Studio" },
     upscale:     { eyebrow: "Post",       title: "Audio Upscale" },
     settings:    { eyebrow: "App",        title: "Settings" },
     models:      { eyebrow: "App",        title: "Models" },
@@ -317,6 +321,10 @@ export default function App() {
           </div>
 
           <div className="side-section">Post · Polish</div>
+          <div className={`side-item ${view === "clip-studio" ? "active" : ""}`} onClick={() => setView("clip-studio")}>
+            <span className="ico" style={{ color: "var(--fg-1)" }}><Icon name="fit" style={{ width: 14, height: 14 }} /></span>
+            <span>Clip Studio</span>
+          </div>
           <div className={`side-item ${view === "upscale" ? "active" : ""}`} onClick={() => setView("upscale")}>
             <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
             <span>Audio Upscale</span>
@@ -342,6 +350,7 @@ export default function App() {
       <div className="canvas">
         {view === "settings" && <SettingsView />}
         {view === "models"   && <ModelsView />}
+        {view === "clip-studio" && <ClipStudioView />}
         {view === "upscale"  && <UpscaleView />}
         {view === "pyramid" && (
           <PyramidView
