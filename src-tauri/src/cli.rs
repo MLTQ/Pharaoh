@@ -563,6 +563,7 @@ async fn generate_sfx(
         backend: Some(if use_audioldm { "audioldm" } else { "woosh" }.into()),
         steps: if use_audioldm { 200 } else { 4 },
         seed: random_seed(),
+        cfg_scale: (!use_audioldm).then_some(4.5),
         guidance_scale: use_audioldm.then_some(2.5),
         negative_prompt: use_audioldm.then_some(
             "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts"

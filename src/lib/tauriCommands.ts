@@ -158,6 +158,7 @@ export const submitSfxT2a = (args: {
     backend?: "woosh" | "audioldm";
     steps: number;
     seed: number;
+    cfg_scale?: number;
     guidance_scale?: number;
     negative_prompt?: string;
     num_waveforms_per_prompt?: number;

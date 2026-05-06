@@ -18,6 +18,7 @@ Shared frontend hook for submitting scene-level TTS, SFX, and music jobs. It res
 - **Does**: Submit SFX and music generation jobs with model-specific defaults. SFX defaults to Woosh for short clips and AudioLDM for requests longer than 5 seconds unless the caller chooses a backend explicitly.
 - **Interacts with**: SFX and Music panels.
 - **Rationale**: Woosh is preferred for short foley; AudioLDM is reserved for long effects and soundscapes that should not be stitched from many short chunks.
+- **Woosh defaults**: Uses 4 Euler steps and CFG scale 4.5 unless the caller overrides them.
 - **AudioLDM defaults**: Uses upstream's recommended `audioldm-m-full` native checkpoint and 200 steps for quality. Candidate count defaults to 1 because upstream AudioLDM's multi-candidate CLAP ranking assumes CUDA and crashes on Apple Silicon/CPU.
 
 ## Contracts

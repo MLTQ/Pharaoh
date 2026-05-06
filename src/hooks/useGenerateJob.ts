@@ -92,6 +92,7 @@ export function useGenerateJob() {
     modelVariant?: string;
     steps?: number;
     seed?: number;
+    cfgScale?: number;
     guidanceScale?: number;
     negativePrompt?: string;
     numWaveformsPerPrompt?: number;
@@ -113,6 +114,7 @@ export function useGenerateJob() {
         backend,
         steps: params.steps ?? (backend === "audioldm" ? 200 : 4),
         seed: params.seed ?? Math.floor(Math.random() * 99999),
+        cfg_scale: params.cfgScale ?? (backend === "woosh" ? 4.5 : undefined),
         guidance_scale: params.guidanceScale ?? (backend === "audioldm" ? 2.5 : undefined),
         negative_prompt: params.negativePrompt ?? (backend === "audioldm" ? "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts" : undefined),
         num_waveforms_per_prompt: params.numWaveformsPerPrompt ?? (backend === "audioldm" ? 1 : undefined),

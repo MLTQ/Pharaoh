@@ -170,6 +170,7 @@ class T2AParams(BaseModel):
     backend: str = "woosh"
     steps: int = 4
     seed: int = 0
+    cfg_scale: float = 4.5
     guidance_scale: float = 2.5
     negative_prompt: str = ""
     num_waveforms_per_prompt: int = 3
@@ -470,6 +471,7 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
         prompt   = params["prompt"]
         steps    = int(params.get("steps", 4))
         seed     = int(params.get("seed", 0))
+        cfg_scale = float(params.get("cfg_scale", 4.5))
         duration = float(params.get("duration_seconds", 3.0))
         out_path = params["output_path"]
 
@@ -505,7 +507,7 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
                     cond=cond,
                     num_steps=steps,
                     renoise=renoise,
-                    cfg=4.5,
+                    cfg=cfg_scale,
                 )
                 return _ldm.autoencoder.inverse(x)
 

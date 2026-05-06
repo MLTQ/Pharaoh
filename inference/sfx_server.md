@@ -10,6 +10,10 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 - **Interacts with**: Woosh `.venv`, Woosh checkpoints, `/generate/t2a`.
 - **Rationale**: Woosh remains the preferred backend for tight one-shots and foley, where quality is more important than long duration.
 
+### T2A parameters
+- **Does**: Accepts prompt, duration, model variant, backend, steps, seed, Woosh `cfg_scale`, AudioLDM guidance, AudioLDM negative prompt, and AudioLDM candidate count.
+- **Interacts with**: `SFXPanel.tsx`, Rust `SfxT2ARequest`.
+
 ### AudioLDM backend
 - **Does**: Runs the upstream `audioldm` CLI from `inference/.venv-audioldm` when a request uses `backend="audioldm"` or an AudioLDM model variant, then copies the generated WAV to Pharaoh's requested output path.
 - **Interacts with**: `requirements-sfx-audioldm.txt`, `PHARAOH_AUDIOLDM_PYTHON`, `PHARAOH_AUDIOLDM_CACHE_DIR`, `/generate/t2a`.
@@ -39,7 +43,7 @@ FastAPI server for Pharaoh SFX generation on port 18002. It keeps Woosh as the d
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `submit_sfx_t2a` | `/generate/t2a` accepts existing Woosh payloads | Making `backend` required without a default |
-| `SFXPanel.tsx` | AudioLDM can be selected through request fields, not a new server URL | Splitting into a new model kind without UI migration |
+| `SFXPanel.tsx` | Woosh/AudioLDM parameters map directly to request fields | Renaming request fields without updating controls |
 | Sidecar finalizer | Server writes a WAV to `output_path` | Returning non-WAV or remote-only outputs |
 
 ## Notes

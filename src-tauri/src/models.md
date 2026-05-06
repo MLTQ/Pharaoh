@@ -17,6 +17,7 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 - **Does**: Encode generation payloads sent to the Python servers.
 - **Interacts with**: `inference.rs`, `cli.rs`.
 - **Rationale**: Clone requests include `max_new_tokens` because Qwen can otherwise spend unbounded time in generation.
+- **SFX fields**: `SfxT2ARequest` carries backend, model variant, duration, steps, seed, Woosh CFG scale, and AudioLDM guidance/negative/candidate controls.
 
 ### `JobProgressEvent`, `JobCompleteEvent`, `JobFailedEvent`
 - **Does**: Define frontend event payloads for live generation state.
