@@ -40,6 +40,8 @@ export function useGenerateJob() {
     instruct?: string;
     seed?: number;
     temperature?: number;
+    topP?: number;
+    maxNewTokens?: number;
     rowIndex?: number;
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
@@ -58,8 +60,8 @@ export function useGenerateJob() {
         instruct,
         seed: params.seed ?? Math.floor(Math.random() * 99999),
         temperature: params.temperature ?? 0.7,
-        top_p: 0.9,
-        max_new_tokens: 2048,
+        top_p: params.topP ?? 0.9,
+        max_new_tokens: params.maxNewTokens ?? 2048,
         output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
       },
     });
@@ -140,6 +142,11 @@ export function useGenerateJob() {
     durationSeconds?: number;
     bpm?: number;
     key?: string;
+    lmModelSize?: string;
+    diffusionSteps?: number;
+    thinkingMode?: boolean;
+    referenceAudioPath?: string;
+    batchSize?: number;
     seed?: number;
     rowIndex?: number;
   }): Promise<SubmitResult> {
@@ -155,12 +162,12 @@ export function useGenerateJob() {
         bpm: params.bpm,
         key: params.key ?? "",
         language: "en",
-        lm_model_size: "1.7B",
-        diffusion_steps: 60,
-        thinking_mode: false,
-        reference_audio_path: "",
+        lm_model_size: params.lmModelSize ?? "1.7B",
+        diffusion_steps: params.diffusionSteps ?? 60,
+        thinking_mode: params.thinkingMode ?? false,
+        reference_audio_path: params.referenceAudioPath ?? "",
         seed: params.seed ?? Math.floor(Math.random() * 99999),
-        batch_size: 1,
+        batch_size: params.batchSize ?? 1,
         output_path: makeOutputPath(pDir, projectId, sceneSlug, `music_${ts}.wav`),
       },
     });

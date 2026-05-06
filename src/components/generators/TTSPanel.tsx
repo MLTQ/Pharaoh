@@ -1,11 +1,13 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { Icon, Wave } from "../shared/atoms";
+import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
+import { PlayButton } from "../shared/PlayButton";
 import { SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
-import type { MockScene } from "../../lib/types";
+import { getWaveformPeaks, listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import type { GeneratedAudioAsset, MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
 
@@ -15,21 +17,24 @@ interface TTSPanelProps {
 }
 
 export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
-  const { characters, activeSceneNo, activeSceneSlug } = useProjectStore();
+  const { characters, realProjectId, setActiveScene } = useProjectStore();
   const { jobs, setQaStatus } = useJobStore();
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
   const [line, setLine]           = useState("");
   const [direction, setDirection] = useState(characters[0]?.voice_assignment.instruct_default ?? "");
-  const [pace, setPace]           = useState(0.92);
+  const [temperature, setTemperature] = useState(0.7);
+  const [topP, setTopP] = useState(0.9);
+  const [maxNewTokens, setMaxNewTokens] = useState(2048);
+  const [seed, setSeed] = useState(Math.floor(Math.random() * 99999));
+  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAudioAsset[]>([]);
+  const [assetPeaks, setAssetPeaks] = useState<Record<string, number[]>>({});
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError]   = useState<string | null>(null);
   const { submitTts } = useGenerateJob();
 
-  // Match the slug source-of-truth used by useGenerateJob.submitTts so filter == write
-  const fallbackScene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
-  const sceneSlug = activeSceneSlug
-    ?? (fallbackScene ? deriveSlug(fallbackScene.no, fallbackScene.title) : "");
+  const selectedScene = scenes.find((s) => s.no === scene) ?? scenes[0];
+  const sceneSlug = selectedScene ? (selectedScene.slug ?? deriveSlug(selectedScene.no, selectedScene.title)) : "";
 
   const takes = useMemo(
     () => [...jobs]
@@ -41,6 +46,8 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
       .reverse(),
     [jobs, sceneSlug],
   );
+  const completedJobPaths = new Set(takes.map((j) => j.output_path).filter(Boolean));
+  const persistedOnly = generatedAssets.filter((asset) => !completedJobPaths.has(asset.audio_path));
 
   const selectedChar = characters.find((c) => c.id === speakerId) ?? characters[0];
   const selectedVoice = selectedChar?.voice_assignment;
@@ -51,6 +58,32 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
     setSpeakerId(characters[0].id);
     setDirection(characters[0].voice_assignment.instruct_default ?? "");
   }, [characters, speakerId]);
+
+  useEffect(() => {
+    setScene(defaultScene);
+  }, [defaultScene]);
+
+  useEffect(() => {
+    if (!realProjectId || !sceneSlug) return;
+    listGeneratedAudioAssets(realProjectId)
+      .then((assets) => {
+        setGeneratedAssets(assets.filter((asset) =>
+          asset.kind === "tts"
+          && asset.scene_slug === sceneSlug
+          && asset.model.toLowerCase().startsWith("qwen3-tts")
+        ));
+      })
+      .catch(() => {});
+  }, [realProjectId, sceneSlug, jobs]);
+
+  useEffect(() => {
+    for (const asset of generatedAssets) {
+      if (assetPeaks[asset.audio_path]) continue;
+      getWaveformPeaks(asset.audio_path, 120)
+        .then((peaks) => setAssetPeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
+        .catch(() => {});
+    }
+  }, [generatedAssets, assetPeaks]);
 
   const handleSelectSpeaker = (id: string) => {
     setSpeakerId(id);
@@ -65,15 +98,19 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
     }
     setGenerating(true);
     setGenError(null);
+    setActiveScene(scene);
     try {
       await submitTts({
         text: line.trim(),
         speaker: customSpeaker,
         character: selectedChar,
         instruct: direction.trim(),
-        seed: Math.floor(Math.random() * 99999),
-        temperature: pace,
+        seed,
+        temperature,
+        topP,
+        maxNewTokens,
       });
+      setSeed(Math.floor(Math.random() * 99999));
     } catch (e) {
       setGenError(String(e));
     } finally {
@@ -108,7 +145,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           </div>
         </div>
 
-        <SceneRouter scenes={scenes} scene={scene} setScene={setScene} accent="var(--tts)" onSend={() => {}} />
+        <SceneRouter scenes={scenes} scene={scene} setScene={(next) => { setScene(next); setActiveScene(next); }} accent="var(--tts)" onSend={() => setActiveScene(scene)} />
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Speaker</div>
         <div className="speaker-grid">
@@ -183,25 +220,37 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         <div className="field-row" style={{ marginTop: 18 }}>
           <div className="field">
             <div className="field-label">
-              <span>Pace</span>
-              <span className="hint">{pace.toFixed(2)}×</span>
+              <span>Temperature</span>
+              <span className="hint">{temperature.toFixed(2)}</span>
             </div>
             <div className="slider-row">
               <input
                 type="range" className="slider tts"
-                min="0.5" max="1.5" step="0.01"
-                value={pace} onChange={(e) => setPace(Number(e.target.value))}
+                min="0.1" max="1.5" step="0.01"
+                value={temperature} onChange={(e) => setTemperature(Number(e.target.value))}
               />
-              <span className="slider-val">{pace.toFixed(2)}</span>
+              <span className="slider-val">{temperature.toFixed(2)}</span>
             </div>
           </div>
           <div className="field">
-            <div className="field-label"><span>Mic distance</span></div>
-            <div className="toggle-group">
-              <button>close</button>
-              <button className="active">intimate</button>
-              <button>room</button>
-              <button>distant</button>
+            <div className="field-label">
+              <span>Top-p</span>
+              <span className="hint">{topP.toFixed(2)}</span>
+            </div>
+            <input type="range" className="slider tts" min="0.1" max="1" step="0.01" value={topP} onChange={(e) => setTopP(Number(e.target.value))} />
+          </div>
+        </div>
+
+        <div className="field-row" style={{ marginTop: 12 }}>
+          <div className="field">
+            <div className="field-label"><span>Max tokens</span><span className="hint">generation cap</span></div>
+            <input className="input" type="number" min={128} max={4096} step={128} value={maxNewTokens} onChange={(e) => setMaxNewTokens(Number(e.target.value) || 2048)} />
+          </div>
+          <div className="field">
+            <div className="field-label"><span>Seed</span><span className="hint">deterministic</span></div>
+            <div style={{ display: "flex", gap: 6 }}>
+              <input className="input" type="number" value={seed} onChange={(e) => setSeed(Number(e.target.value) || 0)} />
+              <button className="btn btn-sm" onClick={() => setSeed(Math.floor(Math.random() * 99999))}>roll</button>
             </div>
           </div>
         </div>
@@ -243,20 +292,39 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
 
         <div className="panel-side-section" style={{ display: "flex", flexDirection: "column", gap: 10 }}>
           <h3>Takes</h3>
-          {takes.length === 0 ? (
+          {takes.length === 0 && persistedOnly.length === 0 ? (
             <EmptyTakes label="No takes yet — generate a line above." />
           ) : (
-            <TakeList label={`${takes.length} take${takes.length === 1 ? "" : "s"}`}>
-              {takes.map((job, i) => (
-                <TakeRow
-                  key={job.id}
-                  job={job}
-                  index={takes.length - 1 - i}
-                  caption={job.description}
-                  onQa={(s) => setQaStatus(job.id, s)}
-                />
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              {takes.length > 0 && (
+                <TakeList label={`${takes.length} active take${takes.length === 1 ? "" : "s"}`}>
+                  {takes.map((job, i) => (
+                    <TakeRow
+                      key={job.id}
+                      job={job}
+                      index={takes.length - 1 - i}
+                      caption={job.description}
+                      onQa={(s) => setQaStatus(job.id, s)}
+                    />
+                  ))}
+                </TakeList>
+              )}
+              {persistedOnly.map((asset) => (
+                <div key={asset.audio_path} style={{ border: "1px solid var(--line-1)", borderRadius: "var(--r)", padding: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
+                  <div style={{ minWidth: 0 }}>
+                    {assetPeaks[asset.audio_path] ? (
+                      <PeaksWave peaks={assetPeaks[asset.audio_path]} width={180} height={20} color="var(--tts)" opacity={0.8} />
+                    ) : (
+                      <Wave width={180} height={20} seed={asset.name.charCodeAt(0)} count={36} color="var(--tts)" opacity={0.6} />
+                    )}
+                    <div style={{ marginTop: 4, fontSize: 10, color: "var(--fg-4)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={asset.prompt}>
+                      {asset.prompt || asset.name}
+                    </div>
+                  </div>
+                  <PlayButton path={asset.audio_path} size={11} />
+                </div>
               ))}
-            </TakeList>
+            </div>
           )}
         </div>
       </div>
