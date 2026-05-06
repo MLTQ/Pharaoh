@@ -67,6 +67,24 @@ fn clip_output_path(input_path: &str) -> Result<String> {
     Ok(parent.join(stamped).to_string_lossy().to_string())
 }
 
+fn sanitize_stem(raw: &str) -> String {
+    let sanitized: String = raw
+        .chars()
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '-' || c == '_' {
+                c.to_ascii_lowercase()
+            } else {
+                '_'
+            }
+        })
+        .collect();
+    sanitized
+        .trim_matches('_')
+        .chars()
+        .take(80)
+        .collect::<String>()
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipProcessRequest {
@@ -79,6 +97,84 @@ pub struct ClipProcessRequest {
     pub normalize_lufs: Option<f32>,
     pub highpass_hz: Option<u32>,
     pub lowpass_hz: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportAudioRequest {
+    pub project_id: String,
+    pub source_path: String,
+    pub label: Option<String>,
+}
+
+/// Import arbitrary source audio into the project as a sidecar-indexed WAV.
+#[tauri::command]
+pub fn import_audio_asset(app: AppHandle, params: ImportAudioRequest) -> Result<String> {
+    let source = PathBuf::from(&params.source_path);
+    if !source.exists() {
+        return Err(Error::Other(format!(
+            "source audio not found: {}",
+            params.source_path
+        )));
+    }
+
+    let projects_dir = app_projects_dir(&app)?;
+    let imports_dir = projects_dir
+        .join(&params.project_id)
+        .join("scenes")
+        .join("__imports")
+        .join("assets");
+    std::fs::create_dir_all(&imports_dir)?;
+
+    let label = params
+        .label
+        .clone()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| source.file_stem().map(|s| s.to_string_lossy().to_string()))
+        .unwrap_or_else(|| "imported_audio".into());
+    let stem = sanitize_stem(&label);
+    let output = imports_dir
+        .join(format!(
+            "{}.import.{}.wav",
+            if stem.is_empty() { "audio" } else { &stem },
+            Utc::now().format("%Y%m%d%H%M%S")
+        ))
+        .to_string_lossy()
+        .to_string();
+
+    run_ffmpeg_owned(&[
+        "-y".into(),
+        "-i".into(),
+        params.source_path.clone(),
+        "-ar".into(),
+        "48000".into(),
+        "-ac".into(),
+        "1".into(),
+        output.clone(),
+    ])?;
+
+    let (duration_actual_ms, sample_rate) = wav_info(&output).unwrap_or((None, 48000));
+    let meta = SidecarMeta {
+        model: "tts-reference-import".into(),
+        model_variant: Some("ffmpeg-import".into()),
+        prompt: format!("Imported reference recording: {}", label),
+        instruct: Some(format!("source={}", params.source_path)),
+        speaker: None,
+        language: None,
+        seed: 0,
+        temperature: None,
+        top_p: None,
+        duration_target_ms: duration_actual_ms,
+        duration_actual_ms,
+        sample_rate,
+        generated_at: Utc::now(),
+        parent: Some(params.source_path),
+        take_index: 0,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    write_sidecar(output.clone(), meta)?;
+    Ok(output)
 }
 
 /// Process a generated asset into a child WAV using ffmpeg, then write a child sidecar.

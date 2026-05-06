@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Wave } from "../shared/atoms";
+import { PeaksWave, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import { useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import {
+  getWaveformPeaks,
+  listGeneratedAudioAssets,
   submitTtsVoiceDesign,
   submitTtsVoiceClone,
 } from "../../lib/tauriCommands";
-import type { Character } from "../../lib/types";
+import type { Character, GeneratedAudioAsset } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -21,6 +23,18 @@ const CLONE_ROW  = 1;
 
 function newCharId() {
   return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
+}
+
+function formatDuration(ms: number | null): string {
+  if (!ms) return "--:--";
+  const total = Math.round(ms / 1000);
+  const m = Math.floor(total / 60).toString().padStart(2, "0");
+  const s = (total % 60).toString().padStart(2, "0");
+  return `${m}:${s}`;
 }
 
 // ── File picker ────────────────────────────────────────────────────────────
@@ -65,6 +79,8 @@ export const CharacterDesignerView: React.FC = () => {
   const [genError, setGenError]           = useState<string | null>(null);
   const [addingChar, setAddingChar]       = useState(false);
   const [newName, setNewName]             = useState("");
+  const [referenceAssets, setReferenceAssets] = useState<GeneratedAudioAsset[]>([]);
+  const [referencePeaks, setReferencePeaks] = useState<Record<string, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -97,6 +113,28 @@ export const CharacterDesignerView: React.FC = () => {
 
   const runningDesign = submitting === "design" || jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
   const runningClone  = submitting === "clone"  || jobs.some((j) => j.scene_slug === slug && j.row_index === CLONE_ROW  && (j.status === "running" || j.status === "pending"));
+
+  useEffect(() => {
+    if (!realProjectId) {
+      setReferenceAssets([]);
+      return;
+    }
+    listGeneratedAudioAssets(realProjectId)
+      .then((assets) => setReferenceAssets(assets.filter((asset) => {
+        const model = asset.model.toLowerCase();
+        return asset.kind === "tts" || model.includes("reference");
+      })))
+      .catch(() => setReferenceAssets([]));
+  }, [realProjectId, jobs]);
+
+  useEffect(() => {
+    for (const asset of referenceAssets.slice(0, 12)) {
+      if (referencePeaks[asset.audio_path]) continue;
+      getWaveformPeaks(asset.audio_path, 80)
+        .then((peaks) => setReferencePeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
+        .catch(() => {});
+    }
+  }, [referenceAssets, referencePeaks]);
 
   // ── Helpers ──
 
@@ -573,6 +611,55 @@ export const CharacterDesignerView: React.FC = () => {
                   </div>
                 )}
               </div>
+
+              {referenceAssets.length > 0 && (
+                <div style={{ marginBottom: 18 }}>
+                  <label style={labelStyle}>Clip Studio references</label>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 190, overflowY: "auto" }}>
+                    {referenceAssets.slice(0, 24).map((asset) => {
+                      const active = refPath === asset.audio_path;
+                      return (
+                        <button
+                          key={asset.audio_path}
+                          onClick={() => saveVoice({ ref_audio_path: asset.audio_path, model: "Clone" })}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "74px 1fr auto",
+                            alignItems: "center",
+                            gap: 8,
+                            width: "100%",
+                            textAlign: "left",
+                            padding: "7px 8px",
+                            border: `1px solid ${active ? "var(--tts)" : "var(--line-1)"}`,
+                            borderRadius: "var(--r)",
+                            background: active ? "color-mix(in oklch, var(--tts) 12%, var(--bg-1))" : "var(--bg-1)",
+                            color: "var(--fg-1)",
+                            cursor: "pointer",
+                          }}
+                        >
+                          {referencePeaks[asset.audio_path] ? (
+                            <PeaksWave peaks={referencePeaks[asset.audio_path]} width={74} height={18} color="var(--tts)" opacity={0.75} />
+                          ) : (
+                            <Wave width={74} height={18} seed={asset.name.charCodeAt(0)} count={22} color="var(--tts)" opacity={0.55} />
+                          )}
+                          <span style={{ minWidth: 0 }}>
+                            <span style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {basename(asset.audio_path)}
+                            </span>
+                            <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)", marginTop: 2 }}>
+                              {asset.scene_slug} · {asset.model} · {formatDuration(asset.duration_ms)}
+                            </span>
+                          </span>
+                          <PlayButton path={asset.audio_path} size={10} />
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ fontSize: 10.5, color: "var(--fg-4)", lineHeight: 1.5, marginTop: 7 }}>
+                    Long recordings imported and cropped in Clip Studio appear here as clone-ready references.
+                  </div>
+                </div>
+              )}
 
               {/* ref_transcript */}
               <div style={{ marginBottom: 14 }}>

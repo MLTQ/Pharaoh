@@ -72,6 +72,7 @@ pub fn run() {
             commands::audio::find_zero_crossings,
             commands::audio_enhance::upscale_audio_asset,
             // Audio engine (ffmpeg)
+            commands::audio_engine::import_audio_asset,
             commands::audio_engine::normalize_clip,
             commands::audio_engine::process_clip_asset,
             commands::audio_engine::resample_to_48k,

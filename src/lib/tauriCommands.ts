@@ -250,6 +250,12 @@ export const processClipAsset = (args: {
   lowpassHz?: number | null;
 }): Promise<string> => invoke("process_clip_asset", { params: args });
 
+export const importAudioAsset = (args: {
+  projectId: string;
+  sourcePath: string;
+  label?: string | null;
+}): Promise<string> => invoke("import_audio_asset", { params: args });
+
 // ── Audio engine (ffmpeg) ────────────────────────────────────────────────────
 
 /** Normalize a clip in-place to targetLufs LUFS; returns path to .norm.wav file. */

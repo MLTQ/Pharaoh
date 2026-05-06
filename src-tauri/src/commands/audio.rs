@@ -1,7 +1,7 @@
 use crate::error::{Error, Result};
 
-/// Extract an array of `num_peaks` peak amplitude values (0.0–1.0) from a WAV file.
-/// Uses RMS over windows for a smoother representation.
+/// Extract an array of `num_peaks` peak amplitude values (0.0-1.0) from a WAV file.
+/// Streams samples so long recordings do not need to be loaded into memory.
 #[tauri::command]
 pub fn get_waveform_peaks(path: String, num_peaks: usize) -> Result<Vec<f32>> {
     let mut reader = hound::WavReader::open(&path)
@@ -12,43 +12,32 @@ pub fn get_waveform_peaks(path: String, num_peaks: usize) -> Result<Vec<f32>> {
         return Ok(vec![0.0; num_peaks]);
     }
 
-    let _samples_per_peak = (total_samples / num_peaks).max(1);
+    let samples_per_peak = (total_samples / num_peaks).max(1);
     let max_val = match spec.bits_per_sample {
-        8  => i32::from(i8::MAX) as f32,
+        8 => i32::from(i8::MAX) as f32,
         16 => i32::from(i16::MAX) as f32,
         24 => (1i32 << 23) as f32,
         32 => i32::MAX as f32,
-        _  => i16::MAX as f32,
+        _ => i16::MAX as f32,
     };
 
-    // Collect all samples as f32 (handles multi-channel by reading interleaved)
-    let raw: Vec<f32> = match spec.sample_format {
+    let mut peaks = vec![0.0_f32; num_peaks];
+    match spec.sample_format {
         hound::SampleFormat::Int => {
-            reader
-                .samples::<i32>()
-                .filter_map(|s| s.ok())
-                .map(|s| s as f32 / max_val)
-                .collect()
+            for (i, sample) in reader.samples::<i32>().filter_map(|s| s.ok()).enumerate() {
+                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                peaks[peak_index] = peaks[peak_index].max((sample as f32 / max_val).abs());
+            }
         }
         hound::SampleFormat::Float => {
-            reader
-                .samples::<f32>()
-                .filter_map(|s| s.ok())
-                .collect()
+            for (i, sample) in reader.samples::<f32>().filter_map(|s| s.ok()).enumerate() {
+                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                peaks[peak_index] = peaks[peak_index].max(sample.abs());
+            }
         }
-    };
-
-    let mut peaks = Vec::with_capacity(num_peaks);
-    for i in 0..num_peaks {
-        let start = (i * raw.len()) / num_peaks;
-        let end = ((i + 1) * raw.len()) / num_peaks;
-        let window = &raw[start..end.min(raw.len())];
-        let peak = if window.is_empty() {
-            0.0_f32
-        } else {
-            window.iter().map(|s| s.abs()).fold(0.0_f32, f32::max)
-        };
-        peaks.push(peak.min(1.0));
+    }
+    for peak in &mut peaks {
+        *peak = peak.min(1.0);
     }
     Ok(peaks)
 }
@@ -61,7 +50,11 @@ pub fn get_duration_ms(path: String) -> Result<u64> {
     let spec = reader.spec();
     let total_samples = reader.duration() as u64;
     let channels = spec.channels as u64;
-    let per_channel = if channels > 0 { total_samples / channels } else { total_samples };
+    let per_channel = if channels > 0 {
+        total_samples / channels
+    } else {
+        total_samples
+    };
     Ok((per_channel * 1000) / spec.sample_rate as u64)
 }
 
@@ -83,10 +76,7 @@ pub fn find_zero_crossings(path: String, near_ms: u64) -> Result<Vec<u64>> {
             .filter_map(|s| s.ok())
             .map(|s| s as f32)
             .collect(),
-        hound::SampleFormat::Float => reader
-            .samples::<f32>()
-            .filter_map(|s| s.ok())
-            .collect(),
+        hound::SampleFormat::Float => reader.samples::<f32>().filter_map(|s| s.ok()).collect(),
     };
 
     let mut crossings = vec![];

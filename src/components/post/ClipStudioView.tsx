@@ -5,6 +5,7 @@ import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import {
   getWaveformPeaks,
+  importAudioAsset,
   listGeneratedAudioAssets,
   processClipAsset,
   readScript,
@@ -36,6 +37,19 @@ function rowLabel(row: ScriptRow, index: number): string {
   return `${index + 1}. ${row.type} · ${who} · ${text}`;
 }
 
+async function pickAudioFile(): Promise<string | null> {
+  try {
+    const { open } = await import("@tauri-apps/plugin-dialog");
+    const result = await open({
+      multiple: false,
+      filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a"] }],
+    });
+    return typeof result === "string" ? result : null;
+  } catch {
+    return null;
+  }
+}
+
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
@@ -47,8 +61,11 @@ interface CropWaveformProps {
   endMs: number;
   color: string;
   fallbackSeed: number;
+  zoom: number;
+  viewportStartMs: number;
   onStartChange: (ms: number) => void;
   onEndChange: (ms: number) => void;
+  onViewportChange: (ms: number) => void;
 }
 
 const CropWaveform: React.FC<CropWaveformProps> = ({
@@ -58,21 +75,36 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   endMs,
   color,
   fallbackSeed,
+  zoom,
+  viewportStartMs,
   onStartChange,
   onEndChange,
+  onViewportChange,
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const duration = durationMs ?? 0;
   const active = duration > 0;
+  const viewportDuration = active ? Math.max(1000, duration / zoom) : 0;
+  const viewportMax = Math.max(0, duration - viewportDuration);
+  const visibleStartMs = clamp(viewportStartMs, 0, viewportMax);
+  const visibleEndMs = Math.min(duration, visibleStartMs + viewportDuration);
   const minGapMs = Math.min(100, Math.max(10, duration * 0.01));
-  const startPct = active ? (clamp(startMs, 0, duration) / duration) * 100 : 0;
-  const endPct = active ? (clamp(endMs, 0, duration) / duration) * 100 : 100;
+  const startVisible = active && startMs >= visibleStartMs && startMs <= visibleEndMs;
+  const endVisible = active && endMs >= visibleStartMs && endMs <= visibleEndMs;
+  const startPct = active ? ((clamp(startMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 0;
+  const endPct = active ? ((clamp(endMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 100;
+  const visiblePeaks = useMemo(() => {
+    if (!peaks || !active) return peaks;
+    const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
+    const endIndex = Math.max(startIndex + 1, Math.ceil((visibleEndMs / duration) * peaks.length));
+    return peaks.slice(startIndex, endIndex);
+  }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
     if (!rect || !active) return 0;
     const pct = clamp((clientX - rect.left) / rect.width, 0, 1);
-    return Math.round(pct * duration);
+    return Math.round(visibleStartMs + pct * viewportDuration);
   };
 
   const startDrag = (handle: "start" | "end", e: React.PointerEvent<HTMLDivElement>) => {
@@ -109,17 +141,19 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
         userSelect: "none",
       }}
     >
-      {peaks ? (
-        <PeaksWave peaks={peaks} width={1000} height={70} color={color} opacity={0.9} />
+      {visiblePeaks ? (
+        <PeaksWave peaks={visiblePeaks} width={1000} height={70} color={color} opacity={0.9} />
       ) : (
         <Wave width={1000} height={70} seed={fallbackSeed} count={180} color={color} opacity={0.75} />
       )}
       {active && (
         <>
-          <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none" }} />
-          <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none" }} />
+          <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: startVisible ? 1 : 0.15 }} />
+          <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: endVisible ? 1 : 0.15 }} />
           {(["start", "end"] as const).map((handle) => {
             const pct = handle === "start" ? startPct : endPct;
+            const visible = handle === "start" ? startVisible : endVisible;
+            if (!visible) return null;
             return (
               <div
                 key={handle}
@@ -137,6 +171,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                   alignItems: "stretch",
                   justifyContent: "center",
                   touchAction: "none",
+                  zIndex: 4,
                 }}
               >
                 <div style={{ width: 2, background: "var(--fg-1)", boxShadow: `0 0 12px ${color}` }} />
@@ -152,16 +187,39 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
               </div>
             );
           })}
-          <div style={{
-            position: "absolute",
-            left: `${startPct}%`,
-            right: `${100 - endPct}%`,
-            bottom: 5,
-            height: 2,
-            background: color,
-            boxShadow: `0 0 10px ${color}`,
-            pointerEvents: "none",
-          }} />
+          {startMs < visibleEndMs && endMs > visibleStartMs && (
+            <div style={{
+              position: "absolute",
+              left: `${startPct}%`,
+              right: `${100 - endPct}%`,
+              bottom: 5,
+              height: 2,
+              background: color,
+              boxShadow: `0 0 10px ${color}`,
+              pointerEvents: "none",
+            }} />
+          )}
+          <div
+            style={{ position: "absolute", inset: 0, cursor: "grab", zIndex: 1 }}
+            onPointerDown={(e) => {
+              if (!active || zoom <= 1) return;
+              e.preventDefault();
+              const startX = e.clientX;
+              const initial = visibleStartMs;
+              const rect = ref.current?.getBoundingClientRect();
+              if (!rect) return;
+              const onMove = (ev: PointerEvent) => {
+                const deltaPct = (ev.clientX - startX) / rect.width;
+                onViewportChange(clamp(initial - deltaPct * viewportDuration, 0, viewportMax));
+              };
+              const onUp = () => {
+                window.removeEventListener("pointermove", onMove);
+                window.removeEventListener("pointerup", onUp);
+              };
+              window.addEventListener("pointermove", onMove);
+              window.addEventListener("pointerup", onUp, { once: true });
+            }}
+          />
         </>
       )}
     </div>
@@ -187,8 +245,11 @@ export const ClipStudioView: React.FC = () => {
   const [scriptRows, setScriptRows] = useState<ScriptRow[]>([]);
   const [targetRowIndex, setTargetRowIndex] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [lastOutput, setLastOutput] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [viewportStartMs, setViewportStartMs] = useState(0);
   const playAudio = useAudioStore((state) => state.play);
 
   const selected = assets.find((asset) => asset.audio_path === selectedPath) ?? assets[0] ?? null;
@@ -204,6 +265,8 @@ export const ClipStudioView: React.FC = () => {
   const selectedDuration = selected?.duration_ms ?? null;
   const safeEndMs = endMs ?? selectedDuration ?? 0;
   const selectedColor = selected ? KIND_COLOR[selected.kind] : "var(--fg-1)";
+  const viewportDuration = selectedDuration ? Math.max(1000, selectedDuration / zoom) : 0;
+  const viewportMax = selectedDuration ? Math.max(0, selectedDuration - viewportDuration) : 0;
 
   const refreshAssets = () => {
     if (!realProjectId) return;
@@ -221,14 +284,20 @@ export const ClipStudioView: React.FC = () => {
     if (!selected) return;
     setStartMs(0);
     setEndMs(selected.duration_ms);
+    setZoom(1);
+    setViewportStartMs(0);
   }, [selected?.audio_path]);
 
   useEffect(() => {
     if (!selected || peaks[selected.audio_path]) return;
-    getWaveformPeaks(selected.audio_path, 220)
+    getWaveformPeaks(selected.audio_path, 12_000)
       .then((next) => setPeaks((prev) => ({ ...prev, [selected.audio_path]: next })))
       .catch(() => {});
   }, [selected?.audio_path]);
+
+  useEffect(() => {
+    setViewportStartMs((current) => clamp(current, 0, viewportMax));
+  }, [viewportMax]);
 
   useEffect(() => {
     if (!realProjectId || !targetSceneMeta) {
@@ -254,6 +323,29 @@ export const ClipStudioView: React.FC = () => {
       Math.max(0, startMs) / 1000,
       safeEndMs > startMs ? safeEndMs / 1000 : null,
     );
+  };
+
+  const handleImportAudio = async () => {
+    if (!realProjectId || importing) return;
+    const sourcePath = await pickAudioFile();
+    if (!sourcePath) return;
+    setImporting(true);
+    setError(null);
+    try {
+      const importedPath = await importAudioAsset({
+        projectId: realProjectId,
+        sourcePath,
+        label: basename(sourcePath),
+      });
+      await listGeneratedAudioAssets(realProjectId).then((next) => {
+        setAssets(next);
+        setSelectedPath(importedPath);
+      });
+    } catch (e) {
+      setError(String(e));
+    } finally {
+      setImporting(false);
+    }
   };
 
   useEffect(() => {
@@ -326,6 +418,15 @@ export const ClipStudioView: React.FC = () => {
             <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.55, marginTop: 7 }}>
               Trim generated takes, apply practical cleanup, save child assets, or assign the result to a scene row.
             </div>
+            <button
+              className="btn btn-sm btn-primary"
+              disabled={importing || !realProjectId}
+              onClick={handleImportAudio}
+              style={{ marginTop: 12 }}
+            >
+              <Icon name="plus" style={{ width: 12, height: 12 }} />
+              {importing ? "importing..." : "Import long recording"}
+            </button>
           </div>
 
           <div style={{ padding: "12px 14px", borderBottom: "1px solid var(--line-1)", display: "flex", gap: 6 }}>
@@ -415,9 +516,42 @@ export const ClipStudioView: React.FC = () => {
                   endMs={safeEndMs}
                   color={selectedColor}
                   fallbackSeed={selected.name.charCodeAt(0)}
+                  zoom={zoom}
+                  viewportStartMs={viewportStartMs}
                   onStartChange={setStartMs}
                   onEndChange={setEndMs}
+                  onViewportChange={setViewportStartMs}
                 />
+
+                <div style={{
+                  display: "grid",
+                  gridTemplateColumns: "auto minmax(160px, 1fr) auto minmax(160px, 1fr)",
+                  gap: 10,
+                  alignItems: "center",
+                  marginTop: 12,
+                }}>
+                  <span className="eyebrow">Zoom</span>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={1}
+                    max={120}
+                    step={1}
+                    value={zoom}
+                    onChange={(e) => setZoom(Number(e.target.value))}
+                  />
+                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)" }}>{zoom}x</span>
+                  <input
+                    className="slider"
+                    type="range"
+                    min={0}
+                    max={viewportMax}
+                    step={100}
+                    value={Math.min(viewportStartMs, viewportMax)}
+                    disabled={zoom <= 1}
+                    onChange={(e) => setViewportStartMs(Number(e.target.value))}
+                  />
+                </div>
 
                 <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: 12 }}>
                   <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, flex: 1 }}>

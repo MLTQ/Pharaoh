@@ -1,7 +1,7 @@
 # audioStore.ts
 
 ## Purpose
-Lightweight Web Audio preview store for generated WAV files. It centralizes clip playback so page components and shared preview buttons do not each create their own audio pipeline.
+Lightweight streaming preview store for generated WAV files. It centralizes clip playback so page components and shared preview buttons do not each create their own audio pipeline.
 
 ## Components
 
@@ -10,7 +10,7 @@ Lightweight Web Audio preview store for generated WAV files. It centralizes clip
 - **Interacts with**: `PlayButton.tsx`, `ClipStudioView.tsx`.
 
 ### `play`
-- **Does**: Loads a local audio file, decodes it with Web Audio, and starts playback from an optional offset until an optional stop point.
+- **Does**: Uses a streaming `HTMLAudioElement`, starts playback from an optional offset, and stops at an optional stop point.
 - **Rationale**: Clip Studio needs deterministic region preview from crop handles while existing preview buttons still play whole files.
 
 ## Contracts
@@ -21,4 +21,4 @@ Lightweight Web Audio preview store for generated WAV files. It centralizes clip
 | `ClipStudioView.tsx` | `play(path, offset, stopAt)` starts at the left crop handle and can stop at the right handle | Ignoring offset/stop parameters |
 
 ## Notes
-- Playback uses `@tauri-apps/plugin-fs` for local files and falls back to `fetch` for browser-like paths.
+- Local filesystem paths are converted with Tauri `convertFileSrc`; browser-like URLs are passed through unchanged.

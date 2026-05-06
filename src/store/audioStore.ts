@@ -1,32 +1,32 @@
+import { convertFileSrc } from "@tauri-apps/api/core";
 import { create } from "zustand";
 
-// ── Module-level Web Audio singletons ────────────────────────────────────────
+// ── Module-level streaming audio singleton ──────────────────────────────────
 
-let _ctx: AudioContext | null = null;
-let _source: AudioBufferSourceNode | null = null;
-let _startTime = 0;
-let _offset = 0;
-let _stopAt: number | null = null;
+let _audio: HTMLAudioElement | null = null;
 let _rafId: number | null = null;
+let _stopAt: number | null = null;
 
-function getCtx(): AudioContext {
-  if (!_ctx) _ctx = new AudioContext();
-  return _ctx;
+function playableSrc(path: string): string {
+  if (/^(https?:|blob:|data:)/.test(path)) return path;
+  return convertFileSrc(path);
 }
 
 function stopCurrent(): void {
-  if (_source) {
-    try { _source.stop(); } catch { /* already stopped */ }
-    _source.disconnect();
-    _source = null;
+  if (_audio) {
+    _audio.pause();
+    _audio.removeAttribute("src");
+    _audio.load();
+    _audio = null;
   }
   if (_rafId !== null) {
     cancelAnimationFrame(_rafId);
     _rafId = null;
   }
+  _stopAt = null;
 }
 
-// ── Store ─────────────────────────────────────────────────────────────────────
+// ── Store ───────────────────────────────────────────────────────────────────
 
 interface AudioState {
   playing: string | null;  // path of active file
@@ -35,19 +35,6 @@ interface AudioState {
   play: (path: string, offsetSeconds?: number, stopAtSeconds?: number | null) => Promise<void>;
   stop: () => void;
   toggle: (path: string) => Promise<void>;
-}
-
-async function loadArrayBuffer(path: string): Promise<ArrayBuffer> {
-  try {
-    const { readFile } = await import("@tauri-apps/plugin-fs");
-    const u8 = await readFile(path);
-    // Slice to own the exact bytes (Uint8Array may be a view into a larger buffer)
-    return u8.buffer.slice(u8.byteOffset, u8.byteOffset + u8.byteLength);
-  } catch {
-    // Browser fallback — works only if path is a valid URL
-    const resp = await fetch(path);
-    return resp.arrayBuffer();
-  }
 }
 
 export const useAudioStore = create<AudioState>((set, get) => ({
@@ -64,34 +51,34 @@ export const useAudioStore = create<AudioState>((set, get) => ({
     stopCurrent();
     set({ playing: path, position: offsetSeconds, duration: 0 });
     try {
-      const ctx = getCtx();
-      if (ctx.state === "suspended") await ctx.resume();
+      const audio = new Audio(playableSrc(path));
+      audio.preload = "metadata";
+      _audio = audio;
 
-      const arrayBuffer = await loadArrayBuffer(path);
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      await new Promise<void>((resolve, reject) => {
+        audio.onloadedmetadata = () => resolve();
+        audio.onerror = () => reject(new Error("audio preview failed to load"));
+      });
 
-      const source = ctx.createBufferSource();
-      source.buffer = audioBuffer;
-      source.connect(ctx.destination);
-      _source = source;
-      _startTime = ctx.currentTime;
-      _offset = Math.max(0, Math.min(offsetSeconds, audioBuffer.duration));
-      _stopAt = stopAtSeconds == null ? null : Math.max(_offset, Math.min(stopAtSeconds, audioBuffer.duration));
+      const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
+      const offset = Math.max(0, Math.min(offsetSeconds, duration || offsetSeconds));
+      _stopAt = stopAtSeconds == null
+        ? null
+        : Math.max(offset, duration ? Math.min(stopAtSeconds, duration) : stopAtSeconds);
 
-      set({ duration: audioBuffer.duration });
+      audio.currentTime = offset;
+      set({ duration, position: offset });
 
-      source.onended = () => {
-        if (_source === source) {
+      audio.onended = () => {
+        if (_audio === audio) {
           stopCurrent();
           set({ playing: null, position: 0 });
         }
       };
-      source.start(0, _offset);
 
-      // Update position via requestAnimationFrame
       const tick = () => {
-        if (_source !== source) return;
-        const position = Math.min(_offset + (ctx.currentTime - _startTime), audioBuffer.duration);
+        if (_audio !== audio) return;
+        const position = audio.currentTime;
         if (_stopAt !== null && position >= _stopAt) {
           stopCurrent();
           set({ playing: null, position: _stopAt });
@@ -100,8 +87,9 @@ export const useAudioStore = create<AudioState>((set, get) => ({
         set({ position });
         _rafId = requestAnimationFrame(tick);
       };
-      _rafId = requestAnimationFrame(tick);
 
+      await audio.play();
+      _rafId = requestAnimationFrame(tick);
     } catch (e) {
       console.error("[audioStore] play failed:", e);
       stopCurrent();

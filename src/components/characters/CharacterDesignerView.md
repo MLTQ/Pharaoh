@@ -10,6 +10,11 @@ Cast and voice-design workspace for creating characters, testing generated voice
 - **Interacts with**: `submitTtsVoiceDesign`, `submitTtsVoiceClone` in `tauriCommands.ts`, `jobStore.ts`.
 - **Rationale**: Uses a synthetic `__char__{id}` scene slug so character takes do not collide with scene generation takes.
 
+### Clip Studio reference selection
+- **Does**: Lists sidecar-indexed TTS/reference assets so cropped long-recording clips can become clone references.
+- **Interacts with**: `listGeneratedAudioAssets`, `getWaveformPeaks`, `ClipStudioView.tsx`.
+- **Rationale**: Voice references should be reusable after import/cropping rather than requiring path re-entry.
+
 ### `submitting`
 - **Does**: Tracks the gap between button click and returned job id so the page shows work-in-progress even before normal job events arrive.
 - **Interacts with**: `RunningBadge` in `TakeList.tsx`.
@@ -24,6 +29,7 @@ Cast and voice-design workspace for creating characters, testing generated voice
 |-----------|---------|------------------|
 | `projectStore.ts` | Voice assignment updates persist into `project.json` | Changing assignment shape |
 | `jobStore.ts` | Character takes use `scene_slug` + `row_index` keys | Key format changes |
+| `ClipStudioView.tsx` | Cropped/imported references are sidecar-indexed and listable | Saving clips without sidecars |
 | `inference.rs` | Clone requests include a bounded `max_new_tokens` value | Removing the cap from clone requests |
 
 ## Notes

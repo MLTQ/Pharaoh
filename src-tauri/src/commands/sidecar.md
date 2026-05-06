@@ -27,4 +27,4 @@ Tauri commands for reading and writing generated-audio sidecar metadata. Sidecar
 | `commands/inference.rs` | Sidecar path is `{audio_path}.meta.json` | Changing `meta_path` naming |
 
 ## Notes
-- Asset kind is inferred from the sidecar model string. AudioSR and Clip Studio child assets inherit kind from their parent sidecar when available.
+- Asset kind is inferred from the sidecar model string. AudioSR and Clip Studio child assets inherit kind from their parent sidecar when available; imported voice references use a TTS-flavored model name so Character Designer can find them.
