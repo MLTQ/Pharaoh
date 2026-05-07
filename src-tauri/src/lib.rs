@@ -71,6 +71,8 @@ pub fn run() {
             commands::audio::get_duration_ms,
             commands::audio::find_zero_crossings,
             commands::audio_enhance::upscale_audio_asset,
+            // LLM
+            commands::llm::draft_scene,
             // Audio engine (ffmpeg)
             commands::audio_engine::import_audio_asset,
             commands::audio_engine::normalize_clip,

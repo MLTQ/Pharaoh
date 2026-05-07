@@ -273,6 +273,51 @@ export const resampleTo48k = (path: string, outputPath: string): Promise<void> =
 export const renderScene = (projectId: string, sceneSlug: string): Promise<string> =>
   invoke("render_scene", { projectId, sceneSlug });
 
+// ── LLM (Anthropic) ─────────────────────────────────────────────────────────
+
+export interface DraftSceneArgs {
+  projectTitle: string;
+  logline: string;
+  synopsis: string;
+  tone: string;
+  characters: Array<{ name: string; description: string; voiceDirection?: string }>;
+  sceneTitle: string;
+  sceneDescription: string;
+  sceneLocation: string;
+  previousFountain?: string;
+  model?: string;
+  apiKeyEnv?: string;
+}
+
+export interface DraftSceneResult {
+  fountain: string;
+  model: string;
+  input_tokens: number;
+  output_tokens: number;
+}
+
+export const draftScene = (args: DraftSceneArgs): Promise<DraftSceneResult> => {
+  // Translate camelCase to snake_case for the Rust struct
+  const toRust = {
+    project_title: args.projectTitle,
+    logline: args.logline,
+    synopsis: args.synopsis,
+    tone: args.tone,
+    characters: args.characters.map((c) => ({
+      name: c.name,
+      description: c.description,
+      voice_direction: c.voiceDirection ?? null,
+    })),
+    scene_title: args.sceneTitle,
+    scene_description: args.sceneDescription,
+    scene_location: args.sceneLocation,
+    previous_fountain: args.previousFountain ?? null,
+    model: args.model ?? null,
+    api_key_env: args.apiKeyEnv ?? null,
+  };
+  return invoke("draft_scene", { args: toRust });
+};
+
 // ── Neural audio enhancement ────────────────────────────────────────────────
 
 export const upscaleAudioAsset = (args: {

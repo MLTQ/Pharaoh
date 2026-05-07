@@ -394,7 +394,12 @@ pub async fn render_scene_with_projects_dir(
 
     // Per-track filter chains
     let mut filter_parts: Vec<String> = Vec::new();
-    let mut mix_inputs = String::new();
+
+    // Categorize each placed row by type so we can implement auto-ducking:
+    // BED + MUSIC tracks are compressed against a sum of all DIALOGUE tracks.
+    let mut dialogue_idxs: Vec<usize> = Vec::new();
+    let mut duck_target_idxs: Vec<usize> = Vec::new();
+    let mut passthrough_idxs: Vec<usize> = Vec::new();
 
     for (i, row) in placed.iter().enumerate() {
         let start_ms: u64 = row.start_ms.parse().unwrap_or(0);
@@ -432,14 +437,77 @@ pub async fn render_scene_with_projects_dir(
         filters.push(format!("volume={:.4}", vol));
 
         filter_parts.push(format!("[{}:a]{}[a{}]", i, filters.join(","), i));
-        mix_inputs.push_str(&format!("[a{}]", i));
+
+        let kind = row.track_type.to_uppercase();
+        if kind == "DIALOGUE" {
+            dialogue_idxs.push(i);
+        } else if kind == "BED" || kind == "MUSIC" {
+            duck_target_idxs.push(i);
+        } else {
+            passthrough_idxs.push(i);
+        }
     }
 
-    // Mix all tracks; normalize=0 preserves individual track levels
+    // ── Auto-ducking ──────────────────────────────────────────────────────
+    // When DIALOGUE and a BED/MUSIC track both exist, sum all dialogue into a
+    // sidechain bus and run sidechaincompress on each music/bed track. This is
+    // the spec-mandated "dialogue intelligibility above all else" behavior.
+    let mut final_inputs: Vec<String> = Vec::new();
+
+    let do_ducking = !dialogue_idxs.is_empty() && !duck_target_idxs.is_empty();
+
+    if do_ducking {
+        // Build [voice_bus] = sum of all dialogue tracks
+        let voice_in: String = dialogue_idxs
+            .iter()
+            .map(|i| format!("[a{}]", i))
+            .collect::<Vec<_>>()
+            .join("");
+        if dialogue_idxs.len() == 1 {
+            // asplit can take a single input directly
+            filter_parts.push(format!("{}aformat=channel_layouts=stereo[voice_bus]", voice_in));
+        } else {
+            filter_parts.push(format!(
+                "{}amix=inputs={}:normalize=0:duration=longest,aformat=channel_layouts=stereo[voice_bus]",
+                voice_in,
+                dialogue_idxs.len()
+            ));
+        }
+
+        // Split voice_bus into N copies (one per duck target) plus 1 for the final mix
+        let split_n = duck_target_idxs.len() + 1;
+        let split_outs: String = (0..split_n)
+            .map(|j| format!("[vb{}]", j))
+            .collect::<Vec<_>>()
+            .join("");
+        filter_parts.push(format!("[voice_bus]asplit={}{}", split_n, split_outs));
+
+        // Apply sidechaincompress to each duck target with a dedicated voice_bus copy.
+        // threshold=0.05 ≈ -26 dBFS, ratio=8, attack=80ms, release=300ms — broadcast-style
+        // dialogue ducking. Outputs renamed to [d{i}].
+        for (j, &idx) in duck_target_idxs.iter().enumerate() {
+            filter_parts.push(format!(
+                "[a{}][vb{}]sidechaincompress=threshold=0.05:ratio=8:attack=80:release=300:makeup=1[d{}]",
+                idx, j, idx
+            ));
+        }
+
+        // Final mix: dialogue (one extra split copy) + ducked music/bed + passthrough SFX
+        final_inputs.push("[vb".to_string() + &duck_target_idxs.len().to_string() + "]");
+        for &idx in &duck_target_idxs { final_inputs.push(format!("[d{}]", idx)); }
+        for &idx in &passthrough_idxs { final_inputs.push(format!("[a{}]", idx)); }
+    } else {
+        // No ducking necessary — straight mix of all processed tracks
+        for i in 0..placed.len() {
+            final_inputs.push(format!("[a{}]", i));
+        }
+    }
+
+    let mix_count = final_inputs.len();
     filter_parts.push(format!(
         "{}amix=inputs={}:normalize=0:duration=longest[out]",
-        mix_inputs,
-        placed.len()
+        final_inputs.join(""),
+        mix_count
     ));
 
     cmd.args(["-filter_complex", &filter_parts.join(";")]);
