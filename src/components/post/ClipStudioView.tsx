@@ -154,8 +154,22 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   const fadeOutMidPct = (fadeOutStartPct + endPct) / 2;
   const fadeInCurveYPct = clamp(52 - fadeInCurve * 28, 20, 82);
   const fadeOutCurveYPct = clamp(52 - fadeOutCurve * 28, 20, 82);
-  const envelopeD = `M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90`;
-  const envelopeFillD = `${envelopeD} L ${endPct} 96 L ${startPct} 96 Z`;
+  const fadeInCurvePoints = Array.from({ length: 22 }, (_, i) => {
+    const t = i / 21;
+    const inv = 1 - t;
+    return {
+      x: inv * inv * startPct + 2 * inv * t * fadeInMidPct + t * t * fadeInEndPct,
+      y: inv * inv * 90 + 2 * inv * t * fadeInCurveYPct + t * t * 18,
+    };
+  });
+  const fadeOutCurvePoints = Array.from({ length: 22 }, (_, i) => {
+    const t = i / 21;
+    const inv = 1 - t;
+    return {
+      x: inv * inv * fadeOutStartPct + 2 * inv * t * fadeOutMidPct + t * t * endPct,
+      y: inv * inv * 18 + 2 * inv * t * fadeOutCurveYPct + t * t * 90,
+    };
+  });
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
@@ -258,53 +272,45 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
         <>
           <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: startVisible ? 1 : 0.15, zIndex: 2 }} />
           <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: endVisible ? 1 : 0.15, zIndex: 2 }} />
-          <svg
-            viewBox="0 0 100 100"
-            preserveAspectRatio="none"
+          <div
             style={{
               position: "absolute",
               inset: 7,
               zIndex: 20,
-              overflow: "visible",
               pointerEvents: "none",
             }}
           >
-            <path
-              d={envelopeFillD}
-              fill={color}
-              opacity={0.16}
+            <div
+              style={{
+                position: "absolute",
+                left: `${fadeInEndPct}%`,
+                right: `${100 - fadeOutStartPct}%`,
+                top: "18%",
+                height: 4,
+                minWidth: 2,
+                borderRadius: 999,
+                background: "var(--fg-0)",
+                boxShadow: `0 0 0 1px rgba(0,0,0,0.85), 0 0 8px ${color}`,
+              }}
             />
-            <path
-              d={envelopeD}
-              fill="none"
-              stroke="rgba(0,0,0,0.9)"
-              strokeWidth={6}
-              vectorEffect="non-scaling-stroke"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={0.8}
-            />
-            <path
-              d={envelopeD}
-              fill="none"
-              stroke="var(--fg-1)"
-              strokeWidth={3}
-              vectorEffect="non-scaling-stroke"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={0.95}
-            />
-            <path
-              d={envelopeD}
-              fill="none"
-              stroke={color}
-              strokeWidth={1.5}
-              vectorEffect="non-scaling-stroke"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-              opacity={1}
-            />
-          </svg>
+            {[...fadeInCurvePoints, ...fadeOutCurvePoints].map((point, index) => (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  left: `${point.x}%`,
+                  top: `${point.y}%`,
+                  width: 6,
+                  height: 6,
+                  transform: "translate(-50%, -50%)",
+                  borderRadius: "50%",
+                  background: "var(--fg-0)",
+                  border: `1px solid ${color}`,
+                  boxShadow: `0 0 0 1px rgba(0,0,0,0.9), 0 0 8px ${color}`,
+                }}
+              />
+            ))}
+          </div>
           {fadeInVisible && (
             <div
               onPointerDown={(e) => startFadeDrag("fadeIn", e)}
