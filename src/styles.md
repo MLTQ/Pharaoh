@@ -13,6 +13,11 @@ Global application styling for Pharaoh's shell, timeline, panels, queues, and re
 - **Does**: Styles buttons, inputs, rails, panels, timeline clips, asset rows, and job rows.
 - **Interacts with**: `App.tsx`, generator panels, `AssetBrowser.tsx`, `JobQueue.tsx`.
 
+### Clip Studio scrollbars
+- **Does**: Provides thin, inset-feeling scrollbars for Clip Studio asset/detail panes.
+- **Interacts with**: `ClipStudioView.tsx`.
+- **Rationale**: The global scrollbar is intentionally heavier; Clip Studio has nested bounded panes where large scrollbars read as outside the panel.
+
 ### Job model badges
 - **Does**: Colors `tts`, `sfx`, `music`, and `post` job labels in the right-rail queue.
 - **Interacts with**: `JobQueue.tsx`, `types.ts`.

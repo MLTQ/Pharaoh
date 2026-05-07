@@ -54,6 +54,12 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function normalizePeaksForDisplay(peaks: number[]): number[] {
+  const max = peaks.reduce((acc, peak) => Math.max(acc, Math.abs(peak)), 0);
+  if (max <= 0.0001) return peaks;
+  return peaks.map((peak) => Math.pow(clamp(Math.abs(peak) / max, 0, 1), 0.68));
+}
+
 interface CropWaveformProps {
   peaks: number[] | null;
   durationMs: number | null;
@@ -97,7 +103,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
     if (!peaks || !active) return peaks;
     const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
     const endIndex = Math.max(startIndex + 1, Math.ceil((visibleEndMs / duration) * peaks.length));
-    return peaks.slice(startIndex, endIndex);
+    return normalizePeaksForDisplay(peaks.slice(startIndex, endIndex));
   }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
 
   const msFromPointer = (clientX: number) => {
@@ -142,14 +148,18 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
       }}
     >
       {visiblePeaks ? (
-        <PeaksWave peaks={visiblePeaks} width={1000} height={70} color={color} opacity={0.9} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <PeaksWave peaks={visiblePeaks} width={1000} height={70} color={color} opacity={0.95} />
+        </div>
       ) : (
-        <Wave width={1000} height={70} seed={fallbackSeed} count={180} color={color} opacity={0.75} />
+        <div style={{ position: "relative", zIndex: 1 }}>
+          <Wave width={1000} height={70} seed={fallbackSeed} count={180} color={color} opacity={0.8} />
+        </div>
       )}
       {active && (
         <>
-          <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: startVisible ? 1 : 0.15 }} />
-          <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: endVisible ? 1 : 0.15 }} />
+          <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: startVisible ? 1 : 0.15, zIndex: 2 }} />
+          <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: endVisible ? 1 : 0.15, zIndex: 2 }} />
           {(["start", "end"] as const).map((handle) => {
             const pct = handle === "start" ? startPct : endPct;
             const visible = handle === "start" ? startVisible : endVisible;
@@ -171,7 +181,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                   alignItems: "stretch",
                   justifyContent: "center",
                   touchAction: "none",
-                  zIndex: 4,
+                  zIndex: 5,
                 }}
               >
                 <div style={{ width: 2, background: "var(--fg-1)", boxShadow: `0 0 12px ${color}` }} />
@@ -197,10 +207,11 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
               background: color,
               boxShadow: `0 0 10px ${color}`,
               pointerEvents: "none",
+              zIndex: 4,
             }} />
           )}
           <div
-            style={{ position: "absolute", inset: 0, cursor: "grab", zIndex: 1 }}
+            style={{ position: "absolute", inset: 0, cursor: "grab", zIndex: 3 }}
             onPointerDown={(e) => {
               if (!active || zoom <= 1) return;
               e.preventDefault();
@@ -443,7 +454,7 @@ export const ClipStudioView: React.FC = () => {
             <button className="btn btn-sm" onClick={refreshAssets} style={{ marginLeft: "auto" }}>refresh</button>
           </div>
 
-          <div style={{ overflowY: "auto", minHeight: 0 }}>
+          <div className="clip-studio-scroll" style={{ overflowY: "auto", minHeight: 0, flex: 1 }}>
             {visibleAssets.length === 0 ? (
               <div style={{ padding: 18, color: "var(--fg-4)", fontSize: 12, lineHeight: 1.6 }}>
                 No generated assets found yet. Generate or upscale audio first; Clip Studio indexes WAV sidecars in scene asset folders.
@@ -491,7 +502,7 @@ export const ClipStudioView: React.FC = () => {
           </div>
         </div>
 
-        <div style={{ overflowY: "auto", overflowX: "hidden", padding: "28px 34px", minWidth: 0 }}>
+        <div className="clip-studio-scroll" style={{ overflowY: "auto", overflowX: "hidden", padding: "28px 28px 28px 34px", minWidth: 0, scrollbarGutter: "stable" }}>
           {!selected ? (
             <div style={{ color: "var(--fg-4)", fontSize: 13 }}>Select a generated sound to edit.</div>
           ) : (

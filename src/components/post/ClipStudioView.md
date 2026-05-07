@@ -11,9 +11,9 @@ Post-production clip editor for generated and imported Pharaoh audio assets. It 
 - **Rationale**: Clip editing is post-production but not neural upscaling, so it stays separate from `UpscaleView`.
 
 ### `CropWaveform`
-- **Does**: Renders the waveform with draggable vertical crop handles, zoom/pan viewport support, and trim state tied to `startMs` and `endMs`.
+- **Does**: Renders a visually normalized waveform with draggable vertical crop handles, zoom/pan viewport support, and trim state tied to `startMs` and `endMs`.
 - **Interacts with**: `PeaksWave`, `Wave`, Clip Studio trim state.
-- **Rationale**: Cropping needs direct manipulation rather than only numeric fields.
+- **Rationale**: Cropping needs direct manipulation rather than only numeric fields; waveform normalization is display-only so quiet clips remain visible without changing audio.
 
 ### `saveClip`
 - **Does**: Processes the selected asset into a child WAV and, when requested, writes that output path back to the selected script row.
