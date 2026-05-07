@@ -1,12 +1,12 @@
 # ClipStudioView.tsx
 
 ## Purpose
-Post-production clip editor for generated and imported Pharaoh audio assets. It lets users import long recordings, edit crop and fade envelopes in a full-width bottom docked waveform, apply practical ffmpeg edits, save child assets, and optionally assign the result to a scene script row.
+Post-production clip editor for generated and imported Pharaoh audio assets. It lets users import long recordings, edit crop and fade envelopes in a compact full-width bottom docked waveform, apply practical ffmpeg edits, save child assets, and optionally assign the result to a scene script row.
 
 ## Components
 
 ### `ClipStudioView`
-- **Does**: Lists generated/imported assets, imports external audio, keeps the enlarged bottom clip editor in sync with selected assets, exposes trim/gain/filter/normalize controls, handles Space-bar crop preview, and calls `processClipAsset`.
+- **Does**: Lists generated/imported assets, imports external audio, keeps the compact full-width bottom clip editor in sync with selected assets, exposes trim/gain/filter/normalize controls, handles Space-bar crop preview, and calls `processClipAsset`.
 - **Interacts with**: `importAudioAsset`, `listGeneratedAudioAssets`, `getWaveformPeaks`, `processClipAsset`, `readScript`, `updateScriptRow`, `useProjectStore`, `useAudioStore`.
 - **Rationale**: Clip editing is post-production but not neural upscaling, so it stays separate from `UpscaleView`.
 
