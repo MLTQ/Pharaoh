@@ -74,6 +74,11 @@ pub async fn run(args: Vec<String>) -> Result<()> {
                 .map_err(|_| Error::Other(format!("invalid row index: {}", row_index)))?;
             script_update_row(&config, project_id, scene_slug, row_index, rest).await
         }
+        [group, action, project_id, fountain_path, rest @ ..]
+            if group == "script" && action == "import" =>
+        {
+            script_import(&config, project_id, fountain_path, rest).await
+        }
         [group, action, rest @ ..] if group == "server" && action == "health" => {
             server_health(&config, rest).await
         }
@@ -206,6 +211,7 @@ fn usage() -> &'static str {
   pharaoh script read <project_id> <scene_slug>
   pharaoh script write <project_id> <scene_slug> <script.csv|script.json>
   pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
+  pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
   pharaoh character list <project_id>
   pharaoh character create <project_id> --name <name> [--description <text>]
   pharaoh character update <project_id> <character_id> [--name <name>] [--description <text>]
@@ -667,6 +673,212 @@ async fn script_update_row(
         fields,
     )?;
     print_json(&row)
+}
+
+/// Import a Fountain (.fountain or plain text) file into an existing project.
+/// Splits on scene headings (INT./EXT./EST./forced .HEADING), creates one Scene
+/// per heading, writes a per-scene script.csv compiled from blocks, and adds
+/// any new characters discovered in DIALOGUE cues.
+///
+/// Idempotency: characters with the same name (case-insensitive) are not
+/// duplicated. Scene slugs include `--prefix` (default empty) so re-importing
+/// the same file twice produces distinct scenes — by design, since we don't
+/// know whether the user intends to revise or append.
+async fn script_import(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    fountain_path: &str,
+    rest: &[String],
+) -> Result<()> {
+    // `--dry-run` is bare; strip it before the standard flag parser so we
+    // don't have to type `--dry-run true`.
+    let dry_run = rest.iter().any(|a| a == "--dry-run" || a == "--dry_run");
+    let filtered: Vec<String> = rest
+        .iter()
+        .filter(|a| a.as_str() != "--dry-run" && a.as_str() != "--dry_run")
+        .cloned()
+        .collect();
+    let flags = parse_flags(&filtered)?;
+    let prefix = flag_string(&flags, "prefix", "");
+    let character_prefix = flag_string(&flags, "character_prefix", "CHAR");
+
+    let path = Path::new(fountain_path);
+    let text = std::fs::read_to_string(path)
+        .map_err(|e| Error::Other(format!("cannot read {}: {}", fountain_path, e)))?;
+
+    let doc = crate::fountain::parse_document(&text);
+
+    if doc.scenes.is_empty() {
+        return Err(Error::Other(
+            "no scene headings (INT./EXT./EST.) found — Fountain import requires at least one scene heading".into(),
+        ));
+    }
+
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let project_root = project_dir(&projects_dir, project_id);
+    if !project_root.exists() {
+        return Err(Error::Other(format!(
+            "project {} not found at {}",
+            project_id,
+            project_root.display()
+        )));
+    }
+
+    // ── Resolve characters: keep existing, append new ────────────────────
+    let mut project = load_project(config, project_id)?;
+    let mut name_to_id: HashMap<String, String> = project
+        .characters
+        .iter()
+        .map(|c| (c.name.to_ascii_uppercase(), c.id.clone()))
+        .collect();
+
+    let mut new_characters: Vec<crate::models::Character> = Vec::new();
+    for name in &doc.characters {
+        let key = name.to_ascii_uppercase();
+        if name_to_id.contains_key(&key) {
+            continue;
+        }
+        let short = Uuid::new_v4().simple().to_string();
+        let id = format!("{}_{}", character_prefix, short[..6].to_ascii_uppercase());
+        name_to_id.insert(key.clone(), id.clone());
+        new_characters.push(crate::models::Character {
+            id: id.clone(),
+            name: name.clone(),
+            description: String::new(),
+            voice_assignment: VoiceAssignment {
+                model: "VoiceDesign".to_string(),
+                speaker: None,
+                instruct_default: None,
+                ref_audio_path: None,
+                ref_transcript: None,
+            },
+        });
+    }
+
+    // ── Resolve scenes: load existing storyboard and append ──────────────
+    let storyboard_path = project_root.join("storyboard.json");
+    let mut storyboard: Storyboard = if storyboard_path.exists() {
+        read_json(&storyboard_path)?
+    } else {
+        Storyboard { scenes: vec![] }
+    };
+    let start_index: u32 = flag_parse(&flags, "start_index", storyboard.scenes.len() as u32)?;
+
+    // Build the planned scene + row payloads first; only commit if !dry_run
+    let mut planned: Vec<(Scene, Vec<ScriptRow>)> = Vec::new();
+    for (i, parsed_scene) in doc.scenes.iter().enumerate() {
+        let index = start_index + i as u32;
+        let title = if !parsed_scene.title.is_empty() {
+            parsed_scene.title.clone()
+        } else if !parsed_scene.heading.is_empty() {
+            parsed_scene.heading.clone()
+        } else {
+            format!("Scene {}", index + 1)
+        };
+        let slug_base = sanitize_slug(&title);
+        let slug = if prefix.is_empty() {
+            format!("{:02}_{}", index, slug_base)
+        } else {
+            format!("{}_{:02}_{}", prefix, index, slug_base)
+        };
+        // scene_no follows the existing convention used by App.tsx
+        let scene_no = format!("S{:02}", index + 1);
+        let rows = crate::fountain::blocks_to_rows(&parsed_scene.blocks, &scene_no, |name| {
+            name_to_id.get(&name.to_ascii_uppercase()).cloned()
+        });
+        // Scene `characters` field: list of character IDs that speak in this scene
+        let mut chars_in_scene: Vec<String> = Vec::new();
+        for b in &parsed_scene.blocks {
+            if matches!(b.block_type, crate::fountain::BlockType::Dialogue) {
+                if let Some(id) = name_to_id.get(&b.character.to_ascii_uppercase()) {
+                    if !chars_in_scene.contains(id) {
+                        chars_in_scene.push(id.clone());
+                    }
+                }
+            }
+        }
+        let scene = Scene {
+            id: Uuid::new_v4().to_string(),
+            index,
+            slug,
+            title,
+            description: parsed_scene.heading.clone(),
+            location: parsed_scene.location.clone(),
+            characters: chars_in_scene,
+            notes: String::new(),
+            connects_from: None,
+            connects_to: None,
+            status: SceneStatus::Draft,
+        };
+        planned.push((scene, rows));
+    }
+
+    if dry_run {
+        let summary = json!({
+            "dry_run": true,
+            "fountain_file": fountain_path,
+            "project_id": project_id,
+            "title_from_fountain": doc.title,
+            "author_from_fountain": doc.author,
+            "characters": {
+                "existing": project.characters.iter().map(|c| &c.name).collect::<Vec<_>>(),
+                "new": new_characters.iter().map(|c| &c.name).collect::<Vec<_>>(),
+            },
+            "scenes": planned.iter().map(|(s, rows)| json!({
+                "slug": s.slug,
+                "title": s.title,
+                "location": s.location,
+                "speakers": s.characters,
+                "rows": rows.len(),
+                "by_type": count_by_type(rows),
+            })).collect::<Vec<_>>(),
+        });
+        return print_json(&summary);
+    }
+
+    // ── Commit: characters → project, scenes → storyboard, rows → script.csv
+    project.characters.extend(new_characters.clone());
+    save_project(config, project)?;
+
+    for (scene, rows) in &planned {
+        let scene_root = scene_dir(&projects_dir, project_id, &scene.slug);
+        std::fs::create_dir_all(scene_root.join("assets"))?;
+        std::fs::create_dir_all(scene_root.join("render"))?;
+        write_script_rows(&scene_root.join("script.csv"), rows)?;
+        storyboard.scenes.push(scene.clone());
+    }
+    storyboard.scenes.sort_by_key(|scene| scene.index);
+    write_json(&storyboard_path, &storyboard)?;
+    update_project_timestamp(config, project_id)?;
+
+    let summary = json!({
+        "imported": true,
+        "fountain_file": fountain_path,
+        "project_id": project_id,
+        "characters_added": new_characters.iter().map(|c| json!({"id": c.id, "name": c.name})).collect::<Vec<_>>(),
+        "scenes_added": planned.iter().map(|(s, rows)| json!({
+            "id": s.id, "slug": s.slug, "title": s.title, "rows": rows.len(),
+            "by_type": count_by_type(rows),
+        })).collect::<Vec<_>>(),
+    });
+    print_json(&summary)
+}
+
+fn sanitize_slug(s: &str) -> String {
+    s.to_lowercase()
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .collect::<String>()
+        .trim_matches('_')
+        .replace("__", "_")
+}
+
+fn count_by_type(rows: &[ScriptRow]) -> serde_json::Value {
+    let mut counts: HashMap<String, u64> = HashMap::new();
+    for r in rows {
+        *counts.entry(r.track_type.clone()).or_insert(0) += 1;
+    }
+    serde_json::to_value(counts).unwrap_or(serde_json::Value::Null)
 }
 
 async fn server_health(config: &crate::models::AppConfig, rest: &[String]) -> Result<()> {

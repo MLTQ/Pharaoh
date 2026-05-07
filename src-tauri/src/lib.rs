@@ -2,6 +2,7 @@ mod app_support;
 mod cli;
 mod commands;
 mod error;
+mod fountain;
 mod models;
 
 use models::{AppConfig, AppState};
