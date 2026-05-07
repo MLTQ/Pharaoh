@@ -170,6 +170,14 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
       y: inv * inv * 18 + 2 * inv * t * fadeOutCurveYPct + t * t * 90,
     };
   });
+  const curveClip = (points: Array<{ x: number; y: number }>, thicknessPct: number) => {
+    const top = points.map((point) => `${point.x}% ${clamp(point.y - thicknessPct, 0, 100)}%`);
+    const bottom = points
+      .slice()
+      .reverse()
+      .map((point) => `${point.x}% ${clamp(point.y + thicknessPct, 0, 100)}%`);
+    return `polygon(${[...top, ...bottom].join(", ")})`;
+  };
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
@@ -293,20 +301,37 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                 boxShadow: `0 0 0 1px rgba(0,0,0,0.85), 0 0 8px ${color}`,
               }}
             />
-            {[...fadeInCurvePoints, ...fadeOutCurvePoints].map((point, index) => (
+            {[fadeInCurvePoints, fadeOutCurvePoints].map((points, index) => (
               <div
                 key={index}
                 style={{
                   position: "absolute",
-                  left: `${point.x}%`,
-                  top: `${point.y}%`,
-                  width: 6,
-                  height: 6,
-                  transform: "translate(-50%, -50%)",
-                  borderRadius: "50%",
+                  inset: 0,
+                  background: "rgba(0,0,0,0.88)",
+                  clipPath: curveClip(points, 5),
+                  filter: `drop-shadow(0 0 5px ${color})`,
+                }}
+              />
+            ))}
+            {[fadeInCurvePoints, fadeOutCurvePoints].map((points, index) => (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  inset: 0,
                   background: "var(--fg-0)",
-                  border: `1px solid ${color}`,
-                  boxShadow: `0 0 0 1px rgba(0,0,0,0.9), 0 0 8px ${color}`,
+                  clipPath: curveClip(points, 2.4),
+                }}
+              />
+            ))}
+            {[fadeInCurvePoints, fadeOutCurvePoints].map((points, index) => (
+              <div
+                key={index}
+                style={{
+                  position: "absolute",
+                  inset: 0,
+                  background: color,
+                  clipPath: curveClip(points, 1),
                 }}
               />
             ))}
