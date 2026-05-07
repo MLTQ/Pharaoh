@@ -291,12 +291,12 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
             <div
               style={{
                 position: "absolute",
-                left: `${fadeInEndPct}%`,
-                right: `${100 - fadeOutStartPct}%`,
-                top: "18%",
+                left: `calc(${fadeInEndPct}% - 2px)`,
+                right: `calc(${100 - fadeOutStartPct}% - 2px)`,
+                top: "calc(18% - 1px)",
                 height: 2,
                 minWidth: 2,
-                borderRadius: 999,
+                borderRadius: 0,
                 background: color,
                 boxShadow: `0 0 0 1px rgba(0,0,0,0.65), 0 0 5px ${color}`,
                 opacity: 0.85,
