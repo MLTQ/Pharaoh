@@ -7,7 +7,7 @@ Rust-side ffmpeg rendering utilities for scene composition. This file mixes plac
 
 ### `normalize_clip`, `resample_to_48k`, `import_audio_asset`, `process_clip_asset`
 - **Does**: Run ffmpeg transforms on individual clips. `import_audio_asset` converts arbitrary source audio into project-local 48 kHz WAV references; `process_clip_asset` trims, filters, fades, normalizes, writes 48 kHz stereo output, and creates a child sidecar.
-- **Interacts with**: Frontend utility wrappers in `tauriCommands.ts`, `ClipStudioView.tsx`, sidecar commands.
+- **Interacts with**: Frontend utility wrappers in `tauriCommands.ts`, `ClipStudioView.tsx`, CLI post commands, sidecar commands.
 
 ### `render_scene`
 - **Does**: Tauri command wrapper that resolves the configured projects root and delegates to the shared renderer.

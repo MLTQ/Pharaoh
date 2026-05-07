@@ -110,6 +110,14 @@ pub struct ImportAudioRequest {
 /// Import arbitrary source audio into the project as a sidecar-indexed WAV.
 #[tauri::command]
 pub fn import_audio_asset(app: AppHandle, params: ImportAudioRequest) -> Result<String> {
+    let projects_dir = app_projects_dir(&app)?;
+    import_audio_asset_with_projects_dir(&projects_dir, params)
+}
+
+pub fn import_audio_asset_with_projects_dir(
+    projects_dir: &Path,
+    params: ImportAudioRequest,
+) -> Result<String> {
     let source = PathBuf::from(&params.source_path);
     if !source.exists() {
         return Err(Error::Other(format!(
@@ -118,7 +126,6 @@ pub fn import_audio_asset(app: AppHandle, params: ImportAudioRequest) -> Result<
         )));
     }
 
-    let projects_dir = app_projects_dir(&app)?;
     let imports_dir = projects_dir
         .join(&params.project_id)
         .join("scenes")
