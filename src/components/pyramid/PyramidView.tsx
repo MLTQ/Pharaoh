@@ -56,10 +56,17 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const totalPlatesW = totalCards * PLATE_W + (totalCards - 1) * plateGap;
   const startX = (W - totalPlatesW) / 2;
 
-  const episodeTotalSec = scenes.reduce((a, s) => {
-    const [m, sec] = s.duration.split(":").map(Number);
-    return a + m * 60 + sec;
-  }, 0);
+  const parseDurationSec = (s: string | undefined): number => {
+    if (!s) return 0;
+    const parts = s.split(":").map((p) => Number(p));
+    if (parts.some((n) => !Number.isFinite(n))) return 0;
+    if (parts.length === 2) return parts[0] * 60 + parts[1];
+    if (parts.length === 3) return parts[0] * 3600 + parts[1] * 60 + parts[2];
+    if (parts.length === 1) return parts[0];
+    return 0;
+  };
+
+  const episodeTotalSec = scenes.reduce((a, s) => a + parseDurationSec(s.duration), 0);
 
   const statusColors: Record<string, string> = {
     rendered: "oklch(0.72 0.13 145)",
@@ -386,8 +393,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                 {(() => {
                   let offset = 0;
                   return scenes.map((s) => {
-                    const [m, sec] = s.duration.split(":").map(Number);
-                    const dur = m * 60 + sec;
+                    const dur = parseDurationSec(s.duration);
                     const xx = episodeTotalSec > 0 ? (offset / episodeTotalSec) * 1000 : 0;
                     const w = episodeTotalSec > 0 ? (dur / episodeTotalSec) * 1000 : 0;
                     offset += dur;

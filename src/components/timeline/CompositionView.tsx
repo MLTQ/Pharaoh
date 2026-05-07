@@ -2,11 +2,14 @@ import React, { useState, useEffect, useRef, useMemo } from "react";
 import { Icon, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
+import { FountainEditor } from "./FountainEditor";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
-import { readScript, updateScriptRow, renderScene } from "../../lib/tauriCommands";
+import { readScript, updateScriptRow, writeScript, renderScene } from "../../lib/tauriCommands";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow } from "../../lib/types";
+
+type ScriptMode = "write" | "direct" | "mix";
 
 const PX_PER_SEC = 4;
 const TOTAL_SEC = 200;
@@ -110,7 +113,12 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [renderState, setRenderState] = useState<"idle" | "rendering" | "done" | "error">("idle");
   const [renderPath, setRenderPath]   = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [mode, setMode] = useState<ScriptMode>("direct");
+  // Per-row pending writes — keyed by row index so concurrent edits across rows
+  // can't clobber each other. flushAllPendingWrites() drains the map immediately.
+  const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
+  // Whole-script write debouncer used by Fountain mode (replaces all rows at once)
+  const fountainSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const { realProjectId, activeSceneSlug, characters } = useProjectStore();
   const { jobs } = useJobStore();
@@ -140,19 +148,65 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const handleDeleteRow = (i: number) =>
     setScriptRows((prev) => prev.filter((_, idx) => idx !== i));
 
+  const flushRowWrite = (rowIndex: number) => {
+    const entry = pendingWritesRef.current.get(rowIndex);
+    if (!entry || !realProjectId || !activeSceneSlug) return;
+    clearTimeout(entry.timer);
+    pendingWritesRef.current.delete(rowIndex);
+    updateScriptRow({
+      projectId: realProjectId,
+      sceneSlug: activeSceneSlug,
+      rowIndex,
+      fields: entry.fields,
+    }).catch(console.error);
+  };
+
+  const flushAllPendingWrites = () => {
+    Array.from(pendingWritesRef.current.keys()).forEach(flushRowWrite);
+  };
+
   const handleUpdateRow = (i: number, patch: Partial<ScriptRow>) => {
     setScriptRows((prev) => prev.map((r, idx) => idx === i ? { ...r, ...patch } : r));
     if (!realProjectId || !activeSceneSlug) return;
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current);
-    saveTimerRef.current = setTimeout(() => {
-      updateScriptRow({
+    const existing = pendingWritesRef.current.get(i);
+    if (existing) clearTimeout(existing.timer);
+    const merged = { ...(existing?.fields ?? {}), ...(patch as Record<string, string>) };
+    const timer = setTimeout(() => flushRowWrite(i), 500);
+    pendingWritesRef.current.set(i, { timer, fields: merged });
+  };
+
+  // Flush on scene switch and unmount so no edit is ever lost
+  useEffect(() => {
+    return () => flushAllPendingWrites();
+  }, [activeSceneSlug, realProjectId]);
+  useEffect(() => {
+    const onBeforeUnload = () => flushAllPendingWrites();
+    window.addEventListener("beforeunload", onBeforeUnload);
+    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+  }, []);
+
+  // ── Fountain commit handler ─────────────────────────────────────────────
+  // Fountain edits replace the entire row list at once; debounce to coalesce
+  // typing bursts, but flush when we hide the editor or switch scenes.
+
+  const handleFountainCommit = (nextRows: ScriptRow[]) => {
+    setScriptRows(nextRows);
+    if (!realProjectId || !activeSceneSlug) return;
+    if (fountainSaveTimerRef.current) clearTimeout(fountainSaveTimerRef.current);
+    fountainSaveTimerRef.current = setTimeout(() => {
+      writeScript({
         projectId: realProjectId,
         sceneSlug: activeSceneSlug,
-        rowIndex: i,
-        fields: patch as Record<string, string>,
+        rows: nextRows,
       }).catch(console.error);
-    }, 5000);
+    }, 600);
   };
+
+  useEffect(() => {
+    return () => {
+      if (fountainSaveTimerRef.current) clearTimeout(fountainSaveTimerRef.current);
+    };
+  }, [activeSceneSlug, realProjectId, mode]);
 
   // ── Timeline tracks ──────────────────────────────────────────────────────
 
@@ -265,6 +319,37 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           )}
         </div>
         <span className="kicker">Duration {scene.duration}</span>
+        {/* Mode toggle: Write (full-width Fountain) · Direct (script + timeline) · Mix (timeline only) */}
+        <div style={{
+          display: "inline-flex", border: "1px solid var(--line-2)", borderRadius: 3,
+          overflow: "hidden", marginRight: 8,
+        }}>
+          {(["write", "direct", "mix"] as ScriptMode[]).map((m) => (
+            <button
+              key={m}
+              onClick={() => setMode(m)}
+              style={{
+                background: mode === m ? "var(--bg-2)" : "transparent",
+                color: mode === m ? "var(--fg-0)" : "var(--fg-3)",
+                border: "none",
+                borderRight: m !== "mix" ? "1px solid var(--line-2)" : "none",
+                padding: "4px 10px",
+                fontFamily: "var(--font-mono)",
+                fontSize: 9,
+                letterSpacing: "0.08em",
+                textTransform: "uppercase",
+                cursor: "pointer",
+              }}
+              title={
+                m === "write"  ? "Full-width Fountain script editor" :
+                m === "direct" ? "Script + timeline" :
+                "Timeline only"
+              }
+            >
+              {m}
+            </button>
+          ))}
+        </div>
         <div className="comp-header-actions">
           <button className="btn"><Icon name="sparkle" style={{ width: 14, height: 14 }} /> Agent assist</button>
           {renderState === "done" && renderPath ? (
@@ -312,27 +397,40 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         ))}
       </div>
 
-      {/* Main area: script canvas (left) + timeline (right) */}
+      {/* Main area: layout depends on mode */}
       <div style={{ display: "flex", flex: 1, overflow: "hidden" }}>
 
-        {/* Script canvas */}
-        <div style={{
-          width: 300, flexShrink: 0,
-          borderRight: "1px solid var(--line-1)",
-          overflowY: "auto", background: "var(--bg-1)",
-        }}>
-          <ScriptCanvas
+        {mode === "write" && (
+          <FountainEditor
+            key={`${activeSceneSlug ?? "demo"}:${scene.no}`}
             rows={scriptRows}
             characters={characters}
             sceneNo={scene.no}
             sceneSlug={activeSceneSlug}
-            onAdd={handleAddRow}
-            onDelete={handleDeleteRow}
-            onUpdate={handleUpdateRow}
+            onCommitRows={handleFountainCommit}
           />
-        </div>
+        )}
 
-        {/* Timeline */}
+        {mode === "direct" && (
+          <div style={{
+            width: 300, flexShrink: 0,
+            borderRight: "1px solid var(--line-1)",
+            overflowY: "auto", background: "var(--bg-1)",
+          }}>
+            <ScriptCanvas
+              rows={scriptRows}
+              characters={characters}
+              sceneNo={scene.no}
+              sceneSlug={activeSceneSlug}
+              onAdd={handleAddRow}
+              onDelete={handleDeleteRow}
+              onUpdate={handleUpdateRow}
+            />
+          </div>
+        )}
+
+        {/* Timeline (visible in direct + mix; hidden in write mode) */}
+        {mode !== "write" && (
         <div className="timeline" style={{ flex: 1, overflow: "auto" }}>
           <div className="tracks-head">
             <div className="tracks-time">
@@ -389,6 +487,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
             </div>
           </div>
         </div>
+        )}
 
       </div>
     </div>
