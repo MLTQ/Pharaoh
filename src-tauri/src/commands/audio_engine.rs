@@ -85,6 +85,21 @@ fn sanitize_stem(raw: &str) -> String {
         .collect::<String>()
 }
 
+fn fade_curve(raw: Option<&str>) -> &'static str {
+    match raw.unwrap_or("tri") {
+        "tri" => "tri",
+        "qsin" => "qsin",
+        "hsin" => "hsin",
+        "esin" => "esin",
+        "log" => "log",
+        "qua" => "qua",
+        "cub" => "cub",
+        "squ" => "squ",
+        "cbr" => "cbr",
+        _ => "tri",
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ClipProcessRequest {
@@ -94,6 +109,8 @@ pub struct ClipProcessRequest {
     pub gain_db: f32,
     pub fade_in_ms: u64,
     pub fade_out_ms: u64,
+    pub fade_in_curve: Option<String>,
+    pub fade_out_curve: Option<String>,
     pub normalize_lufs: Option<f32>,
     pub highpass_hz: Option<u32>,
     pub lowpass_hz: Option<u32>,
@@ -225,16 +242,18 @@ pub fn process_clip_asset(params: ClipProcessRequest) -> Result<String> {
     }
     if params.fade_in_ms > 0 {
         filters.push(format!(
-            "afade=t=in:st=0:d={:.3}",
-            params.fade_in_ms as f32 / 1000.0
+            "afade=t=in:st=0:d={:.3}:curve={}",
+            params.fade_in_ms as f32 / 1000.0,
+            fade_curve(params.fade_in_curve.as_deref())
         ));
     }
     if let (Some(duration_ms), fade_out_ms) = (output_duration_ms, params.fade_out_ms) {
         if fade_out_ms > 0 && duration_ms > fade_out_ms {
             filters.push(format!(
-                "afade=t=out:st={:.3}:d={:.3}",
+                "afade=t=out:st={:.3}:d={:.3}:curve={}",
                 (duration_ms - fade_out_ms) as f32 / 1000.0,
-                fade_out_ms as f32 / 1000.0
+                fade_out_ms as f32 / 1000.0,
+                fade_curve(params.fade_out_curve.as_deref())
             ));
         }
     }

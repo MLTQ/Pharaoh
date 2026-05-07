@@ -245,6 +245,8 @@ export const processClipAsset = (args: {
   gainDb: number;
   fadeInMs: number;
   fadeOutMs: number;
+  fadeInCurve?: string;
+  fadeOutCurve?: string;
   normalizeLufs?: number | null;
   highpassHz?: number | null;
   lowpassHz?: number | null;

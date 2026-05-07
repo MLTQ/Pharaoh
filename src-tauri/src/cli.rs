@@ -230,7 +230,7 @@ fn usage() -> &'static str {
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh post import <project_id> <source_audio> [--label <text>]
-  pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>]
+  pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>] [--fade-in-ms <n>] [--fade-out-ms <n>] [--fade-in-curve tri|qsin|qua] [--fade-out-curve tri|qsin|qua]
   pharaoh post normalize <input_wav> [--target-lufs -16]
   pharaoh post resample <input_wav> <output_wav>
   pharaoh post upscale <input_wav> [--model basic|speech] [--steps 50] [--guidance 3.5] [--seed 0]
@@ -2093,6 +2093,8 @@ async fn post_process(input_path: &str, rest: &[String]) -> Result<()> {
         gain_db: flag_parse(&flags, "gain_db", 0.0)?,
         fade_in_ms: flag_parse(&flags, "fade_in_ms", 0)?,
         fade_out_ms: flag_parse(&flags, "fade_out_ms", 0)?,
+        fade_in_curve: flag_opt(&flags, "fade_in_curve"),
+        fade_out_curve: flag_opt(&flags, "fade_out_curve"),
         normalize_lufs: flag_opt(&flags, "normalize_lufs")
             .map(|_| flag_parse(&flags, "normalize_lufs", -16.0))
             .transpose()?,

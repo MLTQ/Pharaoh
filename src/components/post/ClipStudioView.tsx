@@ -75,17 +75,32 @@ function normalizePeaksForDisplay(peaks: number[], maxBars: number): number[] {
   return bucketed.map((peak) => Math.pow(clamp(Math.abs(peak) / max, 0, 1), 0.68));
 }
 
+function curveName(amount: number, reverse = false): string {
+  const normalized = reverse ? -amount : amount;
+  if (normalized > 0.35) return "qsin";
+  if (normalized < -0.35) return "qua";
+  return "tri";
+}
+
 interface CropWaveformProps {
   peaks: number[] | null;
   durationMs: number | null;
   startMs: number;
   endMs: number;
+  fadeInMs: number;
+  fadeOutMs: number;
+  fadeInCurve: number;
+  fadeOutCurve: number;
   color: string;
   fallbackSeed: number;
   zoom: number;
   viewportStartMs: number;
   onStartChange: (ms: number) => void;
   onEndChange: (ms: number) => void;
+  onFadeInChange: (ms: number) => void;
+  onFadeOutChange: (ms: number) => void;
+  onFadeInCurveChange: (amount: number) => void;
+  onFadeOutCurveChange: (amount: number) => void;
   onViewportChange: (ms: number) => void;
 }
 
@@ -94,12 +109,20 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   durationMs,
   startMs,
   endMs,
+  fadeInMs,
+  fadeOutMs,
+  fadeInCurve,
+  fadeOutCurve,
   color,
   fallbackSeed,
   zoom,
   viewportStartMs,
   onStartChange,
   onEndChange,
+  onFadeInChange,
+  onFadeOutChange,
+  onFadeInCurveChange,
+  onFadeOutCurveChange,
   onViewportChange,
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
@@ -114,18 +137,35 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   const endVisible = active && endMs >= visibleStartMs && endMs <= visibleEndMs;
   const startPct = active ? ((clamp(startMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 0;
   const endPct = active ? ((clamp(endMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 100;
+  const fadeInEndMs = clamp(startMs + fadeInMs, startMs, endMs);
+  const fadeOutStartMs = clamp(endMs - fadeOutMs, startMs, endMs);
+  const fadeInEndPct = active ? ((clamp(fadeInEndMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 0;
+  const fadeOutStartPct = active ? ((clamp(fadeOutStartMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 100;
+  const fadeInVisible = active && fadeInEndMs >= visibleStartMs && fadeInEndMs <= visibleEndMs;
+  const fadeOutVisible = active && fadeOutStartMs >= visibleStartMs && fadeOutStartMs <= visibleEndMs;
   const visiblePeaks = useMemo(() => {
     if (!peaks || !active) return peaks;
     const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
     const endIndex = Math.max(startIndex + 1, Math.ceil((visibleEndMs / duration) * peaks.length));
     return normalizePeaksForDisplay(peaks.slice(startIndex, endIndex), 720);
   }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
+  const fadeInMidPct = (startPct + fadeInEndPct) / 2;
+  const fadeOutMidPct = (fadeOutStartPct + endPct) / 2;
+  const fadeInCurveYPct = clamp(50 - fadeInCurve * 32, 14, 86);
+  const fadeOutCurveYPct = clamp(50 - fadeOutCurve * 32, 14, 86);
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
     if (!rect || !active) return 0;
     const pct = clamp((clientX - rect.left) / rect.width, 0, 1);
     return Math.round(visibleStartMs + pct * viewportDuration);
+  };
+
+  const curveFromPointer = (clientY: number) => {
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return 0;
+    const pct = clamp((clientY - rect.top) / rect.height, 0.14, 0.86);
+    return clamp((0.5 - pct) * 2.4, -1, 1);
   };
 
   const startDrag = (handle: "start" | "end", e: React.PointerEvent<HTMLDivElement>) => {
@@ -140,6 +180,45 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
     };
     move(e.clientX);
     const onMove = (ev: PointerEvent) => move(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+
+  const startFadeDrag = (handle: "fadeIn" | "fadeOut", e: React.PointerEvent<HTMLDivElement>) => {
+    if (!active) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (clientX: number) => {
+      const next = msFromPointer(clientX);
+      if (handle === "fadeIn") onFadeInChange(clamp(next - startMs, 0, Math.max(0, endMs - startMs)));
+      else onFadeOutChange(clamp(endMs - next, 0, Math.max(0, endMs - startMs)));
+    };
+    move(e.clientX);
+    const onMove = (ev: PointerEvent) => move(ev.clientX);
+    const onUp = () => {
+      window.removeEventListener("pointermove", onMove);
+      window.removeEventListener("pointerup", onUp);
+    };
+    window.addEventListener("pointermove", onMove);
+    window.addEventListener("pointerup", onUp, { once: true });
+  };
+
+  const startCurveDrag = (handle: "fadeIn" | "fadeOut", e: React.PointerEvent<HTMLDivElement>) => {
+    if (!active) return;
+    e.preventDefault();
+    e.stopPropagation();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    const move = (clientY: number) => {
+      if (handle === "fadeIn") onFadeInCurveChange(curveFromPointer(clientY));
+      else onFadeOutCurveChange(curveFromPointer(clientY));
+    };
+    move(e.clientY);
+    const onMove = (ev: PointerEvent) => move(ev.clientY);
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
@@ -175,6 +254,105 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
         <>
           <div style={{ position: "absolute", inset: `0 ${100 - startPct}% 0 0`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: startVisible ? 1 : 0.15, zIndex: 2 }} />
           <div style={{ position: "absolute", inset: `0 0 0 ${endPct}%`, background: "rgba(0,0,0,0.34)", pointerEvents: "none", opacity: endVisible ? 1 : 0.15, zIndex: 2 }} />
+          <svg
+            viewBox="0 0 100 100"
+            preserveAspectRatio="none"
+            style={{ position: "absolute", inset: 10, zIndex: 4, overflow: "visible", pointerEvents: "none" }}
+          >
+            <path
+              d={`M ${startPct} 88 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 16 L ${fadeOutStartPct} 16 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 88`}
+              fill="none"
+              stroke={color}
+              strokeWidth={0.45}
+              vectorEffect="non-scaling-stroke"
+              opacity={0.95}
+            />
+            <path
+              d={`M ${startPct} 88 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 16 L ${fadeOutStartPct} 16 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 88 L ${endPct} 96 L ${startPct} 96 Z`}
+              fill={color}
+              opacity={0.08}
+            />
+          </svg>
+          {fadeInVisible && (
+            <div
+              onPointerDown={(e) => startFadeDrag("fadeIn", e)}
+              title="Drag fade-in length"
+              style={{
+                position: "absolute",
+                left: `${fadeInEndPct}%`,
+                bottom: 14,
+                width: 15,
+                height: 15,
+                transform: "translateX(-50%) rotate(45deg)",
+                background: "var(--bg-1)",
+                border: `1px solid ${color}`,
+                boxShadow: `0 0 10px ${color}`,
+                cursor: "ew-resize",
+                touchAction: "none",
+                zIndex: 7,
+              }}
+            />
+          )}
+          {fadeOutVisible && (
+            <div
+              onPointerDown={(e) => startFadeDrag("fadeOut", e)}
+              title="Drag fade-out length"
+              style={{
+                position: "absolute",
+                left: `${fadeOutStartPct}%`,
+                bottom: 14,
+                width: 15,
+                height: 15,
+                transform: "translateX(-50%) rotate(45deg)",
+                background: "var(--bg-1)",
+                border: `1px solid ${color}`,
+                boxShadow: `0 0 10px ${color}`,
+                cursor: "ew-resize",
+                touchAction: "none",
+                zIndex: 7,
+              }}
+            />
+          )}
+          {fadeInMs > 0 && fadeInVisible && (
+            <div
+              onPointerDown={(e) => startCurveDrag("fadeIn", e)}
+              title="Drag fade-in curve"
+              style={{
+                position: "absolute",
+                left: `${fadeInMidPct}%`,
+                top: `${fadeInCurveYPct}%`,
+                width: 13,
+                height: 13,
+                transform: "translate(-50%, -50%)",
+                borderRadius: "50%",
+                background: color,
+                border: "1px solid var(--bg-0)",
+                cursor: "ns-resize",
+                touchAction: "none",
+                zIndex: 8,
+              }}
+            />
+          )}
+          {fadeOutMs > 0 && fadeOutVisible && (
+            <div
+              onPointerDown={(e) => startCurveDrag("fadeOut", e)}
+              title="Drag fade-out curve"
+              style={{
+                position: "absolute",
+                left: `${fadeOutMidPct}%`,
+                top: `${fadeOutCurveYPct}%`,
+                width: 13,
+                height: 13,
+                transform: "translate(-50%, -50%)",
+                borderRadius: "50%",
+                background: color,
+                border: "1px solid var(--bg-0)",
+                cursor: "ns-resize",
+                touchAction: "none",
+                zIndex: 8,
+              }}
+            />
+          )}
           {(["start", "end"] as const).map((handle) => {
             const pct = handle === "start" ? startPct : endPct;
             const visible = handle === "start" ? startVisible : endVisible;
@@ -263,6 +441,8 @@ export const ClipStudioView: React.FC = () => {
   const [gainDb, setGainDb] = useState(0);
   const [fadeInMs, setFadeInMs] = useState(0);
   const [fadeOutMs, setFadeOutMs] = useState(0);
+  const [fadeInCurve, setFadeInCurve] = useState(0);
+  const [fadeOutCurve, setFadeOutCurve] = useState(0);
   const [normalize, setNormalize] = useState(false);
   const [normalizeLufs, setNormalizeLufs] = useState(-16);
   const [highpassHz, setHighpassHz] = useState(0);
@@ -310,6 +490,10 @@ export const ClipStudioView: React.FC = () => {
     if (!selected) return;
     setStartMs(0);
     setEndMs(selected.duration_ms);
+    setFadeInMs(0);
+    setFadeOutMs(0);
+    setFadeInCurve(0);
+    setFadeOutCurve(0);
     setZoom(1);
     setViewportStartMs(0);
   }, [selected?.audio_path]);
@@ -404,6 +588,8 @@ export const ClipStudioView: React.FC = () => {
         gainDb,
         fadeInMs,
         fadeOutMs,
+        fadeInCurve: curveName(fadeInCurve),
+        fadeOutCurve: curveName(fadeOutCurve, true),
         normalizeLufs: normalize ? normalizeLufs : null,
         highpassHz: highpassHz > 0 ? highpassHz : null,
         lowpassHz: lowpassHz > 0 ? lowpassHz : null,
@@ -436,7 +622,7 @@ export const ClipStudioView: React.FC = () => {
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--bg-1)" }}>
-      <div style={{ height: "100%", width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "minmax(320px, 430px) minmax(0, 1fr)" }}>
+      <div style={{ height: "calc(100% - 248px)", width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "minmax(320px, 430px) minmax(0, 1fr)" }}>
         <div style={{ borderRight: "1px solid var(--line-1)", background: "var(--bg-1)", display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "22px 18px 14px", borderBottom: "1px solid var(--line-1)" }}>
             <div className="eyebrow" style={{ marginBottom: 5 }}>Post</div>
@@ -534,59 +720,8 @@ export const ClipStudioView: React.FC = () => {
                   <span style={{ flex: 1 }} />
                   <PlayButton path={selected.audio_path} size={14} />
                 </div>
-
-                <CropWaveform
-                  peaks={peaks[selected.audio_path] ?? null}
-                  durationMs={selectedDuration}
-                  startMs={startMs}
-                  endMs={safeEndMs}
-                  color={selectedColor}
-                  fallbackSeed={selected.name.charCodeAt(0)}
-                  zoom={zoom}
-                  viewportStartMs={viewportStartMs}
-                  onStartChange={setStartMs}
-                  onEndChange={setEndMs}
-                  onViewportChange={setViewportStartMs}
-                />
-
-                <div style={{
-                  display: "grid",
-                  gridTemplateColumns: "auto minmax(160px, 1fr) auto minmax(160px, 1fr)",
-                  gap: 10,
-                  alignItems: "center",
-                  marginTop: 12,
-                }}>
-                  <span className="eyebrow">Zoom</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={1}
-                    max={120}
-                    step={1}
-                    value={zoom}
-                    onChange={(e) => setZoom(Number(e.target.value))}
-                  />
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)" }}>{zoom}x</span>
-                  <input
-                    className="slider"
-                    type="range"
-                    min={0}
-                    max={viewportMax}
-                    step={100}
-                    value={Math.min(viewportStartMs, viewportMax)}
-                    disabled={zoom <= 1}
-                    onChange={(e) => setViewportStartMs(Number(e.target.value))}
-                  />
-                </div>
-
-                <div style={{ display: "flex", gap: 12, alignItems: "flex-start", marginTop: 12 }}>
-                  <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6, flex: 1 }}>
-                    {selected.prompt || "No prompt recorded."}
-                  </div>
-                  <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
-                    <Icon name="play" style={{ width: 11, height: 11 }} />
-                    play crop
-                  </button>
+                <div style={{ fontSize: 12, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                  Crop, fade, zoom, and envelope handles are in the docked clip editor at the bottom of this page.
                 </div>
               </div>
 
@@ -602,14 +737,6 @@ export const ClipStudioView: React.FC = () => {
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 5 }}>Gain dB</div>
                   <input className="input" type="number" min={-24} max={24} step={0.5} value={gainDb} onChange={(e) => setGainDb(Number(e.target.value))} />
-                </label>
-                <label>
-                  <div className="eyebrow" style={{ marginBottom: 5 }}>Fade in ms</div>
-                  <input className="input" type="number" min={0} value={fadeInMs} onChange={(e) => setFadeInMs(Math.max(0, Number(e.target.value)))} />
-                </label>
-                <label>
-                  <div className="eyebrow" style={{ marginBottom: 5 }}>Fade out ms</div>
-                  <input className="input" type="number" min={0} value={fadeOutMs} onChange={(e) => setFadeOutMs(Math.max(0, Number(e.target.value)))} />
                 </label>
                 <label>
                   <div className="eyebrow" style={{ marginBottom: 5 }}>Highpass Hz</div>
@@ -678,6 +805,105 @@ export const ClipStudioView: React.FC = () => {
             </div>
           )}
         </div>
+      </div>
+      <div style={{
+        position: "absolute",
+        left: 0,
+        right: 0,
+        bottom: 0,
+        height: 248,
+        borderTop: "1px solid var(--line-1)",
+        background: "color-mix(in oklch, var(--bg-1) 94%, black)",
+        display: "grid",
+        gridTemplateColumns: "minmax(220px, 300px) minmax(0, 1fr) minmax(230px, 310px)",
+        gap: 16,
+        padding: "14px 18px",
+        zIndex: 9,
+      }}>
+        {!selected ? (
+          <div style={{ gridColumn: "1 / -1", color: "var(--fg-4)", fontSize: 13, display: "grid", placeItems: "center" }}>
+            Select a generated or imported clip to edit its crop and envelope.
+          </div>
+        ) : (
+          <>
+            <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
+              <div className="eyebrow">Clip editor</div>
+              <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
+                <span style={{ width: 7, height: 7, borderRadius: "50%", background: selectedColor, boxShadow: `0 0 8px ${selectedColor}`, flexShrink: 0 }} />
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{basename(selected.audio_path)}</div>
+                  <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)", marginTop: 2 }}>
+                    {formatMs(startMs)} - {formatMs(safeEndMs)} · fade {fadeInMs} / {fadeOutMs} ms
+                  </div>
+                </div>
+              </div>
+              <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.55, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical" }}>
+                {selected.prompt || "No prompt recorded."}
+              </div>
+            </div>
+
+            <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+              <CropWaveform
+                peaks={peaks[selected.audio_path] ?? null}
+                durationMs={selectedDuration}
+                startMs={startMs}
+                endMs={safeEndMs}
+                fadeInMs={fadeInMs}
+                fadeOutMs={fadeOutMs}
+                fadeInCurve={fadeInCurve}
+                fadeOutCurve={fadeOutCurve}
+                color={selectedColor}
+                fallbackSeed={selected.name.charCodeAt(0)}
+                zoom={zoom}
+                viewportStartMs={viewportStartMs}
+                onStartChange={setStartMs}
+                onEndChange={setEndMs}
+                onFadeInChange={setFadeInMs}
+                onFadeOutChange={setFadeOutMs}
+                onFadeInCurveChange={setFadeInCurve}
+                onFadeOutCurveChange={setFadeOutCurve}
+                onViewportChange={setViewportStartMs}
+              />
+              <div style={{ display: "grid", gridTemplateColumns: "auto minmax(120px, 1fr) auto minmax(120px, 1fr)", gap: 10, alignItems: "center" }}>
+                <span className="eyebrow">Zoom</span>
+                <input
+                  className="slider"
+                  type="range"
+                  min={1}
+                  max={120}
+                  step={1}
+                  value={zoom}
+                  onChange={(e) => setZoom(Number(e.target.value))}
+                />
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)" }}>{zoom}x</span>
+                <input
+                  className="slider"
+                  type="range"
+                  min={0}
+                  max={viewportMax}
+                  step={100}
+                  value={Math.min(viewportStartMs, viewportMax)}
+                  disabled={zoom <= 1}
+                  onChange={(e) => setViewportStartMs(Number(e.target.value))}
+                />
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+              <div className="eyebrow">Envelope</div>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)", lineHeight: 1.7 }}>
+                Drag vertical bars to crop. Drag diamond handles for fade length. Drag round handles up/down for curve shape.
+              </div>
+              <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
+                <Icon name="play" style={{ width: 11, height: 11 }} />
+                play crop
+              </button>
+              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)", lineHeight: 1.6 }}>
+                in {curveName(fadeInCurve)} · out {curveName(fadeOutCurve, true)}
+              </div>
+            </div>
+          </>
+        )}
       </div>
     </div>
   );

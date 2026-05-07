@@ -1,19 +1,19 @@
 # ClipStudioView.tsx
 
 ## Purpose
-Post-production clip editor for generated and imported Pharaoh audio assets. It lets users import long recordings, zoom into sidecar-indexed WAV files, apply practical ffmpeg edits, save child assets, and optionally assign the result to a scene script row.
+Post-production clip editor for generated and imported Pharaoh audio assets. It lets users import long recordings, edit crop and fade envelopes in a bottom docked waveform, apply practical ffmpeg edits, save child assets, and optionally assign the result to a scene script row.
 
 ## Components
 
 ### `ClipStudioView`
-- **Does**: Lists generated/imported assets, imports external audio, previews zoomable waveform peaks, exposes trim/gain/fade/filter/normalize controls, handles Space-bar crop preview, and calls `processClipAsset`.
+- **Does**: Lists generated/imported assets, imports external audio, keeps the bottom clip editor in sync with selected assets, exposes trim/gain/filter/normalize controls, handles Space-bar crop preview, and calls `processClipAsset`.
 - **Interacts with**: `importAudioAsset`, `listGeneratedAudioAssets`, `getWaveformPeaks`, `processClipAsset`, `readScript`, `updateScriptRow`, `useProjectStore`, `useAudioStore`.
 - **Rationale**: Clip editing is post-production but not neural upscaling, so it stays separate from `UpscaleView`.
 
 ### `CropWaveform`
-- **Does**: Renders a bucketed, visually normalized waveform with draggable vertical crop handles, zoom/pan viewport support, and trim state tied to `startMs` and `endMs`.
+- **Does**: Renders a bucketed, visually normalized waveform with draggable crop bars, fade-length diamond handles, fade-curve handles, zoom/pan viewport support, and trim state tied to `startMs` and `endMs`.
 - **Interacts with**: `PeaksWave`, `Wave`, Clip Studio trim state.
-- **Rationale**: Cropping needs direct manipulation rather than only numeric fields; waveform bucketing prevents loaded peak arrays from drawing as thousands of subpixel SVG bars, and normalization is display-only.
+- **Rationale**: Cropping and fades need direct manipulation rather than only numeric fields; waveform bucketing prevents loaded peak arrays from drawing as thousands of subpixel SVG bars, and normalization is display-only.
 
 ### `saveClip`
 - **Does**: Processes the selected asset into a child WAV and, when requested, writes that output path back to the selected script row.

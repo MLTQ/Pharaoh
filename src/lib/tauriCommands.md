@@ -17,6 +17,7 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 ### Sidecar and audio wrappers
 - **Does**: Read/write sidecars and call audio utility/render commands.
 - **Interacts with**: asset browser, timeline, Clip Studio, Character Designer reference selection, playback helpers.
+- **Rationale**: `processClipAsset` mirrors the Rust clip processor, including crop times, gain/filter controls, and optional curved fade envelope names.
 
 ### Enhancement wrappers
 - **Does**: List persistent generated assets and submit AudioSR upscaling to the Post server with an optional frontend job id for progress events.

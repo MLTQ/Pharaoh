@@ -64,7 +64,7 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 - **Commands**: `asset list`, `asset meta`, `asset qa`, `asset takes`, `asset use`.
 
 ### Clip/Post Commands
-- **Does**: Imports arbitrary source recordings, crops/processes clips with ffmpeg, normalizes, resamples, and upscales through the remote-safe Post server.
+- **Does**: Imports arbitrary source recordings, crops/processes clips with ffmpeg, applies curved fades, normalizes, resamples, and upscales through the remote-safe Post server.
 - **Interacts with**: `audio_engine.rs`, `audio_enhance.rs`, Post server `/generate/upscale`.
 - **Commands**: `post import`, `post process`, `post normalize`, `post resample`, `post upscale`.
 
