@@ -12,13 +12,14 @@ Zustand store for inference server health, model load/unload state, and load-pro
 
 ### `pollHealth`, `loadModel`, `unloadModel`
 - **Does**: Calls Tauri inference commands and updates online/loading/offline state.
-- **Interacts with**: `commands/inference.rs`.
+- **Interacts with**: `commands/inference.rs`, topbar server health tracker in `App.tsx`.
 
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `ModelsView.tsx` | Optional SFX-only AudioLDM and Post-only AudioSR fields may be absent | Treating optional fields as required |
+| `App.tsx` | `post` status tracks the AudioSR/Post server | Omitting server kinds from the topbar tracker |
 | Tauri settings commands | Health polling returns JSON matching `ServerHealth` | Removing common fields |
 
 ## Notes

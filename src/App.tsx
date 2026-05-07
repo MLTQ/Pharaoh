@@ -51,7 +51,7 @@ export default function App() {
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setRightTab, agentActiveUntil } = useUiStore();
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
-  const { tts, sfx, music, pollHealth, initListeners: initModelListeners } = useModelStore();
+  const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
   useEffect(() => {
@@ -182,12 +182,16 @@ export default function App() {
 
         {/* Server health dots */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginRight: 8 }}>
-          {(["tts", "sfx", "music"] as const).map((m) => {
-            const s = m === "tts" ? tts : m === "sfx" ? sfx : music;
+          {([
+            ["tts", "TTS", tts],
+            ["sfx", "SFX", sfx],
+            ["music", "MUSIC", music],
+            ["post", "AUDIOSR", post],
+          ] as const).map(([key, label, s]) => {
             return (
               <span
-                key={m}
-                title={`${m.toUpperCase()} server: ${s}`}
+                key={key}
+                title={`${label} server: ${s}`}
                 style={{
                   display: "flex", alignItems: "center", gap: 4,
                   fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)",
@@ -199,7 +203,7 @@ export default function App() {
                   background: STATUS_COLOR[s] ?? "var(--fg-4)",
                   boxShadow: s === "online" ? `0 0 4px ${STATUS_COLOR[s]}` : "none",
                 }} />
-                {m}
+                {label}
               </span>
             );
           })}

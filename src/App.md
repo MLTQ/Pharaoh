@@ -13,6 +13,11 @@ Top-level React shell for Pharaoh's project workspace. It wires navigation, glob
 - **Does**: Chooses launcher versus project workspace layout, initializes listeners, and renders the active page.
 - **Interacts with**: project/job/model/playback/UI stores and page components.
 
+### Server health tracker
+- **Does**: Shows TTS, SFX, music, and AudioSR/Post server status in the topbar.
+- **Interacts with**: `modelStore.ts`.
+- **Rationale**: AudioSR runs as the Post inference server, so it needs the same remote-health visibility as generation servers.
+
 ### Post-processing navigation
 - **Does**: Adds Clip Studio and Audio Upscale pages to the rail, breadcrumbs, sidebar, and canvas.
 - **Interacts with**: `ClipStudioView.tsx`, `UpscaleView.tsx`.
