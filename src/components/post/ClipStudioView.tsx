@@ -54,10 +54,25 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
-function normalizePeaksForDisplay(peaks: number[]): number[] {
-  const max = peaks.reduce((acc, peak) => Math.max(acc, Math.abs(peak)), 0);
-  if (max <= 0.0001) return peaks;
-  return peaks.map((peak) => Math.pow(clamp(Math.abs(peak) / max, 0, 1), 0.68));
+function peaksForDisplay(peaks: number[], maxBars: number): number[] {
+  if (peaks.length === 0) return peaks;
+  const bucketSize = Math.max(1, Math.ceil(peaks.length / maxBars));
+  const bucketed: number[] = [];
+  for (let i = 0; i < peaks.length; i += bucketSize) {
+    let bucketPeak = 0;
+    for (let j = i; j < Math.min(i + bucketSize, peaks.length); j += 1) {
+      bucketPeak = Math.max(bucketPeak, Math.abs(peaks[j]));
+    }
+    bucketed.push(bucketPeak);
+  }
+  return bucketed;
+}
+
+function normalizePeaksForDisplay(peaks: number[], maxBars: number): number[] {
+  const bucketed = peaksForDisplay(peaks, maxBars);
+  const max = bucketed.reduce((acc, peak) => Math.max(acc, Math.abs(peak)), 0);
+  if (max <= 0.0001) return bucketed;
+  return bucketed.map((peak) => Math.pow(clamp(Math.abs(peak) / max, 0, 1), 0.68));
 }
 
 interface CropWaveformProps {
@@ -103,7 +118,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
     if (!peaks || !active) return peaks;
     const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
     const endIndex = Math.max(startIndex + 1, Math.ceil((visibleEndMs / duration) * peaks.length));
-    return normalizePeaksForDisplay(peaks.slice(startIndex, endIndex));
+    return normalizePeaksForDisplay(peaks.slice(startIndex, endIndex), 720);
   }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
 
   const msFromPointer = (clientX: number) => {
@@ -484,7 +499,7 @@ export const ClipStudioView: React.FC = () => {
                 >
                   <div>
                     {peaks[asset.audio_path] ? (
-                      <PeaksWave peaks={peaks[asset.audio_path]} width={72} height={28} color={color} opacity={0.85} />
+                      <PeaksWave peaks={normalizePeaksForDisplay(peaks[asset.audio_path], 42)} width={72} height={28} color={color} opacity={0.85} />
                     ) : (
                       <Wave width={72} height={28} seed={index + 10} count={20} color={color} opacity={0.7} />
                     )}
