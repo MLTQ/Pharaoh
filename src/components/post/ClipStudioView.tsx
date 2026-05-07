@@ -154,6 +154,8 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   const fadeOutMidPct = (fadeOutStartPct + endPct) / 2;
   const fadeInCurveYPct = clamp(52 - fadeInCurve * 28, 20, 82);
   const fadeOutCurveYPct = clamp(52 - fadeOutCurve * 28, 20, 82);
+  const envelopeD = `M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90`;
+  const envelopeFillD = `${envelopeD} L ${endPct} 96 L ${startPct} 96 Z`;
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
@@ -262,24 +264,45 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
             style={{
               position: "absolute",
               inset: 7,
-              zIndex: 6,
+              zIndex: 20,
               overflow: "visible",
               pointerEvents: "none",
-              filter: `drop-shadow(0 0 4px ${color})`,
             }}
           >
             <path
-              d={`M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90`}
-              fill="none"
-              stroke={color}
-              strokeWidth={1.25}
-              vectorEffect="non-scaling-stroke"
-              opacity={1}
+              d={envelopeFillD}
+              fill={color}
+              opacity={0.16}
             />
             <path
-              d={`M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90 L ${endPct} 96 L ${startPct} 96 Z`}
-              fill={color}
-              opacity={0.14}
+              d={envelopeD}
+              fill="none"
+              stroke="rgba(0,0,0,0.9)"
+              strokeWidth={6}
+              vectorEffect="non-scaling-stroke"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.8}
+            />
+            <path
+              d={envelopeD}
+              fill="none"
+              stroke="var(--fg-1)"
+              strokeWidth={3}
+              vectorEffect="non-scaling-stroke"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={0.95}
+            />
+            <path
+              d={envelopeD}
+              fill="none"
+              stroke={color}
+              strokeWidth={1.5}
+              vectorEffect="non-scaling-stroke"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              opacity={1}
             />
           </svg>
           {fadeInVisible && (
