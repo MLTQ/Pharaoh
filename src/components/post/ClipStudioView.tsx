@@ -294,11 +294,12 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                 left: `${fadeInEndPct}%`,
                 right: `${100 - fadeOutStartPct}%`,
                 top: "18%",
-                height: 4,
+                height: 2,
                 minWidth: 2,
                 borderRadius: 999,
-                background: "var(--fg-0)",
-                boxShadow: `0 0 0 1px rgba(0,0,0,0.85), 0 0 8px ${color}`,
+                background: color,
+                boxShadow: `0 0 0 1px rgba(0,0,0,0.65), 0 0 5px ${color}`,
+                opacity: 0.85,
               }}
             />
             {[fadeInCurvePoints, fadeOutCurvePoints].map((points, index) => (
@@ -307,20 +308,9 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                 style={{
                   position: "absolute",
                   inset: 0,
-                  background: "rgba(0,0,0,0.88)",
-                  clipPath: curveClip(points, 5),
-                  filter: `drop-shadow(0 0 5px ${color})`,
-                }}
-              />
-            ))}
-            {[fadeInCurvePoints, fadeOutCurvePoints].map((points, index) => (
-              <div
-                key={index}
-                style={{
-                  position: "absolute",
-                  inset: 0,
-                  background: "var(--fg-0)",
+                  background: "rgba(0,0,0,0.75)",
                   clipPath: curveClip(points, 2.4),
+                  filter: `drop-shadow(0 0 4px ${color})`,
                 }}
               />
             ))}
@@ -331,7 +321,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
                   position: "absolute",
                   inset: 0,
                   background: color,
-                  clipPath: curveClip(points, 1),
+                  clipPath: curveClip(points, 0.9),
                 }}
               />
             ))}
