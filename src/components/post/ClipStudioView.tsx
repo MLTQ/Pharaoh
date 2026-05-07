@@ -143,6 +143,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   const fadeOutStartPct = active ? ((clamp(fadeOutStartMs, visibleStartMs, visibleEndMs) - visibleStartMs) / viewportDuration) * 100 : 100;
   const fadeInVisible = active && fadeInEndMs >= visibleStartMs && fadeInEndMs <= visibleEndMs;
   const fadeOutVisible = active && fadeOutStartMs >= visibleStartMs && fadeOutStartMs <= visibleEndMs;
+  const waveformHeight = 176;
   const visiblePeaks = useMemo(() => {
     if (!peaks || !active) return peaks;
     const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
@@ -232,7 +233,8 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
       ref={ref}
       style={{
         position: "relative",
-        minHeight: 82,
+        minHeight: waveformHeight + 20,
+        height: "100%",
         border: "1px solid var(--line-1)",
         background: "var(--bg-0)",
         borderRadius: 2,
@@ -243,11 +245,11 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
     >
       {visiblePeaks ? (
         <div style={{ position: "relative", zIndex: 1 }}>
-          <PeaksWave peaks={visiblePeaks} width={1000} height={70} color={color} opacity={0.95} />
+          <PeaksWave peaks={visiblePeaks} width={1000} height={waveformHeight} color={color} opacity={0.95} />
         </div>
       ) : (
         <div style={{ position: "relative", zIndex: 1 }}>
-          <Wave width={1000} height={70} seed={fallbackSeed} count={180} color={color} opacity={0.8} />
+          <Wave width={1000} height={waveformHeight} seed={fallbackSeed} count={180} color={color} opacity={0.8} />
         </div>
       )}
       {active && (
@@ -622,7 +624,7 @@ export const ClipStudioView: React.FC = () => {
 
   return (
     <div style={{ position: "absolute", inset: 0, overflow: "hidden", background: "var(--bg-1)" }}>
-      <div style={{ height: "calc(100% - 248px)", width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "minmax(320px, 430px) minmax(0, 1fr)" }}>
+      <div style={{ height: "calc(100% - 390px)", width: "100%", minWidth: 0, display: "grid", gridTemplateColumns: "minmax(320px, 430px) minmax(0, 1fr)" }}>
         <div style={{ borderRight: "1px solid var(--line-1)", background: "var(--bg-1)", display: "flex", flexDirection: "column", minHeight: 0 }}>
           <div style={{ padding: "22px 18px 14px", borderBottom: "1px solid var(--line-1)" }}>
             <div className="eyebrow" style={{ marginBottom: 5 }}>Post</div>
@@ -811,13 +813,13 @@ export const ClipStudioView: React.FC = () => {
         left: 0,
         right: 0,
         bottom: 0,
-        height: 248,
+        height: 390,
         borderTop: "1px solid var(--line-1)",
         background: "color-mix(in oklch, var(--bg-1) 94%, black)",
-        display: "grid",
-        gridTemplateColumns: "minmax(220px, 300px) minmax(0, 1fr) minmax(230px, 310px)",
-        gap: 16,
-        padding: "14px 18px",
+        display: "flex",
+        flexDirection: "column",
+        gap: 12,
+        padding: "14px 18px 16px",
         zIndex: 9,
       }}>
         {!selected ? (
@@ -826,23 +828,26 @@ export const ClipStudioView: React.FC = () => {
           </div>
         ) : (
           <>
-            <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 8 }}>
-              <div className="eyebrow">Clip editor</div>
-              <div style={{ display: "flex", alignItems: "center", gap: 9, minWidth: 0 }}>
-                <span style={{ width: 7, height: 7, borderRadius: "50%", background: selectedColor, boxShadow: `0 0 8px ${selectedColor}`, flexShrink: 0 }} />
+            <div style={{ display: "grid", gridTemplateColumns: "minmax(260px, 0.85fr) minmax(320px, 1.35fr) minmax(160px, auto)", gap: 16, alignItems: "center", minHeight: 44 }}>
+              <div style={{ minWidth: 0, display: "flex", alignItems: "center", gap: 10 }}>
+                <span style={{ width: 8, height: 8, borderRadius: "50%", background: selectedColor, boxShadow: `0 0 8px ${selectedColor}`, flexShrink: 0 }} />
                 <div style={{ minWidth: 0 }}>
-                  <div style={{ fontSize: 14, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{basename(selected.audio_path)}</div>
+                  <div style={{ fontSize: 15, fontWeight: 600, whiteSpace: "nowrap", overflow: "hidden", textOverflow: "ellipsis" }}>{basename(selected.audio_path)}</div>
                   <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)", marginTop: 2 }}>
-                    {formatMs(startMs)} - {formatMs(safeEndMs)} · fade {fadeInMs} / {fadeOutMs} ms
+                    {formatMs(startMs)} - {formatMs(safeEndMs)} · fade {fadeInMs} / {fadeOutMs} ms · in {curveName(fadeInCurve)} · out {curveName(fadeOutCurve, true)}
                   </div>
                 </div>
               </div>
-              <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.55, overflow: "hidden", display: "-webkit-box", WebkitLineClamp: 4, WebkitBoxOrient: "vertical" }}>
+              <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.45, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                 {selected.prompt || "No prompt recorded."}
               </div>
+              <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
+                <Icon name="play" style={{ width: 11, height: 11 }} />
+                play crop
+              </button>
             </div>
 
-            <div style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 10 }}>
               <CropWaveform
                 peaks={peaks[selected.audio_path] ?? null}
                 durationMs={selectedDuration}
@@ -886,20 +891,6 @@ export const ClipStudioView: React.FC = () => {
                   disabled={zoom <= 1}
                   onChange={(e) => setViewportStartMs(Number(e.target.value))}
                 />
-              </div>
-            </div>
-
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              <div className="eyebrow">Envelope</div>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)", lineHeight: 1.7 }}>
-                Drag vertical bars to crop. Drag diamond handles for fade length. Drag round handles up/down for curve shape.
-              </div>
-              <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
-                <Icon name="play" style={{ width: 11, height: 11 }} />
-                play crop
-              </button>
-              <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-4)", lineHeight: 1.6 }}>
-                in {curveName(fadeInCurve)} · out {curveName(fadeOutCurve, true)}
               </div>
             </div>
           </>
