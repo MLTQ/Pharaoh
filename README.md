@@ -230,7 +230,7 @@ cargo run --manifest-path src-tauri/Cargo.toml -- <command>
 
 Release builds expose the same commands through the packaged `pharaoh` binary.
 
-Common commands:
+Common commands are shown below with the release binary name. During development, prefix them with `cargo run --manifest-path src-tauri/Cargo.toml --`.
 
 ```bash
 # Server/config/setup
