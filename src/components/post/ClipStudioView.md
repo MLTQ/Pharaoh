@@ -13,7 +13,7 @@ Post-production clip editor for generated and imported Pharaoh audio assets. It 
 ### `CropWaveform`
 - **Does**: Renders a bucketed, visually normalized waveform with draggable crop bars, fade-length diamond handles, fade-curve handles, zoom/pan viewport support, and trim state tied to `startMs` and `endMs`.
 - **Interacts with**: `PeaksWave`, `Wave`, Clip Studio trim state.
-- **Rationale**: Cropping and fades need direct manipulation rather than only numeric fields; waveform bucketing prevents loaded peak arrays from drawing as thousands of subpixel SVG bars, and normalization is display-only.
+- **Rationale**: Cropping and fades need direct manipulation rather than only numeric fields; waveform bucketing prevents loaded peak arrays from drawing as thousands of subpixel SVG bars, normalization is display-only, and the envelope stroke is intentionally prominent so it remains legible in the compact dock.
 
 ### `saveClip`
 - **Does**: Processes the selected asset into a child WAV and, when requested, writes that output path back to the selected script row.

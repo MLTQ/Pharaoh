@@ -152,8 +152,8 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
   const fadeInMidPct = (startPct + fadeInEndPct) / 2;
   const fadeOutMidPct = (fadeOutStartPct + endPct) / 2;
-  const fadeInCurveYPct = clamp(50 - fadeInCurve * 32, 14, 86);
-  const fadeOutCurveYPct = clamp(50 - fadeOutCurve * 32, 14, 86);
+  const fadeInCurveYPct = clamp(52 - fadeInCurve * 28, 20, 82);
+  const fadeOutCurveYPct = clamp(52 - fadeOutCurve * 28, 20, 82);
 
   const msFromPointer = (clientX: number) => {
     const rect = ref.current?.getBoundingClientRect();
@@ -259,20 +259,27 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
           <svg
             viewBox="0 0 100 100"
             preserveAspectRatio="none"
-            style={{ position: "absolute", inset: 10, zIndex: 4, overflow: "visible", pointerEvents: "none" }}
+            style={{
+              position: "absolute",
+              inset: 7,
+              zIndex: 6,
+              overflow: "visible",
+              pointerEvents: "none",
+              filter: `drop-shadow(0 0 4px ${color})`,
+            }}
           >
             <path
-              d={`M ${startPct} 88 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 16 L ${fadeOutStartPct} 16 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 88`}
+              d={`M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90`}
               fill="none"
               stroke={color}
-              strokeWidth={0.45}
+              strokeWidth={1.25}
               vectorEffect="non-scaling-stroke"
-              opacity={0.95}
+              opacity={1}
             />
             <path
-              d={`M ${startPct} 88 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 16 L ${fadeOutStartPct} 16 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 88 L ${endPct} 96 L ${startPct} 96 Z`}
+              d={`M ${startPct} 90 Q ${fadeInMidPct} ${fadeInCurveYPct} ${fadeInEndPct} 18 L ${fadeOutStartPct} 18 Q ${fadeOutMidPct} ${fadeOutCurveYPct} ${endPct} 90 L ${endPct} 96 L ${startPct} 96 Z`}
               fill={color}
-              opacity={0.08}
+              opacity={0.14}
             />
           </svg>
           {fadeInVisible && (
@@ -282,9 +289,9 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
               style={{
                 position: "absolute",
                 left: `${fadeInEndPct}%`,
-                bottom: 14,
-                width: 15,
-                height: 15,
+                bottom: 9,
+                width: 13,
+                height: 13,
                 transform: "translateX(-50%) rotate(45deg)",
                 background: "var(--bg-1)",
                 border: `1px solid ${color}`,
@@ -302,9 +309,9 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
               style={{
                 position: "absolute",
                 left: `${fadeOutStartPct}%`,
-                bottom: 14,
-                width: 15,
-                height: 15,
+                bottom: 9,
+                width: 13,
+                height: 13,
                 transform: "translateX(-50%) rotate(45deg)",
                 background: "var(--bg-1)",
                 border: `1px solid ${color}`,
