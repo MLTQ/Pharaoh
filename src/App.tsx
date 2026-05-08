@@ -21,6 +21,7 @@ import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
+import { useRenderMetaStore } from "./store/renderMetaStore";
 import type { ViewId, RightTab } from "./lib/types";
 
 const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label: string; model?: string }[] = [
@@ -64,6 +65,7 @@ export default function App() {
   const agentActive = agentActiveUntil !== null && Date.now() < agentActiveUntil;
 
   const scene = scenes.find((s) => s.no === activeSceneNo) ?? scenes[0];
+  const renderMeta = useRenderMetaStore((s) => (scene?.slug ? s.metaBySlug[scene.slug] ?? null : null));
 
   useEffect(() => {
     document.documentElement.dataset.colorTemp = colorTemp === "forest" ? "" : colorTemp;
@@ -434,8 +436,32 @@ export default function App() {
           <span className="tp-time">{scene ? `−${scene.duration}` : ""}</span>
         </div>
         <div className="tp-meta">
-          <div>−14.2 LU · −1.8 dB TP</div>
-          <div style={{ color: "var(--fg-4)", marginTop: 2 }}>48 kHz · 24-bit · stereo</div>
+          {renderMeta ? (() => {
+            // Spec compliance: green if within 1 LU of target, yellow within 2,
+            // red beyond. True peak: green if ≤ -1.0 dBTP, yellow ≤ 0, red above.
+            const dev = Math.abs(renderMeta.integrated_lufs - renderMeta.target_lufs);
+            const lufsColor = dev <= 1 ? "var(--st-rendered)" : dev <= 2 ? "var(--st-gen)" : "var(--sfx)";
+            const tpColor = renderMeta.true_peak_dbtp <= -1.0 ? "var(--st-rendered)"
+                          : renderMeta.true_peak_dbtp <=  0.0 ? "var(--st-gen)"
+                          : "var(--sfx)";
+            return (
+              <>
+                <div title={`Target ${renderMeta.target_lufs.toFixed(1)} LUFS · LRA ${renderMeta.loudness_range_lu.toFixed(1)} LU`}>
+                  <span style={{ color: lufsColor }}>{renderMeta.integrated_lufs.toFixed(1)} LUFS</span>
+                  <span style={{ color: "var(--fg-4)" }}> · </span>
+                  <span style={{ color: tpColor }}>{renderMeta.true_peak_dbtp.toFixed(1)} dBTP</span>
+                </div>
+                <div style={{ color: "var(--fg-4)", marginTop: 2 }}>
+                  48 kHz · 24-bit · stereo · target {renderMeta.target_lufs.toFixed(0)}
+                </div>
+              </>
+            );
+          })() : (
+            <>
+              <div style={{ color: "var(--fg-4)" }}>—  · —</div>
+              <div style={{ color: "var(--fg-4)", marginTop: 2 }}>render to measure</div>
+            </>
+          )}
         </div>
       </div>
       <ToastHost />

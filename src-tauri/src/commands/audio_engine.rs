@@ -343,24 +343,34 @@ pub fn resample_to_48k(path: String, output_path: String) -> Result<()> {
 
 /// Build a scene render from script.csv using ffmpeg filter_complex.
 ///
-/// Only rows with a non-empty `file` and `start_ms` are placed. Each placed clip is
-/// delayed by its `start_ms`, has its gain_db applied, and optionally faded.
-/// All tracks are summed with `amix` and written to
-/// `{projects_dir}/{project_id}/scenes/{scene_slug}/render.wav` at 48 kHz stereo.
+/// The render has three stages:
+///   1. **Per-clip processing** — fades, time-delay, gain, equal-power pan.
+///   2. **Bus structure** — dialogue / music+bed / sfx are submixed separately
+///      with sane defaults: HPF at 80Hz on the dialogue bus, music+bed trimmed
+///      -3 dB, sfx trimmed -1 dB. When DIALOGUE coexists with BED/MUSIC the
+///      music+bed bus is sidechain-ducked against the dialogue sum.
+///   3. **Master chain** — loudnorm to the configured target LUFS (default
+///      -16) followed by an alimiter at -1 dBTP.
+///
+/// After the file is written we run ffmpeg's ebur128 filter to measure
+/// integrated LUFS / true peak / loudness range and write that alongside the
+/// audio at `render.meta.json` for the UI to surface.
 #[tauri::command]
 pub async fn render_scene(
     app: AppHandle,
     project_id: String,
     scene_slug: String,
+    target_lufs: Option<f32>,
 ) -> Result<String> {
     let projects_dir = app_projects_dir(&app)?;
-    render_scene_with_projects_dir(&projects_dir, &project_id, &scene_slug).await
+    render_scene_with_projects_dir(&projects_dir, &project_id, &scene_slug, target_lufs).await
 }
 
 pub async fn render_scene_with_projects_dir(
     projects_dir: &Path,
     project_id: &str,
     scene_slug: &str,
+    target_lufs: Option<f32>,
 ) -> Result<String> {
     let scene_root = scene_dir(projects_dir, project_id, scene_slug);
     let output_path = scene_root.join("render.wav");
@@ -392,11 +402,11 @@ pub async fn render_scene_with_projects_dir(
         cmd.args(["-i", &row.file]);
     }
 
-    // Per-track filter chains
+    // ── Per-clip processing ───────────────────────────────────────────────
     let mut filter_parts: Vec<String> = Vec::new();
 
-    // Categorize each placed row by type so we can implement auto-ducking:
-    // BED + MUSIC tracks are compressed against a sum of all DIALOGUE tracks.
+    // Categorize so we can submix dialogue / music+bed / sfx into separate buses
+    // and apply auto-ducking when DIALOGUE coexists with BED/MUSIC.
     let mut dialogue_idxs: Vec<usize> = Vec::new();
     let mut duck_target_idxs: Vec<usize> = Vec::new();
     let mut passthrough_idxs: Vec<usize> = Vec::new();
@@ -405,6 +415,7 @@ pub async fn render_scene_with_projects_dir(
         let start_ms: u64 = row.start_ms.parse().unwrap_or(0);
         let gain_db: f32 = row.gain_db.parse().unwrap_or(0.0);
         let vol = db_to_linear(gain_db);
+        let pan: f32 = row.pan.parse::<f32>().unwrap_or(0.0).clamp(-1.0, 1.0);
 
         let mut filters: Vec<String> = Vec::new();
 
@@ -436,6 +447,24 @@ pub async fn render_scene_with_projects_dir(
         // Apply track gain
         filters.push(format!("volume={:.4}", vol));
 
+        // Stereoize so the pan filter has two channels regardless of source
+        filters.push("aformat=channel_layouts=stereo".to_string());
+
+        // Equal-power pan. pan ∈ [-1, 1]: -1 = full left, 0 = center, +1 = full right.
+        // L = cos((pan+1)·π/4), R = sin((pan+1)·π/4)
+        if pan.abs() > 1e-3 {
+            let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
+            let lg = theta.cos();
+            let rg = theta.sin();
+            // For mono-upmixed-to-stereo input, c0 == c1. For real stereo input
+            // this slightly downmixes — acceptable since true-stereo SFX/music
+            // are normally panned 0 anyway.
+            filters.push(format!(
+                "pan=stereo|c0={:.4}*c0|c1={:.4}*c1",
+                lg, rg
+            ));
+        }
+
         filter_parts.push(format!("[{}:a]{}[a{}]", i, filters.join(","), i));
 
         let kind = row.track_type.to_uppercase();
@@ -448,70 +477,122 @@ pub async fn render_scene_with_projects_dir(
         }
     }
 
-    // ── Auto-ducking ──────────────────────────────────────────────────────
-    // When DIALOGUE and a BED/MUSIC track both exist, sum all dialogue into a
-    // sidechain bus and run sidechaincompress on each music/bed track. This is
-    // the spec-mandated "dialogue intelligibility above all else" behavior.
-    let mut final_inputs: Vec<String> = Vec::new();
+    // ── Bus structure & ducking ───────────────────────────────────────────
+
+    // Helper: name we use to reference the dialogue-bus pre-mix in the final stage
+    let mut dialogue_bus_label: Option<String> = None;
+    // Music+bed bus may be ducked or straight depending on whether dialogue exists
+    let mut music_bed_bus_label: Option<String> = None;
+    let mut sfx_bus_label: Option<String> = None;
 
     let do_ducking = !dialogue_idxs.is_empty() && !duck_target_idxs.is_empty();
 
-    if do_ducking {
-        // Build [voice_bus] = sum of all dialogue tracks
-        let voice_in: String = dialogue_idxs
-            .iter()
-            .map(|i| format!("[a{}]", i))
-            .collect::<Vec<_>>()
-            .join("");
-        if dialogue_idxs.len() == 1 {
-            // asplit can take a single input directly
-            filter_parts.push(format!("{}aformat=channel_layouts=stereo[voice_bus]", voice_in));
+    // Dialogue bus: sum all dialogue tracks → high-pass → trim → [dialogue_bus_premix]
+    // The HPF at 80Hz kills TTS rumble; the small upward trim isn't applied here
+    // because dialogue is the loudness reference for the rest of the mix.
+    if !dialogue_idxs.is_empty() {
+        let voice_in: String = dialogue_idxs.iter().map(|i| format!("[a{}]", i)).collect();
+        let voice_chain = if dialogue_idxs.len() == 1 {
+            format!("{}aformat=channel_layouts=stereo[voice_bus]", voice_in)
         } else {
-            filter_parts.push(format!(
+            format!(
                 "{}amix=inputs={}:normalize=0:duration=longest,aformat=channel_layouts=stereo[voice_bus]",
                 voice_in,
                 dialogue_idxs.len()
-            ));
-        }
+            )
+        };
+        filter_parts.push(voice_chain);
+        // Apply HPF and a touch of headroom-friendly trim. Then split N+1 ways
+        // when ducking is needed: N copies for sidechain inputs, 1 for the mix.
+        let split_n = if do_ducking { duck_target_idxs.len() + 1 } else { 1 };
+        let outs: String = (0..split_n).map(|j| format!("[vb{}]", j)).collect();
+        filter_parts.push(format!(
+            "[voice_bus]highpass=f=80:p=2,asplit={}{}",
+            split_n, outs
+        ));
+        // The "main" copy used in the final mix is the last split.
+        dialogue_bus_label = Some(format!("[vb{}]", split_n - 1));
+    }
 
-        // Split voice_bus into N copies (one per duck target) plus 1 for the final mix
-        let split_n = duck_target_idxs.len() + 1;
-        let split_outs: String = (0..split_n)
-            .map(|j| format!("[vb{}]", j))
-            .collect::<Vec<_>>()
-            .join("");
-        filter_parts.push(format!("[voice_bus]asplit={}{}", split_n, split_outs));
+    // Music+bed bus: optionally sidechained against dialogue, then -3 dB trim
+    if !duck_target_idxs.is_empty() {
+        let post_duck_labels: Vec<String> = if do_ducking {
+            for (j, &idx) in duck_target_idxs.iter().enumerate() {
+                filter_parts.push(format!(
+                    "[a{}][vb{}]sidechaincompress=threshold=0.05:ratio=8:attack=80:release=300:makeup=1[d{}]",
+                    idx, j, idx
+                ));
+            }
+            duck_target_idxs.iter().map(|i| format!("[d{}]", i)).collect()
+        } else {
+            duck_target_idxs.iter().map(|i| format!("[a{}]", i)).collect()
+        };
+        let mix_in: String = post_duck_labels.join("");
+        let chain = if post_duck_labels.len() == 1 {
+            format!("{}volume=-3.0dB[music_bed_bus]", mix_in)
+        } else {
+            format!(
+                "{}amix=inputs={}:normalize=0:duration=longest,volume=-3.0dB[music_bed_bus]",
+                mix_in,
+                post_duck_labels.len()
+            )
+        };
+        filter_parts.push(chain);
+        music_bed_bus_label = Some("[music_bed_bus]".to_string());
+    }
 
-        // Apply sidechaincompress to each duck target with a dedicated voice_bus copy.
-        // threshold=0.05 ≈ -26 dBFS, ratio=8, attack=80ms, release=300ms — broadcast-style
-        // dialogue ducking. Outputs renamed to [d{i}].
-        for (j, &idx) in duck_target_idxs.iter().enumerate() {
-            filter_parts.push(format!(
-                "[a{}][vb{}]sidechaincompress=threshold=0.05:ratio=8:attack=80:release=300:makeup=1[d{}]",
-                idx, j, idx
-            ));
-        }
+    // SFX bus: sum and -1 dB trim
+    if !passthrough_idxs.is_empty() {
+        let sfx_in: String = passthrough_idxs.iter().map(|i| format!("[a{}]", i)).collect();
+        let chain = if passthrough_idxs.len() == 1 {
+            format!("{}volume=-1.0dB[sfx_bus]", sfx_in)
+        } else {
+            format!(
+                "{}amix=inputs={}:normalize=0:duration=longest,volume=-1.0dB[sfx_bus]",
+                sfx_in,
+                passthrough_idxs.len()
+            )
+        };
+        filter_parts.push(chain);
+        sfx_bus_label = Some("[sfx_bus]".to_string());
+    }
 
-        // Final mix: dialogue (one extra split copy) + ducked music/bed + passthrough SFX
-        final_inputs.push("[vb".to_string() + &duck_target_idxs.len().to_string() + "]");
-        for &idx in &duck_target_idxs { final_inputs.push(format!("[d{}]", idx)); }
-        for &idx in &passthrough_idxs { final_inputs.push(format!("[a{}]", idx)); }
-    } else {
-        // No ducking necessary — straight mix of all processed tracks
-        for i in 0..placed.len() {
-            final_inputs.push(format!("[a{}]", i));
-        }
+    // ── Final premaster mix ───────────────────────────────────────────────
+    let mut final_inputs: Vec<String> = Vec::new();
+    if let Some(l) = &dialogue_bus_label   { final_inputs.push(l.clone()); }
+    if let Some(l) = &music_bed_bus_label  { final_inputs.push(l.clone()); }
+    if let Some(l) = &sfx_bus_label        { final_inputs.push(l.clone()); }
+
+    // Defensive: if for some reason no buses materialized, fall back to a flat amix
+    if final_inputs.is_empty() {
+        for i in 0..placed.len() { final_inputs.push(format!("[a{}]", i)); }
     }
 
     let mix_count = final_inputs.len();
+    let mix_out_label = "[premaster]";
+    if mix_count == 1 {
+        // amix with a single input is illegal in ffmpeg — just rename
+        filter_parts.push(format!("{}anull{}", final_inputs[0], mix_out_label));
+    } else {
+        filter_parts.push(format!(
+            "{}amix=inputs={}:normalize=0:duration=longest{}",
+            final_inputs.join(""),
+            mix_count,
+            mix_out_label
+        ));
+    }
+
+    // ── Master chain: loudnorm + alimiter ────────────────────────────────
+    // Single-pass loudnorm (faster, slightly less precise than two-pass).
+    // alimiter brick-walls to -1 dBTP so we never clip downstream encoders.
+    let target_i = target_lufs.unwrap_or(-16.0).clamp(-30.0, -8.0);
     filter_parts.push(format!(
-        "{}amix=inputs={}:normalize=0:duration=longest[out]",
-        final_inputs.join(""),
-        mix_count
+        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891[master]",
+        mix_out_label, target_i
     ));
 
     cmd.args(["-filter_complex", &filter_parts.join(";")]);
-    cmd.args(["-map", "[out]", "-ar", "48000", "-ac", "2"]);
+    cmd.args(["-map", "[master]", "-ar", "48000", "-ac", "2"]);
     cmd.arg(output_path.to_string_lossy().as_ref());
 
     let result = cmd
@@ -527,5 +608,136 @@ pub async fn render_scene_with_projects_dir(
         )));
     }
 
+    // ── Post-render measurement ────────────────────────────────────────────
+    // Run ebur128 over the rendered file and write the measured loudness /
+    // true-peak / range to render.meta.json. Best-effort — if measurement
+    // fails we still return success since the render itself was fine.
+    let meta_path = output_path.with_file_name(
+        format!("{}.meta.json", output_path.file_name().and_then(|n| n.to_str()).unwrap_or("render.wav")),
+    );
+    if let Ok(meas) = measure_render_loudness(&output_path).await {
+        let meta = serde_json::json!({
+            "render_path": output_path.to_string_lossy(),
+            "target_lufs": target_i,
+            "integrated_lufs": meas.integrated_lufs,
+            "true_peak_dbtp": meas.true_peak_dbtp,
+            "loudness_range_lu": meas.loudness_range_lu,
+            "threshold_lufs": meas.threshold_lufs,
+            "duration_seconds": meas.duration_seconds,
+            "measured_at": chrono::Utc::now().to_rfc3339(),
+        });
+        let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
+    }
+
     Ok(output_path.to_string_lossy().to_string())
+}
+
+/// Read the per-render measurement JSON written next to render.wav.
+/// Returns `Ok(None)` if the file doesn't exist (un-rendered or pre-mastering scene).
+#[tauri::command]
+pub async fn read_render_meta(render_path: String) -> Result<Option<serde_json::Value>> {
+    let path = PathBuf::from(&render_path);
+    let meta_path = path.with_file_name(
+        format!("{}.meta.json", path.file_name().and_then(|n| n.to_str()).unwrap_or("render.wav")),
+    );
+    if !meta_path.exists() { return Ok(None); }
+    let bytes = std::fs::read(&meta_path)
+        .map_err(|e| Error::Other(format!("read {} failed: {}", meta_path.display(), e)))?;
+    let v: serde_json::Value = serde_json::from_slice(&bytes)
+        .map_err(|e| Error::Other(format!("parse {} failed: {}", meta_path.display(), e)))?;
+    Ok(Some(v))
+}
+
+/// Loudness measurements parsed from `ebur128` summary stderr.
+#[derive(Debug, Clone)]
+struct LoudnessMeasurement {
+    integrated_lufs: f32,
+    true_peak_dbtp: f32,
+    loudness_range_lu: f32,
+    threshold_lufs: f32,
+    duration_seconds: f32,
+}
+
+async fn measure_render_loudness(path: &Path) -> Result<LoudnessMeasurement> {
+    // ffmpeg -i <path> -af ebur128=peak=true -f null -  prints a "Summary:" block to stderr.
+    let result = tokio::process::Command::new("ffmpeg")
+        .arg("-nostats")
+        .arg("-hide_banner")
+        .args(["-i", &path.to_string_lossy()])
+        .args(["-af", "ebur128=peak=true"])
+        .args(["-f", "null", "-"])
+        .output()
+        .await
+        .map_err(|e| Error::Other(format!("ffmpeg ebur128 failed to start: {}", e)))?;
+    if !result.status.success() {
+        return Err(Error::Other("ffmpeg ebur128 returned non-zero".into()));
+    }
+    let stderr = String::from_utf8_lossy(&result.stderr);
+    parse_ebur128_summary(&stderr)
+        .ok_or_else(|| Error::Other("could not find ebur128 Summary block in ffmpeg output".into()))
+}
+
+/// Parse the ebur128 "Summary:" block. Robust to small ffmpeg version
+/// differences in label spacing — finds `I:`, `Range:`, `True peak:`,
+/// `Threshold:`, and the input file `Duration:`.
+fn parse_ebur128_summary(stderr: &str) -> Option<LoudnessMeasurement> {
+    let summary_start = stderr.rfind("Summary:")?;
+    let summary = &stderr[summary_start..];
+
+    fn extract_lufs(block: &str, label: &str) -> Option<f32> {
+        for line in block.lines() {
+            let trimmed = line.trim();
+            if trimmed.starts_with(label) {
+                // Lines look like:  "    I:         -16.2 LUFS"
+                // Find the number — first sequence that parses as a float.
+                let after = trimmed[label.len()..].trim();
+                let mut acc = String::new();
+                for c in after.chars() {
+                    if c.is_ascii_digit() || c == '-' || c == '+' || c == '.' {
+                        acc.push(c);
+                    } else if !acc.is_empty() {
+                        break;
+                    }
+                }
+                if let Ok(v) = acc.parse::<f32>() { return Some(v); }
+            }
+        }
+        None
+    }
+
+    // Integrated loudness ("I:") is reported in LUFS in the Summary block.
+    let integrated = extract_lufs(summary, "I:")?;
+    let lra = extract_lufs(summary, "LRA:").or_else(|| extract_lufs(summary, "Range:")).unwrap_or(0.0);
+    let tp = extract_lufs(summary, "True peak:")
+        .or_else(|| {
+            // Some builds report the peak as "Peak:" inside the Summary's True-peak block.
+            // We scan for any "Peak:" whose preceding line mentioned "True peak" or "Peak".
+            extract_lufs(summary, "Peak:")
+        })
+        .unwrap_or(-99.0);
+    let threshold = extract_lufs(summary, "Threshold:").unwrap_or(-70.0);
+
+    // Best-effort duration: find "Duration:" earlier in the full stderr (not in Summary)
+    // It looks like "Duration: 00:00:30.10". We don't strictly need it for v1.
+    let duration_seconds = stderr
+        .lines()
+        .find(|l| l.trim_start().starts_with("Duration:"))
+        .and_then(|l| {
+            let after = l.split("Duration:").nth(1)?;
+            let token = after.split(',').next()?.trim();
+            let mut parts = token.split(':');
+            let h: f32 = parts.next()?.parse().ok()?;
+            let m: f32 = parts.next()?.parse().ok()?;
+            let s: f32 = parts.next()?.parse().ok()?;
+            Some(h * 3600.0 + m * 60.0 + s)
+        })
+        .unwrap_or(0.0);
+
+    Some(LoudnessMeasurement {
+        integrated_lufs: integrated,
+        true_peak_dbtp: tp,
+        loudness_range_lu: lra,
+        threshold_lufs: threshold,
+        duration_seconds,
+    })
 }

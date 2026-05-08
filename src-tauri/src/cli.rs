@@ -618,7 +618,7 @@ async fn compose_render_scene(
     scene_slug: &str,
 ) -> Result<()> {
     let projects_dir = PathBuf::from(&config.projects_dir);
-    let output_path = render_scene_with_projects_dir(&projects_dir, project_id, scene_slug).await?;
+    let output_path = render_scene_with_projects_dir(&projects_dir, project_id, scene_slug, None).await?;
     print_json(&json!({
         "project_id": project_id,
         "scene_slug": scene_slug,

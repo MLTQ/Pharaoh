@@ -269,9 +269,28 @@ export const resampleTo48k = (path: string, outputPath: string): Promise<void> =
   invoke("resample_to_48k", { path, outputPath });
 
 /** Render a scene to render.wav by mixing all placed script rows via ffmpeg filter_complex.
- *  Returns the output file path. */
-export const renderScene = (projectId: string, sceneSlug: string): Promise<string> =>
-  invoke("render_scene", { projectId, sceneSlug });
+ *  Returns the output file path. `targetLufs` defaults to -16 (podcast/streaming). */
+export const renderScene = (
+  projectId: string,
+  sceneSlug: string,
+  targetLufs?: number,
+): Promise<string> =>
+  invoke("render_scene", { projectId, sceneSlug, targetLufs: targetLufs ?? null });
+
+export interface RenderMeta {
+  render_path: string;
+  target_lufs: number;
+  integrated_lufs: number;
+  true_peak_dbtp: number;
+  loudness_range_lu: number;
+  threshold_lufs: number;
+  duration_seconds: number;
+  measured_at: string;
+}
+
+/** Read render.meta.json next to render.wav (written by render_scene). */
+export const readRenderMeta = (renderPath: string): Promise<RenderMeta | null> =>
+  invoke("read_render_meta", { renderPath });
 
 // ── LLM (Anthropic) ─────────────────────────────────────────────────────────
 

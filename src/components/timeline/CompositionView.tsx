@@ -6,7 +6,8 @@ import { FountainEditor } from "./FountainEditor";
 import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
-import { readScript, updateScriptRow, writeScript, renderScene } from "../../lib/tauriCommands";
+import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
+import { useRenderMetaStore } from "../../store/renderMetaStore";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow } from "../../lib/types";
 
 type ScriptMode = "write" | "direct" | "mix";
@@ -114,13 +115,16 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [renderPath, setRenderPath]   = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mode, setMode] = useState<ScriptMode>("direct");
+  // Master target loudness — podcast/streaming default. -14 = Spotify, -16 = podcast,
+  // -18 = older Apple Podcasts, -23 = broadcast.
+  const [targetLufs, setTargetLufs] = useState<number>(-16);
   // Per-row pending writes — keyed by row index so concurrent edits across rows
   // can't clobber each other. flushAllPendingWrites() drains the map immediately.
   const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
   // Whole-script write debouncer used by Fountain mode (replaces all rows at once)
   const fountainSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const { realProjectId, activeSceneSlug, characters } = useProjectStore();
+  const { realProjectId, activeSceneSlug, characters, projectsDir } = useProjectStore();
   const { jobs } = useJobStore();
 
   // ── Script rows ──────────────────────────────────────────────────────────
@@ -257,16 +261,33 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
   // ── Render ───────────────────────────────────────────────────────────────
 
+  const setMeta = useRenderMetaStore((s) => s.setMeta);
+
   const handleRender = async () => {
     if (!realProjectId || !activeSceneSlug) return;
     setRenderState("rendering"); setRenderPath(null); setRenderError(null);
     try {
-      const outPath = await renderScene(realProjectId, activeSceneSlug);
+      const outPath = await renderScene(realProjectId, activeSceneSlug, targetLufs);
       setRenderPath(outPath); setRenderState("done");
+      // After render, read the loudness meta the master chain wrote and surface
+      // it in the transport bar. Best-effort — if the meta read fails we still
+      // mark the render done.
+      try {
+        const meta = await readRenderMeta(outPath);
+        if (meta) setMeta(activeSceneSlug, meta);
+      } catch (_) { /* swallow */ }
     } catch (e) {
       setRenderError(String(e)); setRenderState("error");
     }
   };
+
+  // On scene switch, eagerly load any prior render meta that exists on disk so
+  // switching back into a scene shows its measured loudness immediately.
+  useEffect(() => {
+    if (!realProjectId || !activeSceneSlug || !projectsDir) return;
+    const renderPath = `${projectsDir}/${realProjectId}/scenes/${activeSceneSlug}/render.wav`;
+    readRenderMeta(renderPath).then((m) => { if (m) setMeta(activeSceneSlug, m); }).catch(() => {});
+  }, [realProjectId, activeSceneSlug, projectsDir, setMeta]);
 
   // ── Misc ─────────────────────────────────────────────────────────────────
 
@@ -352,6 +373,29 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         </div>
         <div className="comp-header-actions">
           <button className="btn"><Icon name="sparkle" style={{ width: 14, height: 14 }} /> Agent assist</button>
+          {/* Master target loudness — sets the loudnorm `I` parameter in render_scene */}
+          <select
+            value={targetLufs}
+            onChange={(e) => setTargetLufs(Number(e.target.value))}
+            disabled={renderState === "rendering"}
+            title="Master target loudness — applied by loudnorm + alimiter on render"
+            style={{
+              background: "var(--bg-2)",
+              color: "var(--fg-1)",
+              border: "1px solid var(--line-2)",
+              borderRadius: 3,
+              fontFamily: "var(--font-mono)",
+              fontSize: 9.5,
+              letterSpacing: "0.05em",
+              padding: "4px 6px",
+              cursor: "pointer",
+            }}
+          >
+            <option value={-14}>-14 LUFS · Spotify</option>
+            <option value={-16}>-16 LUFS · Podcast</option>
+            <option value={-18}>-18 LUFS · Apple</option>
+            <option value={-23}>-23 LUFS · Broadcast</option>
+          </select>
           {renderState === "done" && renderPath ? (
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--st-rendered)" }}>render.wav</span>
