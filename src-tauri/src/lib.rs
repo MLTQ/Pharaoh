@@ -80,6 +80,7 @@ pub fn run() {
             commands::audio_engine::process_clip_asset,
             commands::audio_engine::resample_to_48k,
             commands::audio_engine::render_scene,
+            commands::audio_engine::read_render_meta,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
