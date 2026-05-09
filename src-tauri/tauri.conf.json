@@ -24,7 +24,18 @@
       }
     ],
     "security": {
-      "csp": null
+      "csp": null,
+      "assetProtocol": {
+        "enable": true,
+        "scope": [
+          "$HOME/**",
+          "$APPDATA/**",
+          "$APPLOCALDATA/**",
+          "/tmp/**",
+          "/private/tmp/**",
+          "/var/folders/**"
+        ]
+      }
     }
   },
   "bundle": {

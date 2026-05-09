@@ -57,7 +57,17 @@ export const useAudioStore = create<AudioState>((set, get) => ({
 
       await new Promise<void>((resolve, reject) => {
         audio.onloadedmetadata = () => resolve();
-        audio.onerror = () => reject(new Error("audio preview failed to load"));
+        audio.onerror = () => {
+          // MediaError code 4 (MEDIA_ERR_SRC_NOT_SUPPORTED) usually means the
+          // asset protocol isn't reaching the file — most often because
+          // app.security.assetProtocol.scope in tauri.conf.json doesn't cover
+          // this path. Surface that explicitly instead of a vague "failed".
+          const code = audio.error?.code;
+          const detail = code === 4
+            ? `src not reachable (asset protocol scope may not cover this path)`
+            : audio.error?.message || `MediaError code ${code ?? "?"}`;
+          reject(new Error(`audio preview failed to load: ${detail} — path=${path}`));
+        };
       });
 
       const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
