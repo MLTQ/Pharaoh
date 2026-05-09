@@ -16,7 +16,7 @@ use crate::commands::audio_engine::{
     ImportAudioRequest,
 };
 use crate::commands::audio_engine::{
-    normalize_clip, render_scene_with_projects_dir, resample_to_48k,
+    normalize_clip, render_episode_with_projects_dir, render_scene_with_projects_dir, resample_to_48k,
 };
 use crate::commands::audio_enhance::{output_path_for, write_upscale_sidecar};
 use crate::commands::inference::finalize_generation_output;
@@ -148,6 +148,11 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         {
             compose_render_scene(&config, project_id, scene_slug).await
         }
+        [group, action, project_id, rest @ ..]
+            if group == "compose" && action == "final" =>
+        {
+            compose_final(&config, project_id, rest).await
+        }
         [group, action, rest @ ..] if group == "generate" && action == "tts-custom" => {
             generate_tts_custom(&config, rest).await
         }
@@ -235,6 +240,7 @@ fn usage() -> &'static str {
   pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
+  pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
   pharaoh post import <project_id> <source_audio> [--label <text>]
   pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>] [--fade-in-ms <n>] [--fade-out-ms <n>] [--fade-in-curve tri|qsin|qua] [--fade-out-curve tri|qsin|qua]
   pharaoh post normalize <input_wav> [--target-lufs -16]
@@ -623,6 +629,28 @@ async fn compose_render_scene(
         "project_id": project_id,
         "scene_slug": scene_slug,
         "output_path": output_path,
+    }))
+}
+
+/// `pharaoh compose final <project> [--crossfade <ms>] [--target-lufs <n>]`
+async fn compose_final(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let crossfade_ms: u64 = flag_parse(&flags, "crossfade", 500)?;
+    let target_lufs: Option<f32> = flag_opt(&flags, "target_lufs")
+        .map(|v| v.parse::<f32>().map_err(|_| Error::Other("invalid --target-lufs".into())))
+        .transpose()?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let output_path = render_episode_with_projects_dir(
+        &projects_dir, project_id, crossfade_ms, target_lufs, None,
+    ).await?;
+    print_json(&json!({
+        "project_id": project_id,
+        "output_path": output_path,
+        "crossfade_ms": crossfade_ms,
     }))
 }
 

@@ -14,6 +14,7 @@ import { SettingsView } from "./components/settings/SettingsView";
 import { ModelsView } from "./components/models/ModelsView";
 import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ClipStudioView } from "./components/post/ClipStudioView";
+import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
@@ -156,6 +157,7 @@ export default function App() {
     if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
     if (view === "clip-studio") return [{ k: "Project", v: project.title }, { k: "Post", v: "Clip Studio", active: true }];
     if (view === "upscale")     return [{ k: "Project", v: project.title }, { k: "Post", v: "Audio Upscale", active: true }];
+    if (view === "final")       return [{ k: "Project", v: project.title }, { k: "Post", v: "Final Assembly", active: true }];
     if (view === "composition" && scene) {
       return [{ k: "Project", v: project.title }, { k: "Tier II", v: scene.no }, { k: "Composition", v: scene.title, active: true }];
     }
@@ -435,6 +437,11 @@ export default function App() {
                 <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
                 <span>Audio Upscale</span>
               </div>
+              <div className="side-section">Deliver</div>
+              <div className={`side-item ${view === "final" ? "active" : ""}`} onClick={() => setView("final")}>
+                <span className="ico" style={{ color: "var(--st-rendered)" }}><Icon name="download" style={{ width: 14, height: 14 }} /></span>
+                <span>Final Assembly</span>
+              </div>
             </>
           )}
 
@@ -538,6 +545,7 @@ export default function App() {
         {view === "models"   && <ModelsView />}
         {view === "clip-studio" && <ClipStudioView />}
         {view === "upscale"  && <UpscaleView />}
+        {view === "final"    && <FinalAssemblyView />}
         {view === "pyramid" && (
           <PyramidView
             project={project}

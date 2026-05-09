@@ -3,7 +3,8 @@ import { Icon, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { FountainEditor } from "./FountainEditor";
-import { deriveSlug, useProjectStore } from "../../store/projectStore";
+import { TakesPopover } from "./TakesPopover";
+import { useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
@@ -106,10 +107,11 @@ interface DraggableClipProps {
   isSelected: boolean;
   onSelect: () => void;
   onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
+  onRequestTakes: (rowIndex: number, x: number, y: number) => void;
 }
 
 const DraggableClip: React.FC<DraggableClipProps> = ({
-  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove,
+  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove, onRequestTakes,
 }) => {
   const pointerStartX = useRef(0);
   const [dragOffsetPx, setDragOffsetPx] = useState(0);
@@ -154,6 +156,15 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
+      onContextMenu={(e) => {
+        // Right-click → open Takes popover for this clip's source row.
+        // Only meaningful for clips derived from a real script row.
+        if (clip.row_index == null) return;
+        e.preventDefault();
+        e.stopPropagation();
+        onRequestTakes(clip.row_index, e.clientX, e.clientY);
+      }}
+      title="Right-click for takes"
     >
       <div className="clip-label">{clip.label}</div>
       <div className="clip-wave">
@@ -198,6 +209,8 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   // Master target loudness — podcast/streaming default. -14 = Spotify, -16 = podcast,
   // -18 = older Apple Podcasts, -23 = broadcast.
   const [targetLufs, setTargetLufs] = useState<number>(-16);
+  // Take family popover anchor — set on right-click of a timeline clip
+  const [takesPopover, setTakesPopover] = useState<{ rowIndex: number; x: number; y: number } | null>(null);
   // Per-row pending writes — keyed by row index so concurrent edits across rows
   // can't clobber each other. flushAllPendingWrites() drains the map immediately.
   const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
@@ -781,6 +794,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                       isSelected={selected === `${ti}-${ci}`}
                       onSelect={() => setSelected(`${ti}-${ci}`)}
                       onMove={handleClipMove}
+                      onRequestTakes={(rowIndex, x, y) => setTakesPopover({ rowIndex, x, y })}
                     />
                   ))}
                 </div>
@@ -793,6 +807,22 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         )}
 
       </div>
+
+      {/* Takes popover — anchored to the right-clicked clip */}
+      {takesPopover && (
+        <TakesPopover
+          projectId={realProjectId}
+          sceneSlug={activeSceneSlug}
+          rowIndex={takesPopover.rowIndex}
+          row={scriptRows[takesPopover.rowIndex] ?? null}
+          x={takesPopover.x}
+          y={takesPopover.y}
+          onClose={() => setTakesPopover(null)}
+          onTakeApplied={(newRow) => {
+            setScriptRows((prev) => prev.map((r, i) => i === takesPopover.rowIndex ? newRow : r));
+          }}
+        />
+      )}
     </div>
   );
 };
