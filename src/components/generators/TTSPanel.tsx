@@ -6,7 +6,8 @@ import { SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
-import { getWaveformPeaks, listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import { usePeaksStore } from "../../store/peaksStore";
 import type { GeneratedAudioAsset, MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
@@ -87,14 +88,18 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
       .catch(() => {});
   }, [realProjectId, sceneSlug, completedJobsKey]);
 
+  // Pull peaks through the session-scoped store. First call per session +
+  // resolution hits Rust, which itself reads/writes the on-disk cache; every
+  // subsequent call is an in-memory map lookup.
+  const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
   useEffect(() => {
     for (const asset of generatedAssets) {
       if (assetPeaks[asset.audio_path]) continue;
-      getWaveformPeaks(asset.audio_path, 120)
+      fetchPeaks(asset.audio_path, 120)
         .then((peaks) => setAssetPeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
         .catch(() => {});
     }
-  }, [generatedAssets, assetPeaks]);
+  }, [generatedAssets, assetPeaks, fetchPeaks]);
 
   const handleSelectSpeaker = (id: string) => {
     setSpeakerId(id);
