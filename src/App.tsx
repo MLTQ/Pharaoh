@@ -22,6 +22,7 @@ import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
 import { useRenderMetaStore } from "./store/renderMetaStore";
+import { useAudioStore } from "./store/audioStore";
 import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
 import { WORKSPACE_OF } from "./lib/types";
 
@@ -70,6 +71,10 @@ export default function App() {
   const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
   const activeWorkspace = WORKSPACE_OF[view];
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
+  // The transport bar reflects whatever's actually playing through audioStore.
+  // The legacy playbackStore is stub state; audioStore is the real engine.
+  const audioPlayingPath = useAudioStore((s) => s.playing);
+  const stopAudio       = useAudioStore((s) => s.stop);
   const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
@@ -606,8 +611,18 @@ export default function App() {
       <div className="transport">
         <div className="tp-controls">
           <button className="tp-btn"><Icon name="skip_back" style={{ width: 14, height: 14 }} /></button>
-          <button className="tp-btn play" onClick={() => isPlaying ? pause() : play()}>
-            <Icon name={isPlaying ? "pause" : "play"} style={{ width: 12, height: 12 }} />
+          {/* If something is actually playing through audioStore, this button
+              stops it. Otherwise it falls back to the placeholder transport
+              state so existing seeded UIs still toggle. */}
+          <button
+            className="tp-btn play"
+            onClick={() => {
+              if (audioPlayingPath) { stopAudio(); return; }
+              isPlaying ? pause() : play();
+            }}
+            title={audioPlayingPath ? "Stop preview" : isPlaying ? "Pause" : "Play"}
+          >
+            <Icon name={(audioPlayingPath || isPlaying) ? "pause" : "play"} style={{ width: 12, height: 12 }} />
           </button>
           <button className="tp-btn"><Icon name="skip_fwd" style={{ width: 14, height: 14 }} /></button>
           <button className="tp-btn" style={{ color: "oklch(0.78 0.14 30)" }}>
