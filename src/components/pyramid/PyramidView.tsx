@@ -1,8 +1,10 @@
 import React, { useRef, useEffect, useState } from "react";
 import { Icon, StatusRing } from "../shared/atoms";
 import type { MockProject, MockCastMember, MockScene } from "../../lib/types";
-import { useProjectStore } from "../../store/projectStore";
-import { createScene } from "../../lib/tauriCommands";
+import { useProjectStore, deriveSlug } from "../../store/projectStore";
+import { useJobStore } from "../../store/jobStore";
+import { createScene, readScript } from "../../lib/tauriCommands";
+import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
 
 interface PyramidViewProps {
   project: MockProject;
@@ -29,6 +31,35 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
   const [formError, setFormError] = useState<string | null>(null);
   const [formBusy, setFormBusy] = useState(false);
+
+  // Per-scene asset pip counts, keyed by scene number (e.g. "S01"). Loads
+  // lazily once we have a real project and refreshes when a job completes for
+  // that scene (so newly generated/placed clips light up the pip row).
+  const [pipsByScene, setPipsByScene] = useState<Record<string, ScenePips>>({});
+  const completedJobsKey = useJobStore((s) =>
+    s.jobs
+      .filter((j) => j.status === "complete")
+      .map((j) => `${j.id}:${j.scene_slug ?? ""}`)
+      .join("|"),
+  );
+  useEffect(() => {
+    if (!realProjectId) { setPipsByScene({}); return; }
+    let cancelled = false;
+    (async () => {
+      const next: Record<string, ScenePips> = {};
+      await Promise.all(scenes.map(async (s) => {
+        const slug = s.slug ?? deriveSlug(s.no, s.title);
+        try {
+          const rows = await readScript({ projectId: realProjectId, sceneSlug: slug });
+          next[s.no] = rowsToPips(rows);
+        } catch {
+          next[s.no] = emptyPips();
+        }
+      }));
+      if (!cancelled) setPipsByScene(next);
+    })();
+    return () => { cancelled = true; };
+  }, [realProjectId, scenes.map((s) => `${s.no}:${s.slug ?? ""}`).join("|"), completedJobsKey]);
 
   useEffect(() => {
     const fit = () => {
@@ -276,12 +307,28 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
           {/* Scene plates */}
           {scenes.map((s, i) => {
             const x = startX + i * (PLATE_W + plateGap);
-            const nodes = s.nodes ?? [];
-            const totalNodes = nodes.reduce((a, nd) => a + nd.n, 0);
+            // Derive pip ordering from real script rows (falls back to mock
+            // nodes for demo mode, then to empty in real-project edge cases)
+            const pips = pipsByScene[s.no];
+            const realPipList: { kind: "tts" | "sfx" | "music"; placed: boolean }[] = [];
+            if (pips) {
+              (["tts", "sfx", "music"] as const).forEach((k) => {
+                for (let p = 0; p < pips[k].placed; p++) realPipList.push({ kind: k, placed: true });
+                for (let p = 0; p < pips[k].planned; p++) realPipList.push({ kind: k, placed: false });
+              });
+            } else {
+              // Mock fallback (demo data) — treat all as placed
+              (s.nodes ?? []).forEach((g) => {
+                for (let p = 0; p < g.n; p++) realPipList.push({ kind: g.k, placed: true });
+              });
+            }
             const NODE_SIZE = 10, NODE_GAP = 4;
-            const nodesW = totalNodes * NODE_SIZE + (totalNodes - 1) * NODE_GAP;
+            const MAX_PIPS = Math.floor((PLATE_W - 24) / (NODE_SIZE + NODE_GAP));
+            const visiblePips = realPipList.slice(0, MAX_PIPS);
+            const overflow = realPipList.length - visiblePips.length;
+            const totalNodes = visiblePips.length;
+            const nodesW = totalNodes * NODE_SIZE + Math.max(0, totalNodes - 1) * NODE_GAP;
             const nodesStart = (PLATE_W - nodesW) / 2;
-            let acc = 0;
 
             return (
               <React.Fragment key={s.no}>
@@ -307,32 +354,49 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                   </div>
                 </div>
 
-                {/* Connector + asset nodes */}
+                {/* Connector + asset pips */}
                 <svg style={{ position: "absolute", left: x, top: BASE_Y + PLATE_H, width: PLATE_W, height: 36, pointerEvents: "none" }}>
                   <line x1={PLATE_W / 2} y1="0" x2={PLATE_W / 2} y2="14" stroke="oklch(0.5 0.025 145 / 0.5)" strokeWidth="1" strokeDasharray="2 2" />
-                  <line x1={nodesStart - 4} y1="14" x2={nodesStart + nodesW + 4} y2="14" stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="1" />
+                  {totalNodes > 0 && (
+                    <line x1={nodesStart - 4} y1="14" x2={nodesStart + nodesW + 4} y2="14" stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="1" />
+                  )}
                 </svg>
-                {nodes.map((group) => {
-                  const color = group.k === "tts" ? "var(--tts)" : group.k === "sfx" ? "var(--sfx)" : "var(--music)";
-                  const items = Array.from({ length: group.n }, (_, j) => {
-                    const cx = x + nodesStart + acc * (NODE_SIZE + NODE_GAP);
-                    acc++;
-                    return (
-                      <div
-                        key={`${group.k}-${j}`}
-                        title={`${group.k.toUpperCase()} asset`}
-                        style={{
-                          position: "absolute",
-                          left: cx, top: BASE_Y + PLATE_H + 18,
-                          width: NODE_SIZE, height: NODE_SIZE,
-                          borderRadius: 2, background: color, opacity: 0.85,
-                          border: `1px solid color-mix(in oklch, ${color} 60%, black)`,
-                        }}
-                      />
-                    );
-                  });
-                  return items;
+                {visiblePips.map((pip, idx) => {
+                  const color = pip.kind === "tts" ? "var(--tts)" : pip.kind === "music" ? "var(--music)" : "var(--sfx)";
+                  const cx = x + nodesStart + idx * (NODE_SIZE + NODE_GAP);
+                  // Filled square for placed; hollow ring for planned-but-unplaced
+                  const placed = pip.placed;
+                  return (
+                    <div
+                      key={idx}
+                      title={`${pip.kind.toUpperCase()} · ${placed ? "placed" : "planned"}`}
+                      style={{
+                        position: "absolute",
+                        left: cx, top: BASE_Y + PLATE_H + 18,
+                        width: NODE_SIZE, height: NODE_SIZE,
+                        borderRadius: pip.kind === "tts" ? "50%" : 2,
+                        background: placed ? color : "transparent",
+                        opacity: placed ? 0.92 : 0.65,
+                        border: `1.5px solid color-mix(in oklch, ${color} ${placed ? 60 : 90}%, black)`,
+                        boxShadow: placed ? `0 0 4px color-mix(in oklch, ${color} 40%, transparent)` : "none",
+                      }}
+                    />
+                  );
                 })}
+                {overflow > 0 && (
+                  <div
+                    title={`+${overflow} more`}
+                    style={{
+                      position: "absolute",
+                      left: x + nodesStart + visiblePips.length * (NODE_SIZE + NODE_GAP),
+                      top: BASE_Y + PLATE_H + 17,
+                      fontFamily: "var(--font-mono)", fontSize: 9,
+                      color: "var(--fg-3)", letterSpacing: "0.04em",
+                    }}
+                  >
+                    +{overflow}
+                  </div>
+                )}
               </React.Fragment>
             );
           })}
