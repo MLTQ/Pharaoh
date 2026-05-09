@@ -22,19 +22,36 @@ import { useUiStore } from "./store/uiStore";
 import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
 import { useRenderMetaStore } from "./store/renderMetaStore";
-import type { ViewId, RightTab } from "./lib/types";
+import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
+import { WORKSPACE_OF } from "./lib/types";
 
-const RAIL_ITEMS: { id: ViewId; icon: Parameters<typeof Icon>[0]["name"]; label: string; model?: string }[] = [
-  { id: "pyramid",     icon: "pyramid",   label: "Pyramid" },
-  { id: "composition", icon: "timeline",  label: "Composition" },
-  { id: "bible",       icon: "book",      label: "Story Bible" },
-  { id: "characters",  icon: "person",    label: "Cast & Voices" },
-  { id: "tts",         icon: "mic",       label: "Voice / TTS",    model: "tts" },
-  { id: "sfx",         icon: "waves",     label: "Sound design",   model: "sfx" },
-  { id: "music",       icon: "music",     label: "Score",          model: "music" },
-  { id: "clip-studio", icon: "fit",       label: "Clip Studio" },
-  { id: "upscale",     icon: "sparkle",   label: "Audio Upscale" },
-  { id: "models",      icon: "settings",  label: "Models" },
+// ── Rail = workspace switcher ────────────────────────────────────────────────
+//
+// Five top-level workspace modes. The sidebar's content swaps based on which
+// workspace is active. Voice/SFX/Score live inside the Scenes workspace as
+// inline tabs, not separate top-level destinations.
+
+type RailItem = {
+  id: WorkspaceId;
+  icon: Parameters<typeof Icon>[0]["name"];
+  label: string;
+};
+
+const RAIL_WORKSPACES: RailItem[] = [
+  { id: "pyramid", icon: "pyramid",  label: "Pyramid" },
+  { id: "story",   icon: "book",     label: "Story" },
+  { id: "scenes",  icon: "timeline", label: "Scenes" },
+  { id: "polish",  icon: "sparkle",  label: "Polish" },
+  { id: "app",     icon: "settings", label: "App" },
+];
+
+// Sub-tabs within the Scenes workspace — shown as a tab strip above the canvas
+// when a scene workspace view is active.
+const SCENE_SUBTABS: { id: ViewId; label: string; accent: string }[] = [
+  { id: "composition", label: "Compose", accent: "var(--fg-1)" },
+  { id: "tts",         label: "Voice",   accent: "var(--tts)" },
+  { id: "sfx",         label: "Sound",   accent: "var(--sfx)" },
+  { id: "music",       label: "Score",   accent: "var(--music)" },
 ];
 
 const STATUS_COLOR: Record<string, string> = {
@@ -50,7 +67,8 @@ export default function App() {
     setActiveScene, updateScene, characters, realProjectId,
   } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
-  const { view, rightTab, colorTemp, density, setView, setRightTab, agentActiveUntil } = useUiStore();
+  const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
+  const activeWorkspace = WORKSPACE_OF[view];
   const { isPlaying, play, pause, positionMs } = usePlaybackStore();
   const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
 
@@ -142,20 +160,18 @@ export default function App() {
     return [{ k: "Project", v: project.title, active: true }];
   })();
 
-  const sidebarTitle: Partial<Record<ViewId, { eyebrow: string; title: string }>> = {
-    pyramid:     { eyebrow: "Workspace",  title: "Pyramid" },
-    composition: { eyebrow: "Workspace",  title: "Composition" },
-    bible:       { eyebrow: "Workspace",  title: "Story Bible" },
-    characters:  { eyebrow: "Tier I",     title: "Cast & Voices" },
-    tts:         { eyebrow: "Generation", title: "Voice · Dialogue" },
-    sfx:         { eyebrow: "Generation", title: "Sound design" },
-    music:       { eyebrow: "Generation", title: "Score" },
-    "clip-studio": { eyebrow: "Post",     title: "Clip Studio" },
-    upscale:     { eyebrow: "Post",       title: "Audio Upscale" },
-    settings:    { eyebrow: "App",        title: "Settings" },
-    models:      { eyebrow: "App",        title: "Models" },
+  // Sidebar header is now keyed by workspace, not view.
+  const sidebarTitle: Record<WorkspaceId, { eyebrow: string; title: string }> = {
+    pyramid: { eyebrow: "Project", title: "Pyramid" },
+    story:   { eyebrow: "Tier I",  title: "Story" },
+    scenes:  { eyebrow: "Tier II", title: "Scenes" },
+    polish:  { eyebrow: "Post",    title: "Polish" },
+    app:     { eyebrow: "App",     title: "Settings" },
   };
-  const sidebar = sidebarTitle[view] ?? { eyebrow: "Workspace", title: "" };
+  const sidebar = sidebarTitle[activeWorkspace];
+
+  // Per-workspace running-job badge counts on the rail
+  const sceneJobsRunning = jobs.filter((j) => j.status === "running" && (j.model === "tts" || j.model === "sfx" || j.model === "music")).length;
 
   return (
     <div className="app">
@@ -227,33 +243,31 @@ export default function App() {
         )}
       </div>
 
-      {/* ── RAIL ────────────────────────────────────────────────────────── */}
+      {/* ── RAIL (workspace switcher) ────────────────────────────────── */}
       <div className="rail">
-        {RAIL_ITEMS.map((r) => (
-          <button
-            key={r.id}
-            className={`rail-btn ${view === r.id ? "active" : ""}`}
-            title={r.label}
-            onClick={() => setView(r.id)}
-          >
-            <Icon name={r.icon} style={{ width: 18, height: 18 }} />
-            {r.model === "tts"   && <span className="rail-badge" style={{ background: "var(--tts)" }}>2</span>}
-            {r.model === "sfx"   && <span className="rail-badge" style={{ background: "var(--sfx)" }}>1</span>}
-            {r.model === "music" && <span className="rail-badge" style={{ background: "var(--music)" }}>1</span>}
-          </button>
-        ))}
+        {RAIL_WORKSPACES.map((r) => {
+          const isActive = activeWorkspace === r.id;
+          // Show running-job badge on Scenes when a generation is in flight
+          const badge = r.id === "scenes" && sceneJobsRunning > 0 ? sceneJobsRunning : null;
+          return (
+            <button
+              key={r.id}
+              className={`rail-btn ${isActive ? "active" : ""}`}
+              title={r.label}
+              onClick={() => setWorkspace(r.id)}
+            >
+              <Icon name={r.icon} style={{ width: 18, height: 18 }} />
+              {badge != null && (
+                <span className="rail-badge" style={{ background: "var(--st-gen)" }}>{badge}</span>
+              )}
+            </button>
+          );
+        })}
         <div className="rail-spacer" />
-        <button
-          className={`rail-btn ${view === "settings" ? "active" : ""}`}
-          title="Settings"
-          onClick={() => setView("settings")}
-        >
-          <Icon name="settings" style={{ width: 18, height: 18 }} />
-        </button>
         <button
           className="rail-btn"
           title="Switch project"
-          onClick={() => { /* clear project to show launcher */ useProjectStore.setState({ realProjectId: null, scenes: [], characters: [] }); setView("pyramid"); }}
+          onClick={() => { useProjectStore.setState({ realProjectId: null, scenes: [], characters: [] }); setView("pyramid"); }}
         >
           <Icon name="folder" style={{ width: 18, height: 18 }} />
         </button>
@@ -266,94 +280,205 @@ export default function App() {
           <span className="title">{sidebar.title}</span>
         </div>
         <div className="sidebar-body">
-          <div className="side-section">Tier I · Story</div>
-          <div className={`side-item ${view === "bible" ? "active" : ""}`} onClick={() => setView("bible")}>
-            <span className="ico"><Icon name="book" style={{ width: 14, height: 14 }} /></span>
-            <span>Story Bible</span>
-            <span className="num">{project.revision}</span>
-          </div>
-          <div className={`side-item ${view === "characters" ? "active" : ""}`} onClick={() => setView("characters")}>
-            <span className="ico" style={{ color: "var(--tts)" }}><Icon name="person" style={{ width: 14, height: 14 }} /></span>
-            <span>Cast & Voices</span>
-            <span className="num">{characters.length}</span>
-          </div>
-
-          <div className="side-section">Tier II · Scenes</div>
-          {scenes.length === 0 && (
-            <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
-              No scenes yet
-            </div>
+          {/* ── PYRAMID workspace ─────────────────────────────────── */}
+          {activeWorkspace === "pyramid" && (
+            <>
+              <div className="side-section">Project</div>
+              <div className={`side-item ${view === "pyramid" ? "active" : ""}`} onClick={() => setView("pyramid")}>
+                <span className="ico"><Icon name="pyramid" style={{ width: 14, height: 14 }} /></span>
+                <span>Pyramid</span>
+              </div>
+              <div className="side-section">Quick jump</div>
+              <div className="side-item" onClick={() => setWorkspace("story")}>
+                <span className="ico"><Icon name="book" style={{ width: 14, height: 14 }} /></span>
+                <span>Story Bible</span>
+                <span className="num">{project.revision}</span>
+              </div>
+              <div className="side-item" onClick={() => setWorkspace("scenes")}>
+                <span className="ico" style={{ color: "var(--fg-1)" }}><Icon name="timeline" style={{ width: 14, height: 14 }} /></span>
+                <span>Scenes</span>
+                <span className="num">{scenes.length}</span>
+              </div>
+              <div className="side-item" onClick={() => setWorkspace("polish")}>
+                <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
+                <span>Polish</span>
+              </div>
+            </>
           )}
-          {scenes.map((s) => (
-            <div
-              key={s.no}
-              className={`side-item ${activeSceneNo === s.no && view === "composition" ? "active" : ""}`}
-              onClick={() => { setActiveScene(s.no); setView("composition"); }}
-            >
-              <span style={{
-                display: "inline-block", width: 9, height: 9, borderRadius: "50%",
-                border: `1.5px solid ${
-                  s.status === "rendered" ? "var(--st-rendered)" :
-                  s.status === "gen"      ? "var(--st-gen)"      :
-                  s.status === "ready"    ? "var(--st-ready)"    : "var(--st-draft)"
-                }`,
-                background: s.status === "rendered" ? "var(--st-rendered)" : "transparent",
-                flexShrink: 0,
-              }} />
-              <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
-                <span style={{ fontSize: 12 }}>{s.no} · {s.title}</span>
-                <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", letterSpacing: "0.04em" }}>
-                  {s.duration} · rev.{s.rev}
-                </span>
-              </span>
-            </div>
-          ))}
 
-          <div className="side-section">Tier III · Generate</div>
-          <div className={`side-item ${view === "tts" ? "active" : ""}`} onClick={() => setView("tts")}>
-            <span className="ico" style={{ color: "var(--tts)" }}><Icon name="mic" style={{ width: 14, height: 14 }} /></span>
-            <span>Voice · Dialogue</span>
-            <span className="num">{jobs.filter(j => j.model === "tts" && j.status === "running").length || ""}</span>
-          </div>
-          <div className={`side-item ${view === "sfx" ? "active" : ""}`} onClick={() => setView("sfx")}>
-            <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="waves" style={{ width: 14, height: 14 }} /></span>
-            <span>Sound design</span>
-            <span className="num">{jobs.filter(j => j.model === "sfx" && j.status === "running").length || ""}</span>
-          </div>
-          <div className={`side-item ${view === "music" ? "active" : ""}`} onClick={() => setView("music")}>
-            <span className="ico" style={{ color: "var(--music)" }}><Icon name="music" style={{ width: 14, height: 14 }} /></span>
-            <span>Score</span>
-            <span className="num">{jobs.filter(j => j.model === "music" && j.status === "running").length || ""}</span>
-          </div>
+          {/* ── STORY workspace ───────────────────────────────────── */}
+          {activeWorkspace === "story" && (
+            <>
+              <div className="side-section">Tier I · Story</div>
+              <div className={`side-item ${view === "bible" ? "active" : ""}`} onClick={() => setView("bible")}>
+                <span className="ico"><Icon name="book" style={{ width: 14, height: 14 }} /></span>
+                <span>Story Bible</span>
+                <span className="num">{project.revision}</span>
+              </div>
+              <div className={`side-item ${view === "characters" ? "active" : ""}`} onClick={() => setView("characters")}>
+                <span className="ico" style={{ color: "var(--tts)" }}><Icon name="person" style={{ width: 14, height: 14 }} /></span>
+                <span>Cast & Voices</span>
+                <span className="num">{characters.length}</span>
+              </div>
+              <div className="side-section">Cast · {characters.length}</div>
+              {characters.map((c) => (
+                <div key={c.id} className="side-item" onClick={() => setView("characters")}>
+                  <span className="ico">
+                    <span style={{
+                      display: "inline-block", width: 10, height: 10, borderRadius: "50%",
+                      background: `oklch(0.7 0.12 ${(c.id.charCodeAt(0) * 13) % 360})`,
+                      border: "1px solid var(--line-2)",
+                    }} />
+                  </span>
+                  <span>{c.name}</span>
+                </div>
+              ))}
+              {characters.length === 0 && (
+                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
+                  No characters yet
+                </div>
+              )}
+            </>
+          )}
 
-          <div className="side-section">Post · Polish</div>
-          <div className={`side-item ${view === "clip-studio" ? "active" : ""}`} onClick={() => setView("clip-studio")}>
-            <span className="ico" style={{ color: "var(--fg-1)" }}><Icon name="fit" style={{ width: 14, height: 14 }} /></span>
-            <span>Clip Studio</span>
-          </div>
-          <div className={`side-item ${view === "upscale" ? "active" : ""}`} onClick={() => setView("upscale")}>
-            <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
-            <span>Audio Upscale</span>
-          </div>
+          {/* ── SCENES workspace ──────────────────────────────────── */}
+          {activeWorkspace === "scenes" && (
+            <>
+              <div className="side-section">Tier II · Scenes</div>
+              {scenes.length === 0 && (
+                <div style={{ padding: "8px 14px", fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
+                  No scenes yet
+                </div>
+              )}
+              {scenes.map((s) => (
+                <div
+                  key={s.no}
+                  className={`side-item ${activeSceneNo === s.no ? "active" : ""}`}
+                  onClick={() => { setActiveScene(s.no); setView("composition"); }}
+                >
+                  <span style={{
+                    display: "inline-block", width: 9, height: 9, borderRadius: "50%",
+                    border: `1.5px solid ${
+                      s.status === "rendered" ? "var(--st-rendered)" :
+                      s.status === "gen"      ? "var(--st-gen)"      :
+                      s.status === "ready"    ? "var(--st-ready)"    : "var(--st-draft)"
+                    }`,
+                    background: s.status === "rendered" ? "var(--st-rendered)" : "transparent",
+                    flexShrink: 0,
+                  }} />
+                  <span style={{ display: "flex", flexDirection: "column", gap: 1, minWidth: 0 }}>
+                    <span style={{ fontSize: 12 }}>{s.no} · {s.title}</span>
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", letterSpacing: "0.04em" }}>
+                      {s.duration} · rev.{s.rev}
+                    </span>
+                  </span>
+                </div>
+              ))}
+              <div className="side-section">Cast · {characters.length}</div>
+              {characters.map((c) => (
+                <div key={c.id} className="side-item" onClick={() => setWorkspace("story")} title="Open Cast & Voices">
+                  <span className="ico">
+                    <span style={{
+                      display: "inline-block", width: 10, height: 10, borderRadius: "50%",
+                      background: `oklch(0.7 0.12 ${(c.id.charCodeAt(0) * 13) % 360})`,
+                      border: "1px solid var(--line-2)",
+                    }} />
+                  </span>
+                  <span>{c.name}</span>
+                </div>
+              ))}
+            </>
+          )}
 
-          <div className="side-section">Cast · {characters.length}</div>
-          {characters.map((c) => (
-            <div key={c.id} className="side-item" onClick={() => { setView("characters"); }}>
-              <span className="ico">
-                <span style={{
-                  display: "inline-block", width: 10, height: 10, borderRadius: "50%",
-                  background: `oklch(0.7 0.12 ${(c.id.charCodeAt(0) * 13) % 360})`,
-                  border: "1px solid var(--line-2)",
-                }} />
-              </span>
-              <span>{c.name}</span>
-            </div>
-          ))}
+          {/* ── POLISH workspace ──────────────────────────────────── */}
+          {activeWorkspace === "polish" && (
+            <>
+              <div className="side-section">Post · Polish</div>
+              <div className={`side-item ${view === "clip-studio" ? "active" : ""}`} onClick={() => setView("clip-studio")}>
+                <span className="ico" style={{ color: "var(--fg-1)" }}><Icon name="fit" style={{ width: 14, height: 14 }} /></span>
+                <span>Clip Studio</span>
+              </div>
+              <div className={`side-item ${view === "upscale" ? "active" : ""}`} onClick={() => setView("upscale")}>
+                <span className="ico" style={{ color: "var(--sfx)" }}><Icon name="sparkle" style={{ width: 14, height: 14 }} /></span>
+                <span>Audio Upscale</span>
+              </div>
+            </>
+          )}
+
+          {/* ── APP workspace ─────────────────────────────────────── */}
+          {activeWorkspace === "app" && (
+            <>
+              <div className="side-section">App</div>
+              <div className={`side-item ${view === "settings" ? "active" : ""}`} onClick={() => setView("settings")}>
+                <span className="ico"><Icon name="settings" style={{ width: 14, height: 14 }} /></span>
+                <span>Settings</span>
+              </div>
+              <div className={`side-item ${view === "models" ? "active" : ""}`} onClick={() => setView("models")}>
+                <span className="ico"><Icon name="settings" style={{ width: 14, height: 14 }} /></span>
+                <span>Models</span>
+              </div>
+            </>
+          )}
         </div>
       </div>
 
       {/* ── CANVAS ──────────────────────────────────────────────────────── */}
-      <div className="canvas">
+      <div className="canvas" style={{ display: "flex", flexDirection: "column", overflow: "hidden" }}>
+        {/* Sub-tab strip — only inside the Scenes workspace.
+            Carries scene context across compose/voice/sound/score sub-views. */}
+        {activeWorkspace === "scenes" && scene && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 0,
+            borderBottom: "1px solid var(--line-1)",
+            background: "var(--bg-1)",
+            flexShrink: 0,
+            padding: "0 12px",
+          }}>
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
+              color: "var(--fg-4)", textTransform: "uppercase",
+              padding: "8px 14px 8px 0", borderRight: "1px solid var(--line-1)",
+              marginRight: 6,
+            }}>
+              {scene.no} · {scene.title}
+            </span>
+            {SCENE_SUBTABS.map((tab) => {
+              const isActive = view === tab.id;
+              const jobBadge = tab.id === "tts" ? jobs.filter(j => j.model === "tts" && j.status === "running").length
+                            : tab.id === "sfx" ? jobs.filter(j => j.model === "sfx" && j.status === "running").length
+                            : tab.id === "music" ? jobs.filter(j => j.model === "music" && j.status === "running").length
+                            : 0;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => setView(tab.id)}
+                  style={{
+                    background: "transparent",
+                    border: "none",
+                    borderBottom: isActive ? `2px solid ${tab.accent}` : "2px solid transparent",
+                    color: isActive ? tab.accent : "var(--fg-3)",
+                    padding: "8px 14px",
+                    fontSize: 11.5,
+                    cursor: "pointer",
+                    display: "flex", alignItems: "center", gap: 6,
+                    fontWeight: isActive ? 500 : 400,
+                  }}
+                >
+                  {tab.label}
+                  {jobBadge > 0 && (
+                    <span style={{
+                      background: tab.accent, color: "var(--bg-0)",
+                      fontSize: 9, fontFamily: "var(--font-mono)", fontWeight: 600,
+                      padding: "1px 5px", borderRadius: 8, lineHeight: 1.2,
+                    }}>{jobBadge}</span>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        )}
+
+        <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
         {view === "settings" && <SettingsView />}
         {view === "models"   && <ModelsView />}
         {view === "clip-studio" && <ClipStudioView />}
@@ -389,6 +514,7 @@ export default function App() {
         {view === "tts"   && <TTSPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "sfx"   && <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />}
         {view === "music" && <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />}
+        </div>
       </div>
 
       {/* ── RIGHT RAIL ──────────────────────────────────────────────────── */}

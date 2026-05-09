@@ -201,6 +201,37 @@ export type ViewId =
   | "tts" | "sfx" | "music"
   | "clip-studio" | "upscale"
   | "settings" | "models";
+
+// ── Workspace mode (rail-level navigation) ──────────────────────────────────
+//
+// The rail is a workspace switcher (mode I'm in); the sidebar is contextual to
+// that workspace. Each ViewId belongs to exactly one workspace.
+
+export type WorkspaceId = "pyramid" | "story" | "scenes" | "polish" | "app";
+
+export const WORKSPACE_OF: Record<ViewId, WorkspaceId> = {
+  pyramid:        "pyramid",
+  bible:          "story",
+  characters:     "story",
+  composition:    "scenes",
+  tts:            "scenes",
+  sfx:            "scenes",
+  music:          "scenes",
+  "clip-studio":  "polish",
+  upscale:        "polish",
+  models:         "app",
+  settings:       "app",
+};
+
+// Used when the rail switches workspace and we have no remembered last-view
+export const WORKSPACE_DEFAULT_VIEW: Record<WorkspaceId, ViewId> = {
+  pyramid: "pyramid",
+  story:   "bible",
+  scenes:  "composition",
+  polish:  "clip-studio",
+  app:     "settings",
+};
+
 export type RightTab = "agent" | "assets" | "jobs";
 export type ColorTemp = "forest" | "warm" | "neutral";
 export type Density = "comfortable" | "compact";
