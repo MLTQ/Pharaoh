@@ -277,6 +277,21 @@ export const renderScene = (
 ): Promise<string> =>
   invoke("render_scene", { projectId, sceneSlug, targetLufs: targetLufs ?? null });
 
+/** Concatenate scene render.wav files into output/final.wav with crossfades and
+ *  episode-level master chain. Renders any missing scenes on demand. */
+export const renderEpisode = (args: {
+  projectId: string;
+  crossfadeMs: number;
+  targetLufs?: number;
+  sceneSlugs?: string[]; // optional override; defaults to storyboard order
+}): Promise<string> =>
+  invoke("render_episode", {
+    projectId: args.projectId,
+    crossfadeMs: args.crossfadeMs,
+    targetLufs: args.targetLufs ?? null,
+    sceneSlugs: args.sceneSlugs ?? null,
+  });
+
 export interface RenderMeta {
   render_path: string;
   target_lufs: number;

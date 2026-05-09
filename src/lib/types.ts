@@ -199,7 +199,7 @@ export interface AssetItem {
 export type ViewId =
   | "pyramid" | "composition" | "bible" | "characters"
   | "tts" | "sfx" | "music"
-  | "clip-studio" | "upscale"
+  | "clip-studio" | "upscale" | "final"
   | "settings" | "models";
 
 // ── Workspace mode (rail-level navigation) ──────────────────────────────────
@@ -219,6 +219,7 @@ export const WORKSPACE_OF: Record<ViewId, WorkspaceId> = {
   music:          "scenes",
   "clip-studio":  "polish",
   upscale:        "polish",
+  final:          "polish",
   models:         "app",
   settings:       "app",
 };

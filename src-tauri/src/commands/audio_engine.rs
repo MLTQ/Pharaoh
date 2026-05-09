@@ -632,6 +632,181 @@ pub async fn render_scene_with_projects_dir(
     Ok(output_path.to_string_lossy().to_string())
 }
 
+/// Concatenate scene renders into a single episode WAV with crossfades.
+///
+/// Reads `storyboard.json` to get scene order. Any scene without a
+/// `render.wav` is rendered first via `render_scene_with_projects_dir`. The
+/// final concat applies a single episode-level master chain (loudnorm +
+/// alimiter) so loudness is consistent across scene boundaries — per-scene
+/// renders may have drifted by 0.5–1 LU due to short-content loudnorm
+/// imprecision. ebur128 is run on the result and a meta JSON written.
+///
+/// `crossfade_ms` is the duration applied between every adjacent pair.
+/// Crossfades use ffmpeg's `acrossfade` filter (equal-power triangle by
+/// default). 0 = hard cut.
+#[tauri::command]
+pub async fn render_episode(
+    app: AppHandle,
+    project_id: String,
+    crossfade_ms: u64,
+    target_lufs: Option<f32>,
+    scene_slugs: Option<Vec<String>>,
+) -> Result<String> {
+    let projects_dir = app_projects_dir(&app)?;
+    render_episode_with_projects_dir(&projects_dir, &project_id, crossfade_ms, target_lufs, scene_slugs).await
+}
+
+pub async fn render_episode_with_projects_dir(
+    projects_dir: &Path,
+    project_id: &str,
+    crossfade_ms: u64,
+    target_lufs: Option<f32>,
+    scene_slugs_override: Option<Vec<String>>,
+) -> Result<String> {
+    let project_root = crate::app_support::project_dir(projects_dir, project_id);
+    let storyboard_path = project_root.join("storyboard.json");
+    let storyboard: serde_json::Value = if storyboard_path.exists() {
+        let bytes = std::fs::read(&storyboard_path)
+            .map_err(|e| Error::Other(format!("read storyboard.json: {}", e)))?;
+        serde_json::from_slice(&bytes)
+            .map_err(|e| Error::Other(format!("parse storyboard.json: {}", e)))?
+    } else {
+        return Err(Error::Other("project has no storyboard.json".into()));
+    };
+
+    // Determine scene order. The override is for callers that want to
+    // re-arrange episode order without mutating the storyboard.
+    let scene_slugs: Vec<String> = if let Some(slugs) = scene_slugs_override {
+        slugs
+    } else {
+        storyboard.get("scenes")
+            .and_then(|s| s.as_array())
+            .map(|arr| arr.iter()
+                .filter_map(|s| s.get("slug").and_then(|v| v.as_str()).map(|v| v.to_string()))
+                .collect::<Vec<_>>())
+            .unwrap_or_default()
+    };
+    if scene_slugs.is_empty() {
+        return Err(Error::Other("no scenes in storyboard".into()));
+    }
+
+    // Make sure each scene has a render.wav — render any missing on the fly.
+    let mut scene_render_paths: Vec<PathBuf> = Vec::with_capacity(scene_slugs.len());
+    for slug in &scene_slugs {
+        let scene_root = crate::app_support::scene_dir(projects_dir, project_id, slug);
+        let render_wav = scene_root.join("render.wav");
+        if !render_wav.exists() {
+            // Lazy render with the scene's own target (defaults to -16). The
+            // episode-level loudnorm pass below will normalize across scenes.
+            render_scene_with_projects_dir(projects_dir, project_id, slug, target_lufs).await?;
+        }
+        if !render_wav.exists() {
+            return Err(Error::Other(format!(
+                "scene {} render did not produce render.wav", slug
+            )));
+        }
+        scene_render_paths.push(render_wav);
+    }
+
+    let output_dir = project_root.join("output");
+    std::fs::create_dir_all(&output_dir)?;
+    let output_path = output_dir.join("final.wav");
+
+    // ── Build ffmpeg filter graph ─────────────────────────────────────────
+    let mut cmd = tokio::process::Command::new("ffmpeg");
+    cmd.arg("-y");
+    for p in &scene_render_paths {
+        cmd.args(["-i", &p.to_string_lossy()]);
+    }
+
+    let mut filter_parts: Vec<String> = Vec::new();
+    let crossfade_s = (crossfade_ms as f32 / 1000.0).max(0.0);
+
+    let concat_label = if scene_render_paths.len() == 1 {
+        // Single scene — just rename, no crossfade math
+        filter_parts.push(format!("[0:a]aformat=channel_layouts=stereo[concat]"));
+        "[concat]".to_string()
+    } else if crossfade_s <= 0.001 {
+        // Hard cut — use straight concat filter
+        let inputs: String = (0..scene_render_paths.len())
+            .map(|i| format!("[{}:a]aformat=channel_layouts=stereo[s{}]", i, i))
+            .collect::<Vec<_>>()
+            .join(";");
+        filter_parts.push(inputs);
+        let cat_inputs: String = (0..scene_render_paths.len())
+            .map(|i| format!("[s{}]", i))
+            .collect();
+        filter_parts.push(format!(
+            "{}concat=n={}:v=0:a=1[concat]",
+            cat_inputs, scene_render_paths.len()
+        ));
+        "[concat]".to_string()
+    } else {
+        // acrossfade pairwise: [0]+[1] → [x1], [x1]+[2] → [x2], …
+        for i in 0..scene_render_paths.len() {
+            filter_parts.push(format!("[{}:a]aformat=channel_layouts=stereo[s{}]", i, i));
+        }
+        let mut prev_label = "[s0]".to_string();
+        for i in 1..scene_render_paths.len() {
+            let next_label = if i == scene_render_paths.len() - 1 {
+                "[concat]".to_string()
+            } else {
+                format!("[x{}]", i)
+            };
+            filter_parts.push(format!(
+                "{}{}acrossfade=d={:.3}:c1=tri:c2=tri{}",
+                prev_label, format!("[s{}]", i), crossfade_s, next_label
+            ));
+            prev_label = next_label;
+        }
+        "[concat]".to_string()
+    };
+
+    // Episode-level master chain. Same parameters as per-scene render so the
+    // overall result hits the same target with consistent ceilings.
+    let target_i = target_lufs.unwrap_or(-16.0).clamp(-30.0, -8.0);
+    filter_parts.push(format!(
+        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891[master]",
+        concat_label, target_i
+    ));
+
+    cmd.args(["-filter_complex", &filter_parts.join(";")]);
+    cmd.args(["-map", "[master]", "-ar", "48000", "-ac", "2"]);
+    cmd.arg(output_path.to_string_lossy().as_ref());
+
+    let result = cmd
+        .output()
+        .await
+        .map_err(|e| Error::Other(format!("ffmpeg episode render failed: {}", e)))?;
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(Error::Other(format!(
+            "ffmpeg episode render failed:\n{}",
+            &stderr[..stderr.len().min(2000)]
+        )));
+    }
+
+    // Measure and write meta
+    let meta_path = output_path.with_file_name("final.wav.meta.json");
+    if let Ok(meas) = measure_render_loudness(&output_path).await {
+        let meta = serde_json::json!({
+            "render_path": output_path.to_string_lossy(),
+            "target_lufs": target_i,
+            "integrated_lufs": meas.integrated_lufs,
+            "true_peak_dbtp": meas.true_peak_dbtp,
+            "loudness_range_lu": meas.loudness_range_lu,
+            "threshold_lufs": meas.threshold_lufs,
+            "duration_seconds": meas.duration_seconds,
+            "measured_at": chrono::Utc::now().to_rfc3339(),
+            "scene_slugs": scene_slugs,
+            "crossfade_ms": crossfade_ms,
+        });
+        let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
+    }
+
+    Ok(output_path.to_string_lossy().to_string())
+}
+
 /// Read the per-render measurement JSON written next to render.wav.
 /// Returns `Ok(None)` if the file doesn't exist (un-rendered or pre-mastering scene).
 #[tauri::command]
