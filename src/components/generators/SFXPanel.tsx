@@ -5,10 +5,8 @@ import { RichDirector, SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
-import {
-  getWaveformPeaks,
-  listGeneratedAudioAssets,
-} from "../../lib/tauriCommands";
+import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import { usePeaksStore } from "../../store/peaksStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 const AUDIO_LDM_NEGATIVE = "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts";
@@ -215,14 +213,15 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
       .catch(() => {});
   }, [realProjectId, sceneSlug, completedJobsKey]);
 
+  const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
   useEffect(() => {
     for (const asset of generatedAssets) {
       if (assetPeaks[asset.audio_path]) continue;
-      getWaveformPeaks(asset.audio_path, 84)
+      fetchPeaks(asset.audio_path, 84)
         .then((peaks) => setAssetPeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
         .catch(() => {});
     }
-  }, [generatedAssets, assetPeaks]);
+  }, [generatedAssets, assetPeaks, fetchPeaks]);
 
   const chooseScene = (next: string) => {
     setScene(next);

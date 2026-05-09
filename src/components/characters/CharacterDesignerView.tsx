@@ -5,11 +5,11 @@ import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList"
 import { useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import {
-  getWaveformPeaks,
   listGeneratedAudioAssets,
   submitTtsVoiceDesign,
   submitTtsVoiceClone,
 } from "../../lib/tauriCommands";
+import { usePeaksStore } from "../../store/peaksStore";
 import type { Character, GeneratedAudioAsset } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -127,14 +127,15 @@ export const CharacterDesignerView: React.FC = () => {
       .catch(() => setReferenceAssets([]));
   }, [realProjectId, jobs]);
 
+  const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
   useEffect(() => {
     for (const asset of referenceAssets.slice(0, 12)) {
       if (referencePeaks[asset.audio_path]) continue;
-      getWaveformPeaks(asset.audio_path, 80)
+      fetchPeaks(asset.audio_path, 80)
         .then((peaks) => setReferencePeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
         .catch(() => {});
     }
-  }, [referenceAssets, referencePeaks]);
+  }, [referenceAssets, referencePeaks, fetchPeaks]);
 
   // ── Helpers ──
 

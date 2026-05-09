@@ -103,10 +103,11 @@ export const useJobStore = create<JobState>((set, get) => ({
           get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
         }
 
-        // Fetch waveform peaks
+        // Fetch waveform peaks via the session cache so the panels that later
+        // ask for the same file get an instant hit instead of recomputing.
         try {
-          const { getWaveformPeaks } = await import("../lib/tauriCommands");
-          const peaks = await getWaveformPeaks(payload.output_path, 120);
+          const { usePeaksStore } = await import("./peaksStore");
+          const peaks = await usePeaksStore.getState().fetchPeaks(payload.output_path, 120);
           get().updateJob(payload.job_id, { peaks });
         } catch {
           // Not fatal — peaks stay null, Wave fallback renders instead
