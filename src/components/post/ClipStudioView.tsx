@@ -466,6 +466,8 @@ export const ClipStudioView: React.FC = () => {
   const [zoom, setZoom] = useState(1);
   const [viewportStartMs, setViewportStartMs] = useState(0);
   const playAudio = useAudioStore((state) => state.play);
+  const stopAudio = useAudioStore((state) => state.stop);
+  const audioPlayingPath = useAudioStore((state) => state.playing);
 
   const selected = assets.find((asset) => asset.audio_path === selectedPath) ?? assets[0] ?? null;
   const visibleAssets = useMemo(
@@ -537,6 +539,12 @@ export const ClipStudioView: React.FC = () => {
 
   const playSelection = () => {
     if (!selected) return;
+    // Toggle: if this asset is already playing (i.e. user wants to stop and
+    // look at a different clip), stop instead of restarting from startMs.
+    if (audioPlayingPath === selected.audio_path) {
+      stopAudio();
+      return;
+    }
     playAudio(
       selected.audio_path,
       Math.max(0, startMs) / 1000,
@@ -848,10 +856,19 @@ export const ClipStudioView: React.FC = () => {
               <div style={{ fontSize: 10, color: "var(--fg-3)", lineHeight: 1.35, overflow: "hidden", whiteSpace: "nowrap", textOverflow: "ellipsis" }}>
                 {selected.prompt || "No prompt recorded."}
               </div>
-              <button className="btn btn-sm" onClick={playSelection} title="Preview crop from the left handle. Space also previews.">
-                <Icon name="play" style={{ width: 11, height: 11 }} />
-                play crop
-              </button>
+              {(() => {
+                const isPlayingThis = selected && audioPlayingPath === selected.audio_path;
+                return (
+                  <button
+                    className="btn btn-sm"
+                    onClick={playSelection}
+                    title={isPlayingThis ? "Stop preview · Space" : "Preview crop from the left handle · Space"}
+                  >
+                    <Icon name={isPlayingThis ? "pause" : "play"} style={{ width: 11, height: 11 }} />
+                    {isPlayingThis ? "stop" : "play crop"}
+                  </button>
+                );
+              })()}
             </div>
 
             <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
