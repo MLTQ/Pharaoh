@@ -265,8 +265,8 @@ export const CharacterDesignerView: React.FC = () => {
   };
 
   const handleRemoveCharacter = (id: string) => {
-    if (characters.length <= 1) return;
-    if (!confirm(`Remove "${characters.find((c) => c.id === id)?.name}"?`)) return;
+    const name = characters.find((c) => c.id === id)?.name ?? "this character";
+    if (!window.confirm(`Delete "${name}" from the cast? This keeps existing generated audio files but removes the character from project.json.`)) return;
     removeCharacter(id);
   };
 
@@ -365,17 +365,16 @@ export const CharacterDesignerView: React.FC = () => {
                   {modelLabel}
                 </span>
               </span>
-              {characters.length > 1 && (
-                <button
-                  className="btn btn-sm"
-                  style={{
-                    padding: "1px 5px", minWidth: 0, fontSize: 11, opacity: 0.4,
-                    color: "var(--sfx)", borderColor: "transparent",
-                  }}
-                  title="Remove character"
-                  onClick={(e) => { e.stopPropagation(); handleRemoveCharacter(c.id); }}
-                >×</button>
-              )}
+              <button
+                className="btn btn-sm"
+                style={{
+                  padding: "1px 6px", minWidth: 0, fontSize: 11,
+                  color: "var(--sfx)", borderColor: "transparent",
+                }}
+                title={`Delete ${c.name}`}
+                aria-label={`Delete ${c.name}`}
+                onClick={(e) => { e.stopPropagation(); handleRemoveCharacter(c.id); }}
+              >×</button>
             </div>
           );
         })}
@@ -433,6 +432,18 @@ export const CharacterDesignerView: React.FC = () => {
                 : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
                 : "Custom"}
             </span>
+            <button
+              className="btn btn-sm"
+              style={{
+                color: "var(--sfx)",
+                borderColor: "color-mix(in oklch, var(--sfx) 45%, var(--line-1))",
+                background: "color-mix(in oklch, var(--sfx) 8%, transparent)",
+                flexShrink: 0,
+              }}
+              onClick={() => handleRemoveCharacter(char.id)}
+            >
+              Delete
+            </button>
           </div>
           <textarea
             className="input"

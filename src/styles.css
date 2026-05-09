@@ -275,7 +275,7 @@ input:focus, textarea:focus, select:focus { outline: none; }
 .tracks-body { position: relative; overflow: auto; background: var(--bg-0); }
 .timeline-ruler { position: sticky; top: 0; height: 28px; background: var(--bg-2); border-bottom: 1px solid var(--line-1); z-index: 3; display: flex; font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
 .ruler-tick { flex: 0 0 80px; border-right: 1px solid var(--line-1); padding: 8px 6px 0; letter-spacing: 0.04em; }
-.tracks-rows { position: relative; }
+.tracks-rows { position: relative; min-height: calc(100% - 28px); }
 .track-row { position: relative; height: 76px; border-bottom: 1px solid var(--line-1); background-image: linear-gradient(90deg, var(--line-1) 1px, transparent 1px), linear-gradient(90deg, color-mix(in oklch, var(--line-1) 30%, transparent) 1px, transparent 1px); background-size: 80px 100%, 16px 100%; }
 .clip { position: absolute; top: 8px; bottom: 8px; border-radius: var(--radius); padding: 5px 8px; font-family: var(--font-mono); font-size: 10px; cursor: pointer; overflow: hidden; display: flex; flex-direction: column; justify-content: space-between; border: 1px solid; user-select: none; }
 .clip.selected { outline: 1px solid var(--fg-0); outline-offset: 1px; }
@@ -334,7 +334,7 @@ input:focus, textarea:focus, select:focus { outline: none; }
 .asset-row .wave { height: 24px; }
 .asset-row .meta { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .asset-row .name { color: var(--fg-0); font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.asset-row .sub { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); letter-spacing: 0.04em; }
+.asset-row .sub { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); letter-spacing: 0.04em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .asset-row .badge { font-family: var(--font-mono); font-size: 9px; padding: 2px 6px; border-radius: 1px; letter-spacing: 0.08em; text-transform: uppercase; border: 1px solid var(--line-2); color: var(--fg-2); }
 .asset-row .badge.resolved { color: var(--st-rendered); border-color: color-mix(in oklch, var(--st-rendered) 50%, transparent); }
 .asset-row .badge.gen { color: var(--st-gen); border-color: color-mix(in oklch, var(--st-gen) 50%, transparent); }

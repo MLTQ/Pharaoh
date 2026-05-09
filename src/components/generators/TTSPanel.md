@@ -23,8 +23,13 @@ Dialogue-generation panel for scene-level spoken lines. It collects a character,
 - **Interacts with**: `useGenerateJob.ts`, `tts_server.py`.
 
 ### Take history
-- **Does**: Shows current-session TTS jobs and persisted Qwen TTS sidecars for the selected scene.
+- **Does**: Shows current-session TTS jobs and persisted Qwen TTS sidecars for the selected scene, and lets completed takes be selected for scene routing.
 - **Interacts with**: `jobStore.ts`, `listGeneratedAudioAssets`, `getWaveformPeaks`.
+
+### `handleSendToScene`
+- **Does**: Writes the selected completed take into the first empty dialogue row of the target scene's `script.csv`, replacing the first dialogue row only if no empty row exists.
+- **Interacts with**: `routeAudioToScene` in `assetRouting.ts`, `projectStore.ts`.
+- **Rationale**: Old dialogue assets need the same explicit promotion path as freshly generated takes, without depending on transient job state.
 
 ## Contracts
 
@@ -34,6 +39,8 @@ Dialogue-generation panel for scene-level spoken lines. It collects a character,
 | Users | Direction text is not spoken literally | Concatenating direction into line text |
 | `jobStore.ts` | Generated takes are keyed to the active scene and row 0 | Changing row metadata |
 | `sidecar.rs` | Persisted Qwen TTS assets can be listed after app restart | Filtering only transient jobs |
+| Users | Completed current-session and persisted takes can be selected and routed to a scene | Making the take list review-only |
 
 ## Notes
 - Character Designer still owns voice clone and voice design probes. This panel is for production dialogue takes that need direction control.
+- “Send to scene” targets dialogue rows in the selected scene; scenes with no assignable dialogue rows report an error instead of silently dropping the assignment.

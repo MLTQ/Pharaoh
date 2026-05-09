@@ -19,9 +19,13 @@ Scene-level sound-design panel for generating foley, effects, ambience beds, and
 - **Interacts with**: `SfxT2ARequest`, `T2AParams`.
 
 ### Generated list
-- **Does**: Shows running/failed/current-session jobs plus persisted Woosh/AudioLDM SFX sidecars for the selected scene.
+- **Does**: Shows running/failed/current-session jobs plus persisted Woosh/AudioLDM SFX sidecars for the selected scene, and lets completed takes be selected for routing.
 - **Interacts with**: `jobStore.ts`, `listGeneratedAudioAssets`, `getWaveformPeaks`, `PlayButton`.
 - **Rationale**: The page should show real generated takes, not static mock variations.
+
+### Scene routing
+- **Does**: Sends the selected completed SFX take to the target scene's first empty `SFX`/`BED` row, replacing the first matching row only if no empty row exists.
+- **Interacts with**: `routeAudioToScene` in `assetRouting.ts`.
 
 ## Contracts
 
@@ -30,6 +34,7 @@ Scene-level sound-design panel for generating foley, effects, ambience beds, and
 | `useGenerateJob.ts` | Backend is one of `woosh` or `audioldm` | Renaming backend values |
 | `projectStore.ts` | Selected scene is synced before submission | Submitting to a different scene than the router shows |
 | Users | Generated list reflects the selected scene's real SFX takes | Reintroducing mock variation cards |
+| Users | Completed SFX takes can be selected and sent to a scene | Making the generated list review-only |
 
 ## Notes
 - AudioLDM native rounds duration to 2.5 second increments server-side.

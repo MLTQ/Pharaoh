@@ -13,6 +13,11 @@ Global application styling for Pharaoh's shell, timeline, panels, queues, and re
 - **Does**: Styles buttons, inputs, rails, panels, timeline clips, asset rows, and job rows.
 - **Interacts with**: `App.tsx`, generator panels, `AssetBrowser.tsx`, `JobQueue.tsx`.
 
+### Timeline and asset browser affordances
+- **Does**: Keeps the timeline drop surface full-height and constrains asset-row subtitles to single-line ellipses.
+- **Interacts with**: `CompositionView.tsx`, `AssetBrowser.tsx`.
+- **Rationale**: Drag/drop needs a broad target even below existing tracks, and long generation prompts should not dominate the right rail.
+
 ### Clip Studio scrollbars
 - **Does**: Provides thin, inset-feeling scrollbars for Clip Studio asset/detail panes.
 - **Interacts with**: `ClipStudioView.tsx`.

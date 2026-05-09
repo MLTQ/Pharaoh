@@ -23,11 +23,17 @@ Cast and voice-design workspace for creating characters, testing generated voice
 - **Does**: Persist selected voice assignment data and choose character asset output paths.
 - **Interacts with**: `projectStore.ts`, project character folders.
 
+### Cast deletion
+- **Does**: Exposes explicit delete controls in the cast list and character header, confirms destructive intent, and removes the character from persisted `project.json`.
+- **Interacts with**: `removeCharacter` in `projectStore.ts`.
+- **Rationale**: Generated character audio remains on disk, but the cast record should be removable from the project metadata.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `projectStore.ts` | Voice assignment updates persist into `project.json` | Changing assignment shape |
+| `projectStore.ts` | Character deletion removes the cast record and updates selection, including empty-cast state | Blocking deletion of the final character |
 | `jobStore.ts` | Character takes use `scene_slug` + `row_index` keys | Key format changes |
 | `ClipStudioView.tsx` | Cropped/imported references are sidecar-indexed and listable | Saving clips without sidecars |
 | `inference.rs` | Clone requests include a bounded `max_new_tokens` value | Removing the cap from clone requests |

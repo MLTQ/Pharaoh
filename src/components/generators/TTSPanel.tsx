@@ -7,14 +7,26 @@ import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import { routeAudioToScene } from "../../lib/assetRouting";
 import { usePeaksStore } from "../../store/peaksStore";
-import type { GeneratedAudioAsset, MockScene } from "../../lib/types";
+import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
 
 interface TTSPanelProps {
   scenes: MockScene[];
   defaultScene: string;
+}
+
+interface SelectableTake {
+  audioPath: string;
+  label: string;
+  prompt: string;
+  durationMs: number | null;
+}
+
+function basename(path: string): string {
+  return path.split(/[\\/]/).pop() ?? path;
 }
 
 export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
@@ -32,6 +44,9 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const [assetPeaks, setAssetPeaks] = useState<Record<string, number[]>>({});
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError]   = useState<string | null>(null);
+  const [selectedTakePath, setSelectedTakePath] = useState<string | null>(null);
+  const [routeMessage, setRouteMessage] = useState<string | null>(null);
+  const [routing, setRouting] = useState(false);
   const { submitTts } = useGenerateJob();
 
   const selectedScene = scenes.find((s) => s.no === scene) ?? scenes[0];
@@ -49,6 +64,24 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   );
   const completedJobPaths = new Set(takes.map((j) => j.output_path).filter(Boolean));
   const persistedOnly = generatedAssets.filter((asset) => !completedJobPaths.has(asset.audio_path));
+  const selectableTakes = useMemo<SelectableTake[]>(() => {
+    const jobTakes = takes
+      .filter((job): job is Job & { output_path: string } => job.status === "complete" && !!job.output_path)
+      .map((job, index) => ({
+        audioPath: job.output_path,
+        label: `take ${takes.length - index}`,
+        prompt: job.description,
+        durationMs: null,
+      }));
+    const persistedTakes = persistedOnly.map((asset) => ({
+      audioPath: asset.audio_path,
+      label: basename(asset.audio_path),
+      prompt: asset.prompt || asset.name,
+      durationMs: asset.duration_ms,
+    }));
+    return [...jobTakes, ...persistedTakes];
+  }, [takes, persistedOnly]);
+  const selectedTake = selectableTakes.find((take) => take.audioPath === selectedTakePath) ?? null;
 
   const selectedChar = characters.find((c) => c.id === speakerId) ?? characters[0];
   const selectedVoice = selectedChar?.voice_assignment;
@@ -63,6 +96,10 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   useEffect(() => {
     setScene(defaultScene);
   }, [defaultScene]);
+
+  useEffect(() => {
+    setRouteMessage(null);
+  }, [scene, selectedTakePath]);
 
   // Only re-fetch when a relevant job *settles* (complete/failed) — not on every
   // progress tick. The jobs array updates ~2x/sec during generation; depending
@@ -134,6 +171,35 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
     }
   };
 
+  const handleSendToScene = async () => {
+    if (!selectedTake) {
+      setRouteMessage("Select a completed take first.");
+      return;
+    }
+    if (!realProjectId || !sceneSlug) {
+      setRouteMessage("Open a project and scene before routing audio.");
+      return;
+    }
+
+    setRouting(true);
+    setRouteMessage(null);
+    setActiveScene(scene);
+    try {
+      const result = await routeAudioToScene({
+        projectId: realProjectId,
+        sceneSlug,
+        kind: "tts",
+        audioPath: selectedTake.audioPath,
+        durationMs: selectedTake.durationMs,
+      });
+      setRouteMessage(`Sent ${selectedTake.label} to dialogue row ${result.rowIndex + 1}${result.replaced ? " (replaced)" : ""}.`);
+    } catch (e) {
+      setRouteMessage(`Send failed: ${String(e)}`);
+    } finally {
+      setRouting(false);
+    }
+  };
+
   const charColor = selectedChar ? `oklch(0.7 0.12 ${CHAR_HUE(selectedChar.id)})` : "var(--tts)";
 
   return (
@@ -161,7 +227,18 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           </div>
         </div>
 
-        <SceneRouter scenes={scenes} scene={scene} setScene={(next) => { setScene(next); setActiveScene(next); }} accent="var(--tts)" onSend={() => setActiveScene(scene)} />
+        <SceneRouter scenes={scenes} scene={scene} setScene={(next) => { setScene(next); setActiveScene(next); }} accent="var(--tts)" onSend={handleSendToScene} />
+        {routeMessage && (
+          <div style={{
+            marginTop: 8,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: routeMessage.startsWith("Sent ") ? "var(--st-rendered)" : "var(--sfx)",
+            letterSpacing: "0.04em",
+          }}>
+            {routeMessage}
+          </div>
+        )}
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Speaker</div>
         <div className="speaker-grid">
@@ -314,19 +391,61 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {takes.length > 0 && (
                 <TakeList label={`${takes.length} active take${takes.length === 1 ? "" : "s"}`}>
-                  {takes.map((job, i) => (
-                    <TakeRow
-                      key={job.id}
-                      job={job}
-                      index={takes.length - 1 - i}
-                      caption={job.description}
-                      onQa={(s) => setQaStatus(job.id, s)}
-                    />
-                  ))}
+                  {takes.map((job, i) => {
+                    const selectable = job.status === "complete" && !!job.output_path;
+                    const active = selectable && selectedTakePath === job.output_path;
+                    return (
+                      <div
+                        key={job.id}
+                        role={selectable ? "button" : undefined}
+                        tabIndex={selectable ? 0 : undefined}
+                        onClick={() => selectable && setSelectedTakePath(job.output_path)}
+                        onKeyDown={(event) => {
+                          if (!selectable || (event.key !== "Enter" && event.key !== " ")) return;
+                          event.preventDefault();
+                          setSelectedTakePath(job.output_path);
+                        }}
+                        style={{
+                          cursor: selectable ? "pointer" : "default",
+                          borderLeft: active ? "2px solid var(--tts)" : "2px solid transparent",
+                          background: active ? "color-mix(in oklch, var(--tts) 10%, var(--bg-1))" : undefined,
+                        }}
+                      >
+                        <TakeRow
+                          job={job}
+                          index={takes.length - 1 - i}
+                          caption={job.description}
+                          onQa={(s) => setQaStatus(job.id, s)}
+                        />
+                      </div>
+                    );
+                  })}
                 </TakeList>
               )}
               {persistedOnly.map((asset) => (
-                <div key={asset.audio_path} style={{ border: "1px solid var(--line-1)", borderRadius: "var(--r)", padding: 8, display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "center" }}>
+                <div
+                  key={asset.audio_path}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => setSelectedTakePath(asset.audio_path)}
+                  onKeyDown={(event) => {
+                    if (event.key !== "Enter" && event.key !== " ") return;
+                    event.preventDefault();
+                    setSelectedTakePath(asset.audio_path);
+                  }}
+                  style={{
+                    border: `1px solid ${selectedTakePath === asset.audio_path ? "var(--tts)" : "var(--line-1)"}`,
+                    borderLeft: `2px solid ${selectedTakePath === asset.audio_path ? "var(--tts)" : "transparent"}`,
+                    background: selectedTakePath === asset.audio_path ? "color-mix(in oklch, var(--tts) 10%, var(--bg-1))" : "transparent",
+                    borderRadius: "var(--r)",
+                    padding: 8,
+                    display: "grid",
+                    gridTemplateColumns: "1fr auto",
+                    gap: 8,
+                    alignItems: "center",
+                    cursor: "pointer",
+                  }}
+                >
                   <div style={{ minWidth: 0 }}>
                     {assetPeaks[asset.audio_path] ? (
                       <PeaksWave peaks={assetPeaks[asset.audio_path]} width={180} height={20} color="var(--tts)" opacity={0.8} />
@@ -340,6 +459,12 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
                   <PlayButton path={asset.audio_path} size={11} />
                 </div>
               ))}
+              {selectableTakes.length > 0 && (
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: selectedTake ? "var(--tts)" : "var(--fg-4)", letterSpacing: "0.05em" }}>
+                  {selectedTake ? `selected · ${selectedTake.label}` : "select a completed take to route it"}
+                  {routing ? " · sending..." : ""}
+                </div>
+              )}
             </div>
           )}
         </div>

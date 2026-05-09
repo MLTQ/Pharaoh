@@ -6,12 +6,19 @@ import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
+import { routeAudioToScene } from "../../lib/assetRouting";
 import { usePeaksStore } from "../../store/peaksStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 interface MusicPanelProps {
   scenes: MockScene[];
   defaultScene: string;
+}
+
+interface SelectableMusicTake {
+  audioPath: string;
+  label: string;
+  durationMs: number | null;
 }
 
 function selectedSlug(sceneNo: string, scenes: MockScene[]): string | null {
@@ -60,11 +67,42 @@ function NumberControl({
   );
 }
 
-function MusicJobRow({ job, index }: { job: Job; index: number }) {
+function MusicJobRow({
+  job,
+  index,
+  active,
+  onSelect,
+}: {
+  job: Job;
+  index: number;
+  active: boolean;
+  onSelect: (() => void) | null;
+}) {
   const running = job.status === "running" || job.status === "pending";
   const failed = job.status === "failed";
   return (
-    <div style={{ border: "1px solid var(--line-1)", background: "var(--bg-2)", borderRadius: 2, padding: 12, display: "grid", gridTemplateColumns: "92px 1fr auto", gap: 12, alignItems: "center" }}>
+    <div
+      role={onSelect ? "button" : undefined}
+      tabIndex={onSelect ? 0 : undefined}
+      onClick={() => onSelect?.()}
+      onKeyDown={(event) => {
+        if (!onSelect || (event.key !== "Enter" && event.key !== " ")) return;
+        event.preventDefault();
+        onSelect();
+      }}
+      style={{
+        border: `1px solid ${active ? "var(--music)" : "var(--line-1)"}`,
+        borderLeft: `2px solid ${active ? "var(--music)" : "transparent"}`,
+        background: active ? "color-mix(in oklch, var(--music) 10%, var(--bg-1))" : "var(--bg-2)",
+        borderRadius: 2,
+        padding: 12,
+        display: "grid",
+        gridTemplateColumns: "92px 1fr auto",
+        gap: 12,
+        alignItems: "center",
+        cursor: onSelect ? "pointer" : "default",
+      }}
+    >
       <div>
         {job.peaks ? (
           <PeaksWave peaks={job.peaks} width={92} height={30} color="var(--music)" opacity={0.85} />
@@ -88,9 +126,40 @@ function MusicJobRow({ job, index }: { job: Job; index: number }) {
   );
 }
 
-function MusicAssetRow({ asset, peaks }: { asset: GeneratedAudioAsset; peaks: number[] | undefined }) {
+function MusicAssetRow({
+  asset,
+  peaks,
+  active,
+  onSelect,
+}: {
+  asset: GeneratedAudioAsset;
+  peaks: number[] | undefined;
+  active: boolean;
+  onSelect: () => void;
+}) {
   return (
-    <div style={{ border: "1px solid var(--line-1)", background: "var(--bg-2)", borderRadius: 2, padding: 12, display: "grid", gridTemplateColumns: "92px 1fr auto", gap: 12, alignItems: "center" }}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onSelect}
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" && event.key !== " ") return;
+        event.preventDefault();
+        onSelect();
+      }}
+      style={{
+        border: `1px solid ${active ? "var(--music)" : "var(--line-1)"}`,
+        borderLeft: `2px solid ${active ? "var(--music)" : "transparent"}`,
+        background: active ? "color-mix(in oklch, var(--music) 10%, var(--bg-1))" : "var(--bg-2)",
+        borderRadius: 2,
+        padding: 12,
+        display: "grid",
+        gridTemplateColumns: "92px 1fr auto",
+        gap: 12,
+        alignItems: "center",
+        cursor: "pointer",
+      }}
+    >
       <div>
         {peaks ? (
           <PeaksWave peaks={peaks} width={92} height={30} color="var(--music)" opacity={0.85} />
@@ -128,6 +197,9 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
   const [assetPeaks, setAssetPeaks] = useState<Record<string, number[]>>({});
   const [generating, setGenerating] = useState(false);
   const [genError, setGenError] = useState<string | null>(null);
+  const [selectedTakePath, setSelectedTakePath] = useState<string | null>(null);
+  const [routeMessage, setRouteMessage] = useState<string | null>(null);
+  const [routing, setRouting] = useState(false);
   const { submitMusic } = useGenerateJob();
   const { jobs } = useJobStore();
   const { realProjectId, setActiveScene } = useProjectStore();
@@ -139,10 +211,30 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
   );
   const completedJobPaths = new Set(sceneJobs.map((j) => j.output_path).filter(Boolean));
   const persistedOnly = generatedAssets.filter((asset) => !completedJobPaths.has(asset.audio_path));
+  const selectableTakes = useMemo<SelectableMusicTake[]>(() => {
+    const jobTakes = sceneJobs
+      .filter((job): job is Job & { output_path: string } => job.status === "complete" && !!job.output_path)
+      .map((job, index) => ({
+        audioPath: job.output_path,
+        label: `cue ${index + 1}`,
+        durationMs: null,
+      }));
+    const assetTakes = persistedOnly.map((asset) => ({
+      audioPath: asset.audio_path,
+      label: basename(asset.audio_path),
+      durationMs: asset.duration_ms,
+    }));
+    return [...jobTakes, ...assetTakes];
+  }, [sceneJobs, persistedOnly]);
+  const selectedTake = selectableTakes.find((take) => take.audioPath === selectedTakePath) ?? null;
 
   useEffect(() => {
     setScene(defaultScene);
   }, [defaultScene]);
+
+  useEffect(() => {
+    setRouteMessage(null);
+  }, [scene, selectedTakePath]);
 
   // Stable signature: only changes when a music job for this scene settles.
   const completedJobsKey = useMemo(
@@ -211,6 +303,35 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
     }
   };
 
+  const handleSendToScene = async () => {
+    if (!selectedTake) {
+      setRouteMessage("Select a completed score cue first.");
+      return;
+    }
+    if (!realProjectId || !sceneSlug) {
+      setRouteMessage("Open a project and scene before routing audio.");
+      return;
+    }
+
+    setRouting(true);
+    setRouteMessage(null);
+    setActiveScene(scene);
+    try {
+      const result = await routeAudioToScene({
+        projectId: realProjectId,
+        sceneSlug,
+        kind: "music",
+        audioPath: selectedTake.audioPath,
+        durationMs: selectedTake.durationMs,
+      });
+      setRouteMessage(`Sent ${selectedTake.label} to music row ${result.rowIndex + 1}${result.replaced ? " (replaced)" : ""}.`);
+    } catch (e) {
+      setRouteMessage(`Send failed: ${String(e)}`);
+    } finally {
+      setRouting(false);
+    }
+  };
+
   return (
     <div className="panel-view">
       <div className="panel-main">
@@ -231,7 +352,18 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
           </div>
         </div>
 
-        <SceneRouter scenes={scenes} scene={scene} setScene={chooseScene} accent="var(--music)" onSend={() => setActiveScene(scene)} />
+        <SceneRouter scenes={scenes} scene={scene} setScene={chooseScene} accent="var(--music)" onSend={handleSendToScene} />
+        {routeMessage && (
+          <div style={{
+            marginTop: 8,
+            fontFamily: "var(--font-mono)",
+            fontSize: 10,
+            color: routeMessage.startsWith("Sent ") ? "var(--st-rendered)" : "var(--sfx)",
+            letterSpacing: "0.04em",
+          }}>
+            {routeMessage}
+          </div>
+        )}
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · caption</div>
         <RichDirector value={caption} setValue={setCaption} accent="var(--music)" />
@@ -292,11 +424,37 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Generated for {sceneSlug ?? "scene"} · {sceneJobs.length + persistedOnly.length}</div>
         <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-          {sceneJobs.map((job, i) => <MusicJobRow key={job.id} job={job} index={i} />)}
-          {persistedOnly.map((asset) => <MusicAssetRow key={asset.audio_path} asset={asset} peaks={assetPeaks[asset.audio_path]} />)}
+          {sceneJobs.map((job, i) => {
+            const selectable = job.status === "complete" && !!job.output_path;
+            const active = selectable && selectedTakePath === job.output_path;
+            return (
+              <MusicJobRow
+                key={job.id}
+                job={job}
+                index={i}
+                active={active}
+                onSelect={selectable ? () => setSelectedTakePath(job.output_path) : null}
+              />
+            );
+          })}
+          {persistedOnly.map((asset) => (
+            <MusicAssetRow
+              key={asset.audio_path}
+              asset={asset}
+              peaks={assetPeaks[asset.audio_path]}
+              active={selectedTakePath === asset.audio_path}
+              onSelect={() => setSelectedTakePath(asset.audio_path)}
+            />
+          ))}
           {sceneJobs.length === 0 && persistedOnly.length === 0 && (
             <div style={{ padding: 24, textAlign: "center", border: "1px dashed var(--line-2)", borderRadius: "var(--r)", fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6 }}>
               No score cues generated for this scene yet.
+            </div>
+          )}
+          {selectableTakes.length > 0 && (
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: selectedTake ? "var(--music)" : "var(--fg-4)", letterSpacing: "0.05em" }}>
+              {selectedTake ? `selected · ${selectedTake.label}` : "select a completed cue to route it"}
+              {routing ? " · sending..." : ""}
             </div>
           )}
         </div>

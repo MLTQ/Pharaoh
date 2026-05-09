@@ -1,10 +1,21 @@
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
-import { updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
-import type { Job, MockAssets, QaJobStatus } from "../../lib/types";
+import { listGeneratedAudioAssets, readScript, updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
+import {
+  ASSET_DRAG_MIME,
+  ASSET_POINTER_DROP_EVENT,
+  clearCurrentDraggedAsset,
+  routeAudioToScene,
+  SCRIPT_ASSETS_CHANGED_EVENT,
+  setCurrentDraggedAsset,
+  type AssetPointerDropDetail,
+  type DraggedAssetPayload,
+  type RoutableAssetKind,
+} from "../../lib/assetRouting";
+import type { GeneratedAudioAsset, Job, MockAssets, QaJobStatus, ScriptRow } from "../../lib/types";
 
 interface AssetBrowserProps {
   assets: MockAssets;
@@ -14,11 +25,43 @@ function basename(p: string): string {
   return p.split(/[\\/]/).pop() ?? p;
 }
 
+function truncate(text: string, maxChars = 100): string {
+  const compact = text.replace(/\s+/g, " ").trim();
+  return compact.length > maxChars ? `${compact.slice(0, maxChars - 1)}…` : compact;
+}
+
 const KIND_COLOR: Record<string, string> = {
   tts:   "var(--tts)",
   sfx:   "var(--sfx)",
   music: "var(--music)",
 };
+
+interface PersistentAsset {
+  id: string;
+  kind: RoutableAssetKind;
+  audioPath: string;
+  name: string;
+  prompt: string;
+  model: string;
+  durationMs: number | null;
+  qaStatus: QaJobStatus;
+  rowIndex: number | null;
+  track: string | null;
+  character: string | null;
+  active: boolean;
+}
+
+function kindFromRowType(type: ScriptRow["type"]): RoutableAssetKind | null {
+  if (type === "DIALOGUE") return "tts";
+  if (type === "SFX" || type === "BED") return "sfx";
+  if (type === "MUSIC") return "music";
+  return null;
+}
+
+function durationFromRow(row: ScriptRow): number | null {
+  const parsed = Number(row.duration_ms);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
 
 // ── Take group ─────────────────────────────────────────────────────────────
 
@@ -31,24 +74,81 @@ const QA_COLORS: Record<QaJobStatus, string> = {
 interface TakeGroupProps {
   jobs: Job[];            // all completed takes for one row, oldest-first
   activeJobId: string | null;
+  scriptRows: ScriptRow[];
   onUse: (job: Job) => void;
   onQa: (job: Job, status: QaJobStatus) => void;
 }
 
-const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa }) => {
-  const color = KIND_COLOR[jobs[0].model] ?? "currentColor";
+function setAssetDragData(event: React.DragEvent<HTMLElement>, payload: DraggedAssetPayload) {
+  const serialized = JSON.stringify(payload);
+  setCurrentDraggedAsset(payload);
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData(ASSET_DRAG_MIME, serialized);
+  event.dataTransfer.setData("application/json", serialized);
+  event.dataTransfer.setData("text/plain", serialized);
+}
+
+function beginAssetPointerDrag(event: React.PointerEvent<HTMLElement>, payload: DraggedAssetPayload) {
+  if (event.button !== 0) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("button, input, select, textarea, a")) return;
+
+  setCurrentDraggedAsset(payload);
+  const handlePointerUp = (upEvent: PointerEvent) => {
+    const detail: AssetPointerDropDetail = {
+      asset: payload,
+      clientX: upEvent.clientX,
+      clientY: upEvent.clientY,
+    };
+    window.dispatchEvent(new CustomEvent(ASSET_POINTER_DROP_EVENT, { detail }));
+    clearCurrentDraggedAsset();
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointercancel", handleCancel);
+  };
+  const handleCancel = () => {
+    clearCurrentDraggedAsset();
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointercancel", handleCancel);
+  };
+
+  window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("pointercancel", handleCancel);
+}
+
+const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, scriptRows, onUse, onQa }) => {
+  const kind = jobs[0].model as RoutableAssetKind;
+  const color = KIND_COLOR[kind] ?? "currentColor";
   return (
     <div style={{ borderBottom: "1px solid var(--line-1)" }}>
       {jobs.map((job, ti) => {
         const isActive = job.id === activeJobId;
         const qaColor = QA_COLORS[job.qa_status];
+        const row = job.row_index != null ? scriptRows[job.row_index] : undefined;
+        const sub = truncate(job.description);
+        const dragPayload = job.output_path ? {
+          kind,
+          audioPath: job.output_path,
+          label: basename(job.output_path),
+          prompt: row?.prompt || job.description,
+          durationMs: row ? durationFromRow(row) : null,
+          track: row?.track ?? null,
+          character: row?.character ?? null,
+        } satisfies DraggedAssetPayload : null;
         return (
           <div
             key={job.id}
             className={`asset-row ${job.model}`}
+            draggable={!!job.output_path}
+            onDragStart={(event) => {
+              if (!dragPayload) return;
+              setAssetDragData(event, dragPayload);
+            }}
+            onPointerDown={(event) => dragPayload && beginAssetPointerDrag(event, dragPayload)}
+            onDragEnd={clearCurrentDraggedAsset}
             style={{
               background: isActive ? `color-mix(in oklch, ${color} 8%, var(--bg-1))` : undefined,
               borderLeft: isActive ? `2px solid ${color}` : "2px solid transparent",
+              cursor: job.output_path ? "grab" : undefined,
             }}
           >
             <div className="swatch" />
@@ -63,7 +163,7 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa })
               <span className="name" title={job.output_path ?? undefined}>
                 take {ti + 1} · {basename(job.output_path!)}
               </span>
-              <span className="sub">{job.description}</span>
+              <span className="sub" title={job.description}>{sub}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
               <PlayButton path={job.output_path} size={12} />
@@ -112,14 +212,193 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa })
   );
 };
 
+interface PersistentAssetRowProps {
+  asset: PersistentAsset;
+  onUse: (asset: PersistentAsset) => void;
+  onQa: (asset: PersistentAsset, status: QaJobStatus) => void;
+}
+
+const PersistentAssetRow: React.FC<PersistentAssetRowProps> = ({ asset, onUse, onQa }) => {
+  const color = KIND_COLOR[asset.kind] ?? "currentColor";
+  const qaColor = QA_COLORS[asset.qaStatus];
+  const sub = truncate(asset.prompt || asset.model);
+  const dragPayload: DraggedAssetPayload = {
+    kind: asset.kind,
+    audioPath: asset.audioPath,
+    label: asset.name,
+    prompt: asset.prompt,
+    durationMs: asset.durationMs,
+    track: asset.track,
+    character: asset.character,
+  };
+  return (
+    <div
+      className={`asset-row ${asset.kind}`}
+      draggable
+      onDragStart={(event) => setAssetDragData(event, dragPayload)}
+      onPointerDown={(event) => beginAssetPointerDrag(event, dragPayload)}
+      onDragEnd={clearCurrentDraggedAsset}
+      style={{
+        background: asset.active ? `color-mix(in oklch, ${color} 8%, var(--bg-1))` : undefined,
+        borderLeft: asset.active ? `2px solid ${color}` : "2px solid transparent",
+        cursor: "grab",
+      }}
+    >
+      <div className="swatch" />
+      <div className="wave">
+        <Wave width={120} height={24} seed={asset.audioPath.charCodeAt(0) + asset.audioPath.length} count={28} color={color} opacity={0.7} />
+      </div>
+      <div className="meta">
+        <span className="name" title={asset.audioPath}>
+          {asset.active && asset.rowIndex != null ? `row ${asset.rowIndex + 1} · ` : ""}{asset.name}
+        </span>
+        <span className="sub" title={asset.prompt || asset.model}>{sub}</span>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", gap: 3 }}>
+        <PlayButton path={asset.audioPath} size={12} />
+        <button
+          className="btn btn-sm"
+          style={{
+            padding: "2px 4px", minWidth: 0,
+            color: asset.qaStatus === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
+            borderColor: asset.qaStatus === "approved" ? "var(--st-rendered)" : undefined,
+          }}
+          title="Approve asset"
+          onClick={() => onQa(asset, asset.qaStatus === "approved" ? "unreviewed" : "approved")}
+        >✓</button>
+        <button
+          className="btn btn-sm"
+          style={{
+            padding: "2px 4px", minWidth: 0,
+            color: asset.qaStatus === "rejected" ? "var(--sfx)" : "var(--fg-4)",
+            borderColor: asset.qaStatus === "rejected" ? "var(--sfx)" : undefined,
+          }}
+          title="Reject asset"
+          onClick={() => onQa(asset, asset.qaStatus === "rejected" ? "unreviewed" : "rejected")}
+        >✕</button>
+        {asset.qaStatus !== "unreviewed" && (
+          <span style={{
+            fontFamily: "var(--font-mono)", fontSize: 8, letterSpacing: "0.06em",
+            color: qaColor, textTransform: "uppercase",
+          }}>{asset.qaStatus}</span>
+        )}
+        <button
+          className={`btn btn-sm${asset.active ? " btn-primary" : ""}`}
+          style={asset.active ? { borderColor: color, color } : undefined}
+          onClick={() => !asset.active && onUse(asset)}
+          disabled={asset.active}
+        >
+          {asset.active ? "using" : "use"}
+        </button>
+      </div>
+    </div>
+  );
+};
+
 // ── Asset browser ─────────────────────────────────────────────────────────
 
 export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
   const { jobs, activeTakes, setActiveTake, setQaStatus } = useJobStore();
-  const { realProjectId } = useProjectStore();
+  const { realProjectId, activeSceneSlug } = useProjectStore();
+  const [generatedAssets, setGeneratedAssets] = useState<GeneratedAudioAsset[]>([]);
+  const [scriptRows, setScriptRows] = useState<ScriptRow[]>([]);
+
+  const refreshPersistentAssets = useCallback(() => {
+    if (!realProjectId || !activeSceneSlug) {
+      setGeneratedAssets([]);
+      setScriptRows([]);
+      return;
+    }
+    Promise.all([
+      listGeneratedAudioAssets(realProjectId),
+      readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug }),
+    ])
+      .then(([nextAssets, nextRows]) => {
+        setGeneratedAssets(nextAssets);
+        setScriptRows(nextRows);
+      })
+      .catch((error) => {
+        console.error("[AssetBrowser] failed to refresh assets", error);
+        setGeneratedAssets([]);
+        setScriptRows([]);
+      });
+  }, [realProjectId, activeSceneSlug]);
+
+  const completedJobsKey = useMemo(
+    () => jobs
+      .filter((job) => job.status === "complete" || job.status === "failed")
+      .map((job) => `${job.id}:${job.status}:${job.output_path ?? ""}`)
+      .join("|"),
+    [jobs],
+  );
+
+  useEffect(refreshPersistentAssets, [refreshPersistentAssets, completedJobsKey]);
+
+  useEffect(() => {
+    window.addEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshPersistentAssets);
+    return () => window.removeEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshPersistentAssets);
+  }, [refreshPersistentAssets]);
 
   const completedByModel = (model: "tts" | "sfx" | "music") =>
-    jobs.filter(j => j.model === model && j.status === "complete" && j.output_path);
+    jobs.filter(j =>
+      j.model === model
+      && j.status === "complete"
+      && j.output_path
+      && j.scene_slug === activeSceneSlug
+    );
+
+  const completedOutputPaths = useMemo(
+    () => new Set(jobs.filter((job) => job.status === "complete" && job.output_path).map((job) => job.output_path!)),
+    [jobs],
+  );
+
+  const persistentAssets = useMemo(() => {
+    const catalog = new Map(generatedAssets.map((asset) => [asset.audio_path, asset]));
+    const assigned = scriptRows
+      .map((row, index): PersistentAsset | null => {
+        if (!row.file.trim()) return null;
+        const kind = kindFromRowType(row.type);
+        if (!kind) return null;
+        const catalogAsset = catalog.get(row.file);
+        return {
+          id: `script:${index}:${row.file}`,
+          kind,
+          audioPath: row.file,
+          name: catalogAsset?.name ?? basename(row.file),
+          prompt: row.prompt || catalogAsset?.prompt || "",
+          model: catalogAsset?.model ?? "assigned",
+          durationMs: catalogAsset?.duration_ms ?? durationFromRow(row),
+          qaStatus: catalogAsset?.qa_status ?? "unreviewed",
+          rowIndex: index,
+          track: row.track,
+          character: row.character,
+          active: true,
+        };
+      })
+      .filter((asset): asset is PersistentAsset => !!asset);
+    const assignedPaths = new Set(assigned.map((asset) => asset.audioPath));
+    const localUnassigned = generatedAssets
+      .filter((asset) =>
+        asset.scene_slug === activeSceneSlug
+        && !assignedPaths.has(asset.audio_path)
+        && !completedOutputPaths.has(asset.audio_path)
+      )
+      .map((asset): PersistentAsset => ({
+        id: `asset:${asset.audio_path}`,
+        kind: asset.kind,
+        audioPath: asset.audio_path,
+        name: asset.name,
+        prompt: asset.prompt,
+        model: asset.model,
+        durationMs: asset.duration_ms,
+        qaStatus: asset.qa_status,
+        rowIndex: null,
+        track: null,
+        character: null,
+        active: false,
+      }));
+    return [...assigned, ...localUnassigned];
+  }, [activeSceneSlug, completedOutputPaths, generatedAssets, scriptRows]);
 
   // Group completed jobs by "{scene_slug}:{row_index}", sort each group oldest-first
   function groupByRow(completed: Job[]): Map<string, Job[]> {
@@ -158,6 +437,29 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
     }
   };
 
+  const handleUsePersistent = (asset: PersistentAsset) => {
+    if (!realProjectId || !activeSceneSlug || asset.active) return;
+    routeAudioToScene({
+      projectId: realProjectId,
+      sceneSlug: activeSceneSlug,
+      kind: asset.kind,
+      audioPath: asset.audioPath,
+      durationMs: asset.durationMs,
+    })
+      .then(refreshPersistentAssets)
+      .catch(console.error);
+  };
+
+  const handlePersistentQa = (asset: PersistentAsset, status: QaJobStatus) => {
+    updateSidecarQa({
+      audioPath: asset.audioPath,
+      qaStatus: status,
+      qaNotes: "",
+    })
+      .then(refreshPersistentAssets)
+      .catch(console.error);
+  };
+
   function renderSection(
     label: string,
     eyebrow: string,
@@ -169,7 +471,8 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
   ) {
     const completed = completedByModel(model);
     const groups = groupByRow(completed);
-    const total = mockItems.length + completed.length;
+    const persistent = persistentAssets.filter((asset) => asset.kind === model);
+    const total = mockItems.length + completed.length + persistent.length;
 
     return (
       <>
@@ -182,8 +485,17 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             key={key}
             jobs={groupJobs}
             activeJobId={activeTakes[key] ?? null}
+            scriptRows={scriptRows}
             onUse={handleUse}
             onQa={handleQa}
+          />
+        ))}
+        {persistent.map((asset) => (
+          <PersistentAssetRow
+            key={asset.id}
+            asset={asset}
+            onUse={handleUsePersistent}
+            onQa={handlePersistentQa}
           />
         ))}
         {mockItems.map((a, i) => (
@@ -198,7 +510,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             </div>
             <div className="meta">
               <span className="name">{a.name}</span>
-              <span className="sub">{a.sub}</span>
+              <span className="sub" title={a.sub}>{truncate(a.sub)}</span>
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
               <PlayButton path={a.file_path} size={12} />

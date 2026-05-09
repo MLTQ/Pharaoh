@@ -3,18 +3,97 @@ import { Icon, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { FountainEditor } from "./FountainEditor";
-import { useProjectStore } from "../../store/projectStore";
+import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
+import {
+  ASSET_DRAG_MIME,
+  ASSET_POINTER_DROP_EVENT,
+  getCurrentDraggedAsset,
+  SCRIPT_ASSETS_CHANGED_EVENT,
+  type AssetPointerDropDetail,
+  type DraggedAssetPayload,
+  type RoutableAssetKind,
+} from "../../lib/assetRouting";
 import { useRenderMetaStore } from "../../store/renderMetaStore";
-import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow } from "../../lib/types";
+import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow, TrackType } from "../../lib/types";
 
 type ScriptMode = "write" | "direct" | "mix";
 
 const PX_PER_SEC = 4;
 const TOTAL_SEC = 200;
 const SNAP_SEC = 0.5;
+
+type DraggedAsset = DraggedAssetPayload;
+
+function trackKindForAsset(kind: RoutableAssetKind): MockTrack["kind"] {
+  if (kind === "tts") return "dialogue";
+  if (kind === "music") return "music";
+  return "sfx";
+}
+
+function rowTypeForAsset(kind: RoutableAssetKind): TrackType {
+  if (kind === "tts") return "DIALOGUE";
+  if (kind === "music") return "MUSIC";
+  return "SFX";
+}
+
+function defaultTrackNameForAsset(asset: DraggedAsset): string {
+  if (asset.kind === "tts") return asset.character?.trim() || asset.track?.trim() || asset.label.split(/[_.]/)[0].toUpperCase() || "DIALOGUE";
+  if (asset.kind === "music") return asset.track?.trim() || "MUSIC";
+  return asset.track?.trim() || "SFX";
+}
+
+function uniqueTrackName(base: string, tracks: MockTrack[]): string {
+  const names = new Set(tracks.map((track) => track.name.toLowerCase()));
+  if (!names.has(base.toLowerCase())) return base;
+  let index = 2;
+  while (names.has(`${base} ${index}`.toLowerCase())) index += 1;
+  return `${base} ${index}`;
+}
+
+function blankScriptRow(sceneNo: string, asset: DraggedAsset, track: string, startMs: number): ScriptRow {
+  const prompt = asset.prompt ?? "";
+  return {
+    scene: sceneNo,
+    track,
+    type: rowTypeForAsset(asset.kind),
+    character: asset.kind === "tts" ? (asset.character ?? track) : "",
+    prompt,
+    file: asset.audioPath,
+    start_ms: String(startMs),
+    duration_ms: asset.durationMs != null ? String(asset.durationMs) : "",
+    loop: "",
+    pan: "0",
+    gain_db: "0",
+    instruct: "",
+    fade_in_ms: "",
+    fade_out_ms: "",
+    reverb_send: "0",
+    notes: "",
+  };
+}
+
+function parseDraggedAsset(event: React.DragEvent): DraggedAsset | null {
+  const candidates = [
+    event.dataTransfer.getData(ASSET_DRAG_MIME),
+    event.dataTransfer.getData("application/json"),
+    event.dataTransfer.getData("text/plain"),
+  ].filter(Boolean);
+
+  for (const raw of candidates) {
+    try {
+      const parsed = JSON.parse(raw) as DraggedAsset;
+      if (!parsed.audioPath || !["tts", "sfx", "music"].includes(parsed.kind)) continue;
+      return parsed;
+    } catch {
+      continue;
+    }
+  }
+
+  return getCurrentDraggedAsset();
+}
 
 // ── Draggable clip ───────────────────────────────────────────────────────────
 
@@ -115,6 +194,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [renderPath, setRenderPath]   = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mode, setMode] = useState<ScriptMode>("direct");
+  const [sceneRenderState, setSceneRenderState] = useState<Record<string, "idle" | "rendering" | "error">>({});
   // Master target loudness — podcast/streaming default. -14 = Spotify, -16 = podcast,
   // -18 = older Apple Podcasts, -23 = broadcast.
   const [targetLufs, setTargetLufs] = useState<number>(-16);
@@ -123,6 +203,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
   // Whole-script write debouncer used by Fountain mode (replaces all rows at once)
   const fountainSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const tracksRowsRef = useRef<HTMLDivElement | null>(null);
 
   const { realProjectId, activeSceneSlug, characters, projectsDir } = useProjectStore();
   const { jobs } = useJobStore();
@@ -146,6 +227,17 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       .map((job) => `${job.id}:${job.output_path ?? ""}`)
       .join("|"),
   ]);
+
+  useEffect(() => {
+    const refreshScript = () => {
+      if (!realProjectId || !activeSceneSlug) return;
+      readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug })
+        .then(setScriptRows)
+        .catch(() => setScriptRows([]));
+    };
+    window.addEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshScript);
+    return () => window.removeEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshScript);
+  }, [realProjectId, activeSceneSlug]);
 
   const handleAddRow = (row: ScriptRow) => setScriptRows((prev) => [...prev, row]);
 
@@ -259,6 +351,91 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     }
   };
 
+  const timelineStartFromDrop = (event: React.DragEvent<HTMLElement>) => {
+    const rect = event.currentTarget.getBoundingClientRect();
+    const rawSec = (event.clientX - rect.left) / PX_PER_SEC;
+    return Math.max(0, Math.round(rawSec / SNAP_SEC) * SNAP_SEC);
+  };
+
+  const trackNameForAssetDrop = (asset: DraggedAsset, compatibleTarget?: MockTrack): string => {
+    if (compatibleTarget) return compatibleTarget.name;
+    const base = defaultTrackNameForAsset(asset);
+    if (asset.kind === "tts") {
+      const existing = activeTracks.find((track) => track.kind === "dialogue" && track.name.toLowerCase() === base.toLowerCase());
+      return existing?.name ?? base;
+    }
+    return uniqueTrackName(base, activeTracks);
+  };
+
+  const placeDraggedAsset = async (asset: DraggedAsset, startSec: number, targetTrack?: MockTrack) => {
+    if (!realProjectId || !activeSceneSlug) return;
+    const desiredKind = trackKindForAsset(asset.kind);
+    const compatibleTarget = targetTrack?.kind === desiredKind ? targetTrack : undefined;
+    const track = trackNameForAssetDrop(asset, compatibleTarget);
+    const startMs = Math.round(startSec * 1000);
+    const compatibleType = rowTypeForAsset(asset.kind);
+    const shouldReuseExisting = asset.kind === "tts" || !!compatibleTarget;
+    const existingIndex = shouldReuseExisting
+      ? scriptRows.findIndex((row) => row.file === asset.audioPath && row.type === compatibleType)
+      : -1;
+
+    if (existingIndex >= 0) {
+      const fields: Record<string, string> = { start_ms: String(startMs), track };
+      if (asset.durationMs != null) fields.duration_ms = String(asset.durationMs);
+      if (asset.kind === "tts" && !scriptRows[existingIndex].character.trim()) {
+        fields.character = asset.character?.trim() || track;
+      }
+      await updateScriptRow({
+        projectId: realProjectId,
+        sceneSlug: activeSceneSlug,
+        rowIndex: existingIndex,
+        fields,
+      });
+      setScriptRows((prev) => prev.map((row, index) => index === existingIndex ? { ...row, ...fields } : row));
+    } else {
+      const nextRows = [...scriptRows, blankScriptRow(scene.no, asset, track, startMs)];
+      setScriptRows(nextRows);
+      await writeScript({ projectId: realProjectId, sceneSlug: activeSceneSlug, rows: nextRows });
+    }
+
+    window.dispatchEvent(new CustomEvent(SCRIPT_ASSETS_CHANGED_EVENT, {
+      detail: { projectId: realProjectId, sceneSlug: activeSceneSlug },
+    }));
+  };
+
+  const handleAssetDrop = (event: React.DragEvent<HTMLElement>, targetTrack?: MockTrack) => {
+    const asset = parseDraggedAsset(event);
+    if (!asset) return;
+    event.preventDefault();
+    event.stopPropagation();
+    const startSec = timelineStartFromDrop(event);
+    placeDraggedAsset(asset, startSec, targetTrack).catch(console.error);
+  };
+
+  useEffect(() => {
+    const handlePointerAssetDrop = (event: Event) => {
+      const detail = (event as CustomEvent<AssetPointerDropDetail>).detail;
+      if (!detail?.asset || !tracksRowsRef.current) return;
+      const rect = tracksRowsRef.current.getBoundingClientRect();
+      if (
+        detail.clientX < rect.left
+        || detail.clientX > rect.right
+        || detail.clientY < rect.top
+        || detail.clientY > rect.bottom
+      ) return;
+
+      const localX = detail.clientX - rect.left;
+      const localY = detail.clientY - rect.top;
+      const startSec = Math.max(0, Math.round((localX / PX_PER_SEC) / SNAP_SEC) * SNAP_SEC);
+      const trackIndex = Math.floor(localY / 76);
+      const targetTrack = trackIndex >= 0 && trackIndex < activeTracks.length ? activeTracks[trackIndex] : undefined;
+      placeDraggedAsset(detail.asset, startSec, targetTrack).catch(console.error);
+    };
+
+    window.addEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
+    return () => window.removeEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
+  }, [activeTracks, activeSceneSlug, realProjectId, scriptRows]);
+
   // ── Render ───────────────────────────────────────────────────────────────
 
   const setMeta = useRenderMetaStore((s) => s.setMeta);
@@ -291,7 +468,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
   // ── Misc ─────────────────────────────────────────────────────────────────
 
-  const { playing, position } = useAudioStore();
+  const { playing, position, play: playAudio, stop: stopAudio } = useAudioStore();
   const playheadSec = playing ? position : 72;
 
   useEffect(() => {
@@ -310,6 +487,38 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     const ss = (s % 60).toString().padStart(2, "0");
     return <div key={s} className="ruler-tick">{m}:{ss}</div>;
   });
+
+  const sceneSlugFor = (target: MockScene) => target.slug ?? deriveSlug(target.no, target.title);
+  const sceneRenderPath = (target: MockScene) =>
+    realProjectId && projectsDir ? `${projectsDir}/${realProjectId}/scenes/${sceneSlugFor(target)}/render.wav` : null;
+
+  const handleScenePlay = async (event: React.MouseEvent, target: MockScene) => {
+    event.stopPropagation();
+    if (!realProjectId || !projectsDir) return;
+    const slug = sceneSlugFor(target);
+    const path = sceneRenderPath(target);
+    if (!path) return;
+
+    if (playing === path) {
+      stopAudio();
+      return;
+    }
+
+    setSceneRenderState((prev) => ({ ...prev, [slug]: "rendering" }));
+    try {
+      const existingMeta = await readRenderMeta(path);
+      const outputPath = existingMeta ? path : await renderScene(realProjectId, slug, targetLufs);
+      try {
+        const meta = existingMeta ?? await readRenderMeta(outputPath);
+        if (meta) setMeta(slug, meta);
+      } catch (_) { /* best-effort metadata */ }
+      setSceneRenderState((prev) => ({ ...prev, [slug]: "idle" }));
+      await playAudio(outputPath);
+    } catch (error) {
+      console.error("[CompositionView] scene playback failed", error);
+      setSceneRenderState((prev) => ({ ...prev, [slug]: "error" }));
+    }
+  };
 
   // ── JSX ──────────────────────────────────────────────────────────────────
 
@@ -427,18 +636,40 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
       {/* Scene strip */}
       <div className="scene-strip" style={{ flexShrink: 0 }}>
-        {scenes.map((s) => (
-          <div
-            key={s.no}
-            className={`scene-chip ${s.no === scene.no ? "active" : ""}`}
-            onClick={() => onSwitchScene(s.no)}
-          >
-            <span className={`ring ${s.status}`} />
-            <span>{s.no}</span>
-            <span style={{ color: "var(--fg-3)" }}>·</span>
-            <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--font-ui)" }}>{s.title}</span>
-          </div>
-        ))}
+        {scenes.map((s) => {
+          const slug = sceneSlugFor(s);
+          const renderPathForScene = sceneRenderPath(s);
+          const isPlayingScene = !!renderPathForScene && playing === renderPathForScene;
+          const renderBusy = sceneRenderState[slug] === "rendering";
+          const renderFailed = sceneRenderState[slug] === "error";
+          return (
+            <div
+              key={s.no}
+              className={`scene-chip ${s.no === scene.no ? "active" : ""}`}
+              onClick={() => onSwitchScene(s.no)}
+            >
+              <button
+                className="btn btn-sm"
+                onClick={(event) => handleScenePlay(event, s)}
+                disabled={!realProjectId || renderBusy}
+                title={renderBusy ? "Rendering scene before playback" : isPlayingScene ? "Stop scene" : "Play scene"}
+                style={{
+                  padding: "1px 4px",
+                  minWidth: 0,
+                  lineHeight: 1,
+                  borderColor: isPlayingScene ? "var(--st-rendered)" : renderFailed ? "var(--sfx)" : undefined,
+                  color: isPlayingScene ? "var(--st-rendered)" : renderFailed ? "var(--sfx)" : undefined,
+                }}
+              >
+                <Icon name={isPlayingScene ? "pause" : "play"} style={{ width: 10, height: 10, opacity: renderBusy ? 0.35 : 1 }} />
+              </button>
+              <span className={`ring ${s.status}`} />
+              <span>{s.no}</span>
+              <span style={{ color: "var(--fg-3)" }}>·</span>
+              <span style={{ textTransform: "none", letterSpacing: 0, fontFamily: "var(--font-ui)" }}>{s.title}</span>
+            </div>
+          );
+        })}
       </div>
 
       {/* Main area: layout depends on mode */}
@@ -496,19 +727,47 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           </div>
           <div className="tracks-body">
             <div className="timeline-ruler" style={{ width: TOTAL_SEC * PX_PER_SEC }}>{ruler}</div>
-            <div className="tracks-rows" style={{ width: TOTAL_SEC * PX_PER_SEC }}>
+            <div
+              ref={tracksRowsRef}
+              className="tracks-rows"
+              style={{
+                width: TOTAL_SEC * PX_PER_SEC,
+                boxShadow: dropTarget === -1 ? "inset 0 0 0 1px var(--fg-0)" : undefined,
+              }}
+              onDragOver={(e) => {
+                // Some WebKit/Tauri builds do not expose custom MIME types
+                // reliably during dragover. Always allow the drop, then parse
+                // and reject non-asset payloads in onDrop.
+                e.preventDefault();
+                e.dataTransfer.dropEffect = "copy";
+                setDropTarget(-1);
+              }}
+              onDragLeave={() => setDropTarget(null)}
+              onDrop={(e) => {
+                setDropTarget(null);
+                handleAssetDrop(e);
+              }}
+            >
               {activeTracks.length === 0 && realProjectId && (
                 <div style={{ padding: "20px 16px", fontSize: 11, color: "var(--fg-4)" }}>
-                  No placed clips yet — use Place on script rows to add them to the timeline.
+                  No placed clips yet — drag an asset here to create a track.
                 </div>
               )}
               {activeTracks.map((t, ti) => (
                 <div
                   key={t.id}
                   className="track-row"
-                  onDragOver={(e) => { e.preventDefault(); setDropTarget(ti); }}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    e.dataTransfer.dropEffect = "copy";
+                    setDropTarget(ti);
+                  }}
                   onDragLeave={() => setDropTarget(null)}
-                  onDrop={(e) => { e.preventDefault(); setDropTarget(null); }}
+                  onDrop={(e) => {
+                    setDropTarget(null);
+                    handleAssetDrop(e, t);
+                  }}
                   style={dropTarget === ti ? { boxShadow: "inset 0 0 0 1px var(--fg-0)" } : {}}
                 >
                   {t.clips.map((c, ci) => (
