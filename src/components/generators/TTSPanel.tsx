@@ -63,6 +63,17 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
     setScene(defaultScene);
   }, [defaultScene]);
 
+  // Only re-fetch when a relevant job *settles* (complete/failed) — not on every
+  // progress tick. The jobs array updates ~2x/sec during generation; depending
+  // on the entire array burns Tauri IPC cycles for nothing.
+  const completedJobsKey = useMemo(
+    () => jobs
+      .filter((j) => j.scene_slug === sceneSlug && j.model === "tts" && (j.status === "complete" || j.status === "failed"))
+      .map((j) => `${j.id}:${j.status}`)
+      .join("|"),
+    [jobs, sceneSlug],
+  );
+
   useEffect(() => {
     if (!realProjectId || !sceneSlug) return;
     listGeneratedAudioAssets(realProjectId)
@@ -74,7 +85,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         ));
       })
       .catch(() => {});
-  }, [realProjectId, sceneSlug, jobs]);
+  }, [realProjectId, sceneSlug, completedJobsKey]);
 
   useEffect(() => {
     for (const asset of generatedAssets) {

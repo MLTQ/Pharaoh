@@ -143,6 +143,15 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
     setScene(defaultScene);
   }, [defaultScene]);
 
+  // Stable signature: only changes when a music job for this scene settles.
+  const completedJobsKey = useMemo(
+    () => jobs
+      .filter((j) => j.scene_slug === sceneSlug && j.model === "music" && (j.status === "complete" || j.status === "failed"))
+      .map((j) => `${j.id}:${j.status}`)
+      .join("|"),
+    [jobs, sceneSlug],
+  );
+
   useEffect(() => {
     if (!realProjectId || !sceneSlug) return;
     listGeneratedAudioAssets(realProjectId)
@@ -154,7 +163,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
         ));
       })
       .catch(() => {});
-  }, [realProjectId, sceneSlug, jobs]);
+  }, [realProjectId, sceneSlug, completedJobsKey]);
 
   useEffect(() => {
     for (const asset of generatedAssets) {

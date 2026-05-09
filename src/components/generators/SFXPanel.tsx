@@ -192,6 +192,15 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
     setScene(defaultScene);
   }, [defaultScene]);
 
+  // Stable signature: only changes when an SFX job for this scene settles.
+  const completedJobsKey = useMemo(
+    () => jobs
+      .filter((j) => j.scene_slug === sceneSlug && j.model === "sfx" && (j.status === "complete" || j.status === "failed"))
+      .map((j) => `${j.id}:${j.status}`)
+      .join("|"),
+    [jobs, sceneSlug],
+  );
+
   useEffect(() => {
     if (!realProjectId || !sceneSlug) return;
     listGeneratedAudioAssets(realProjectId)
@@ -204,7 +213,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
         }));
       })
       .catch(() => {});
-  }, [realProjectId, sceneSlug, jobs]);
+  }, [realProjectId, sceneSlug, completedJobsKey]);
 
   useEffect(() => {
     for (const asset of generatedAssets) {

@@ -170,8 +170,12 @@ export default function App() {
   };
   const sidebar = sidebarTitle[activeWorkspace];
 
-  // Per-workspace running-job badge counts on the rail
-  const sceneJobsRunning = jobs.filter((j) => j.status === "running" && (j.model === "tts" || j.model === "sfx" || j.model === "music")).length;
+  // Per-channel running-job counts (powers per-channel color dots on the
+  // Scenes rail icon and the badges on each Scene sub-tab).
+  const ttsJobsRunning = jobs.filter((j) => j.status === "running" && j.model === "tts").length;
+  const sfxJobsRunning = jobs.filter((j) => j.status === "running" && j.model === "sfx").length;
+  const musicJobsRunning = jobs.filter((j) => j.status === "running" && j.model === "music").length;
+  const sceneJobsRunning = ttsJobsRunning + sfxJobsRunning + musicJobsRunning;
 
   return (
     <div className="app">
@@ -247,18 +251,42 @@ export default function App() {
       <div className="rail">
         {RAIL_WORKSPACES.map((r) => {
           const isActive = activeWorkspace === r.id;
-          // Show running-job badge on Scenes when a generation is in flight
-          const badge = r.id === "scenes" && sceneJobsRunning > 0 ? sceneJobsRunning : null;
+          // Per-channel color dots on the Scenes icon when generation is running —
+          // restores the channel-color signal from the old per-model rail items.
+          const showChannelDots = r.id === "scenes" && sceneJobsRunning > 0;
           return (
             <button
               key={r.id}
               className={`rail-btn ${isActive ? "active" : ""}`}
               title={r.label}
               onClick={() => setWorkspace(r.id)}
+              style={{ position: "relative" }}
             >
               <Icon name={r.icon} style={{ width: 18, height: 18 }} />
-              {badge != null && (
-                <span className="rail-badge" style={{ background: "var(--st-gen)" }}>{badge}</span>
+              {showChannelDots && (
+                <span style={{
+                  position: "absolute", top: 4, right: 4,
+                  display: "flex", flexDirection: "column", gap: 2,
+                }}>
+                  {ttsJobsRunning > 0 && (
+                    <span title={`${ttsJobsRunning} voice job${ttsJobsRunning !== 1 ? "s" : ""}`} style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: "var(--tts)", boxShadow: "0 0 4px var(--tts)",
+                    }} />
+                  )}
+                  {sfxJobsRunning > 0 && (
+                    <span title={`${sfxJobsRunning} sound job${sfxJobsRunning !== 1 ? "s" : ""}`} style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: "var(--sfx)", boxShadow: "0 0 4px var(--sfx)",
+                    }} />
+                  )}
+                  {musicJobsRunning > 0 && (
+                    <span title={`${musicJobsRunning} score job${musicJobsRunning !== 1 ? "s" : ""}`} style={{
+                      width: 6, height: 6, borderRadius: "50%",
+                      background: "var(--music)", boxShadow: "0 0 4px var(--music)",
+                    }} />
+                  )}
+                </span>
               )}
             </button>
           );
@@ -444,26 +472,48 @@ export default function App() {
             </span>
             {SCENE_SUBTABS.map((tab) => {
               const isActive = view === tab.id;
-              const jobBadge = tab.id === "tts" ? jobs.filter(j => j.model === "tts" && j.status === "running").length
-                            : tab.id === "sfx" ? jobs.filter(j => j.model === "sfx" && j.status === "running").length
-                            : tab.id === "music" ? jobs.filter(j => j.model === "music" && j.status === "running").length
+              const jobBadge = tab.id === "tts" ? ttsJobsRunning
+                            : tab.id === "sfx" ? sfxJobsRunning
+                            : tab.id === "music" ? musicJobsRunning
                             : 0;
+              const isGenTab = tab.id !== "composition";
+              // Filled active state for generation tabs (loud channel color);
+              // subtle active state for the Compose tab so the timeline isn't shouty.
+              const activeBg = isGenTab
+                ? `color-mix(in oklch, ${tab.accent} 14%, transparent)`
+                : "var(--bg-2)";
+              const inactiveColor = isGenTab
+                ? `color-mix(in oklch, ${tab.accent} 70%, var(--fg-3))`
+                : "var(--fg-3)";
               return (
                 <button
                   key={tab.id}
                   onClick={() => setView(tab.id)}
                   style={{
-                    background: "transparent",
+                    background: isActive ? activeBg : "transparent",
                     border: "none",
                     borderBottom: isActive ? `2px solid ${tab.accent}` : "2px solid transparent",
-                    color: isActive ? tab.accent : "var(--fg-3)",
+                    color: isActive ? tab.accent : inactiveColor,
                     padding: "8px 14px",
                     fontSize: 11.5,
                     cursor: "pointer",
                     display: "flex", alignItems: "center", gap: 6,
-                    fontWeight: isActive ? 500 : 400,
+                    fontWeight: isActive ? 600 : 500,
+                    letterSpacing: isGenTab ? "0.02em" : 0,
+                    transition: "background-color 0.1s, color 0.1s",
                   }}
                 >
+                  {/* Channel color dot before generation tab labels — visible
+                      even when the tab is inactive, so the channel identity
+                      reads at a glance. */}
+                  {isGenTab && (
+                    <span style={{
+                      width: 7, height: 7, borderRadius: "50%",
+                      background: tab.accent,
+                      opacity: isActive ? 1 : 0.55,
+                      boxShadow: jobBadge > 0 ? `0 0 5px ${tab.accent}` : "none",
+                    }} />
+                  )}
                   {tab.label}
                   {jobBadge > 0 && (
                     <span style={{
@@ -493,27 +543,42 @@ export default function App() {
             onOpenBible={() => setView("bible")}
           />
         )}
-        {view === "composition" && scene && (
-          <CompositionView
-            scene={scene}
-            scenes={scenes}
-            tracks={[]}
-            assets={assets}
-            onSwitchScene={(no) => setActiveScene(no)}
-            onOpenPyramid={() => setView("pyramid")}
-            onUpdateScene={updateScene}
-          />
-        )}
-        {view === "composition" && !scene && (
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--fg-4)", fontSize: 13 }}>
-            No scenes yet — create one in the Pyramid.
-          </div>
-        )}
         {view === "bible"      && <StoryBibleView />}
         {view === "characters" && <CharacterDesignerView />}
-        {view === "tts"   && <TTSPanel scenes={scenes} defaultScene={activeSceneNo} />}
-        {view === "sfx"   && <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />}
-        {view === "music" && <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />}
+
+        {/* Scenes workspace: all 4 sub-views stay mounted at once and toggle
+            via display, so flipping Compose/Voice/Sound/Score is instant
+            instead of paying a fresh-mount + Tauri-IPC tax every click. */}
+        {activeWorkspace === "scenes" && (
+          <>
+            <div style={{ display: view === "composition" ? "block" : "none", position: "absolute", inset: 0 }}>
+              {scene ? (
+                <CompositionView
+                  scene={scene}
+                  scenes={scenes}
+                  tracks={[]}
+                  assets={assets}
+                  onSwitchScene={(no) => setActiveScene(no)}
+                  onOpenPyramid={() => setView("pyramid")}
+                  onUpdateScene={updateScene}
+                />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", color: "var(--fg-4)", fontSize: 13 }}>
+                  No scenes yet — create one in the Pyramid.
+                </div>
+              )}
+            </div>
+            <div style={{ display: view === "tts" ? "block" : "none", position: "absolute", inset: 0 }}>
+              <TTSPanel scenes={scenes} defaultScene={activeSceneNo} />
+            </div>
+            <div style={{ display: view === "sfx" ? "block" : "none", position: "absolute", inset: 0 }}>
+              <SFXPanel scenes={scenes} defaultScene={activeSceneNo} />
+            </div>
+            <div style={{ display: view === "music" ? "block" : "none", position: "absolute", inset: 0 }}>
+              <MusicPanel scenes={scenes} defaultScene={activeSceneNo} />
+            </div>
+          </>
+        )}
         </div>
       </div>
 
