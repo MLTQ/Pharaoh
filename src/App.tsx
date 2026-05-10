@@ -25,6 +25,7 @@ import { useUiStore } from "./store/uiStore";
 import { useModelStore } from "./store/modelStore";
 import { useRenderMetaStore } from "./store/renderMetaStore";
 import { useAudioStore } from "./store/audioStore";
+import { useToastStore } from "./store/toastStore";
 import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
 import { WORKSPACE_OF } from "./lib/types";
 
@@ -99,6 +100,66 @@ export default function App() {
     document.documentElement.dataset.colorTemp = colorTemp === "forest" ? "" : colorTemp;
     document.documentElement.dataset.density   = density === "compact" ? "compact" : "";
   }, [colorTemp, density]);
+
+  // ── Global keyboard shortcuts ──
+  // Single listener that gates on active element so it doesn't fire while
+  // typing into inputs / textareas / contenteditable. Only the project chooser
+  // and scene navigation work cross-view; per-surface shortcuts (J/K/L scrub,
+  // Cmd-Z, etc.) live in their own components.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const inEditor = target?.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+      const cmd = e.metaKey || e.ctrlKey;
+
+      // Cmd/Ctrl-K — quick project switcher (the rail folder icon's gesture)
+      if (cmd && e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        // Anchor near the rail's folder icon (bottom-left)
+        setProjectChooser({ x: 56, y: window.innerHeight - 80 });
+        return;
+      }
+
+      // Cmd/Ctrl-S — confirm save. We already autosave; this just reassures
+      // users with the muscle-memory and triggers an explicit flush via the
+      // beforeunload-style listeners that components install.
+      if (cmd && e.key.toLowerCase() === "s" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        // Dispatch a synthetic beforeunload so any debounced writers flush
+        // immediately. They install with `addEventListener("beforeunload", flush)`.
+        window.dispatchEvent(new Event("beforeunload"));
+        useToastStore.getState().push({ kind: "info", title: "Saved" });
+        return;
+      }
+
+      // Skip the rest when the user is typing
+      if (inEditor) return;
+
+      // ← / → arrow keys: previous/next scene when no input is focused.
+      // Loops at the ends — better than dead-stopping for long episodes.
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && scenes.length > 1) {
+        e.preventDefault();
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        const idx = Math.max(0, scenes.findIndex((s) => s.no === activeSceneNo));
+        const next = scenes[(idx + dir + scenes.length) % scenes.length];
+        setActiveScene(next.no);
+        return;
+      }
+
+      // Space — stop audio if anything's playing. Per-surface space handlers
+      // (ClipStudio crop preview) take precedence by stopping propagation
+      // before this fires.
+      if (e.code === "Space" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (audioPlayingPath) {
+          e.preventDefault();
+          stopAudio();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scenes, activeSceneNo, audioPlayingPath, setActiveScene, stopAudio]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
