@@ -79,6 +79,7 @@ pub fn run() {
             commands::audio_enhance::upscale_audio_asset,
             // LLM
             commands::llm::draft_scene,
+            commands::llm::storyboard_review,
             // Setup integrity
             commands::setup_check::check_setup,
             // Audio engine (ffmpeg)
