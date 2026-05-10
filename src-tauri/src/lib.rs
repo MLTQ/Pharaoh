@@ -82,6 +82,8 @@ pub fn run() {
             commands::llm::storyboard_review,
             // Setup integrity
             commands::setup_check::check_setup,
+            // Project archive
+            commands::archive::archive_project,
             // Audio engine (ffmpeg)
             commands::audio_engine::import_audio_asset,
             commands::audio_engine::normalize_clip,

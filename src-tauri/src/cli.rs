@@ -44,6 +44,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, project_id, rest @ ..] if group == "project" && action == "update" => {
             project_update(&config, project_id, rest).await
         }
+        [group, action, project_id, rest @ ..] if group == "project" && action == "archive" => {
+            project_archive(&config, project_id, rest).await
+        }
         [group, action, project_id] if group == "scene" && action == "list" => {
             scene_list(&config, project_id).await
         }
@@ -214,6 +217,7 @@ fn usage() -> &'static str {
   pharaoh project status <project_id>
   pharaoh project create --title <title> [--logline <text>] [--tone <text>]
   pharaoh project update <project_id> [--title <text>] [--synopsis <text>] [--tone <text>]
+  pharaoh project archive <project_id> [--output <path>]
   pharaoh scene list <project_id>
   pharaoh scene get <project_id> <scene_slug_or_id>
   pharaoh scene create <project_id> --title <title> [--slug <slug>] [--index <n>]
@@ -484,6 +488,36 @@ async fn project_update(
     project.updated_at = Utc::now();
     write_json(&path, &project)?;
     print_json(&project)
+}
+
+/// `pharaoh project archive <project> [--output <path>]`
+///
+/// Bundles the project into a zip. Defaults the output to
+/// ./pharaoh-archive-<title-slug>-<date>.zip in the current directory.
+async fn project_archive(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    // Resolve a default output path: ./pharaoh-archive-<slug>-<YYYYMMDD>.zip
+    let project = load_project(config, project_id).ok();
+    let title_slug = project.as_ref()
+        .map(|p| p.title.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>())
+        .unwrap_or_else(|| project_id.to_string());
+    let default_output = format!(
+        "./pharaoh-archive-{}-{}.zip",
+        title_slug.trim_matches('_'),
+        Utc::now().format("%Y%m%d"),
+    );
+    let output = flag_opt(&flags, "output").unwrap_or(default_output);
+    let result = crate::commands::archive::archive_project_with_projects_dir(
+        &projects_dir,
+        project_id,
+        Path::new(&output),
+    )?;
+    print_json(&result)
 }
 
 async fn scene_list(config: &crate::models::AppConfig, project_id: &str) -> Result<()> {
