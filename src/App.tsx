@@ -16,6 +16,7 @@ import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ClipStudioView } from "./components/post/ClipStudioView";
 import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
+import { ProjectChooser } from "./components/launcher/ProjectChooser";
 import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
@@ -122,6 +123,11 @@ export default function App() {
     const s = (total % 60).toString().padStart(2, "0");
     return `${m}:${s}`;
   };
+
+  // Project chooser popover anchor — toggled by the rail's folder icon.
+  // Declared before the launcher early-return so hook order is stable across
+  // realProjectId transitions (otherwise React errors on hook count change).
+  const [projectChooser, setProjectChooser] = useState<{ x: number; y: number } | null>(null);
 
   // ── No project: launcher shell ───────────────────────────────────────────
   if (!realProjectId) {
@@ -300,9 +306,12 @@ export default function App() {
         })}
         <div className="rail-spacer" />
         <button
-          className="rail-btn"
+          className={`rail-btn ${projectChooser ? "active" : ""}`}
           title="Switch project"
-          onClick={() => { useProjectStore.setState({ realProjectId: null, scenes: [], characters: [] }); setView("pyramid"); }}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setProjectChooser({ x: rect.right, y: rect.top + rect.height / 2 });
+          }}
         >
           <Icon name="folder" style={{ width: 18, height: 18 }} />
         </button>
@@ -679,6 +688,13 @@ export default function App() {
         </div>
       </div>
       <ToastHost />
+      {projectChooser && (
+        <ProjectChooser
+          anchorX={projectChooser.x}
+          anchorY={projectChooser.y}
+          onClose={() => setProjectChooser(null)}
+        />
+      )}
     </div>
   );
 }
