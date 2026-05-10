@@ -81,7 +81,7 @@ interface ScriptCardProps {
   onUpdate: (patch: Partial<ScriptRow>) => void;
   onGenerate: () => void;
   onPlace: () => void;
-  onDragStart: () => void;
+  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
   onDragEnd: () => void;
@@ -444,8 +444,29 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  // ── Drag-to-reorder ──
-  const handleDragStart = (i: number) => setDragIndex(i);
+  // ── Drag-to-reorder + drag-to-place ──
+  // The card supports two drag operations:
+  //   1. Drop on another card → reorder within the script list
+  //   2. Drop on a timeline track row → place this row at that timeline
+  //      position (writes start_ms and possibly track to script.csv)
+  // The timeline detects (2) via the custom MIME type set in dataTransfer.
+  const handleDragStart = (i: number, e?: React.DragEvent<HTMLDivElement>) => {
+    setDragIndex(i);
+    if (e?.dataTransfer) {
+      const row = rows[i];
+      const payload = JSON.stringify({
+        rowIndex: i,
+        type: row.type,
+        track: row.track,
+        hasFile: row.file !== "",
+      });
+      // Custom MIME so the timeline can distinguish script-row drags from
+      // arbitrary OS drags. Plain text/plain fallback for paste-type tooling.
+      e.dataTransfer.setData("application/x-pharaoh-script-row", payload);
+      e.dataTransfer.setData("text/plain", `script row ${i + 1}`);
+      e.dataTransfer.effectAllowed = "copyMove";
+    }
+  };
   const handleDragOver = (e: React.DragEvent, i: number) => {
     e.preventDefault();
     setDragOverIndex(i);
@@ -539,7 +560,7 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
             onUpdate={(patch) => onUpdate(i, patch)}
             onGenerate={() => handleGenerate(row)}
             onPlace={() => handlePlace(i)}
-            onDragStart={() => handleDragStart(i)}
+            onDragStart={(e) => handleDragStart(i, e)}
             onDragOver={(e) => handleDragOver(e, i)}
             onDrop={() => handleDrop(i)}
             onDragEnd={handleDragEnd}

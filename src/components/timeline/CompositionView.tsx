@@ -28,15 +28,19 @@ interface DraggableClipProps {
   isSelected: boolean;
   onSelect: () => void;
   onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
+  onTrim: (trackIdx: number, clipIdx: number, newDurationSec: number) => void;
   onRequestTakes: (rowIndex: number, x: number, y: number) => void;
 }
 
 const DraggableClip: React.FC<DraggableClipProps> = ({
-  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove, onRequestTakes,
+  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove, onTrim, onRequestTakes,
 }) => {
   const pointerStartX = useRef(0);
+  const trimStartLen = useRef(0);
   const [dragOffsetPx, setDragOffsetPx] = useState(0);
   const [dragging, setDragging] = useState(false);
+  const [trimDeltaPx, setTrimDeltaPx] = useState(0);
+  const [trimming, setTrimming] = useState(false);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -61,17 +65,50 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
     setDragOffsetPx(0);
   };
 
+  // ── Right-edge trim ───────────────────────────────────────────────────
+  // The trim handle is its own pointer surface so it doesn't fight with the
+  // body's drag-to-move. Updates the row's duration_ms, which the renderer
+  // honors via atrim — the audio is actually shortened on render, not just
+  // the visual width.
+
+  const handleTrimDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    e.stopPropagation();
+    e.preventDefault();
+    e.currentTarget.setPointerCapture(e.pointerId);
+    pointerStartX.current = e.clientX;
+    trimStartLen.current = clip.len;
+    setTrimDeltaPx(0);
+    setTrimming(true);
+    onSelect();
+  };
+
+  const handleTrimMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!trimming) return;
+    setTrimDeltaPx(e.clientX - pointerStartX.current);
+  };
+
+  const handleTrimUp = () => {
+    if (!trimming) return;
+    setTrimming(false);
+    const rawLen = trimStartLen.current + trimDeltaPx / PX_PER_SEC;
+    // Floor at 0.1s so the user can't trim a clip out of existence
+    const newLen = Math.max(0.1, Math.round(rawLen / SNAP_SEC) * SNAP_SEC);
+    onTrim(trackIdx, clipIdx, newLen);
+    setTrimDeltaPx(0);
+  };
+
   const effectiveLeft = (startSec * PX_PER_SEC) + dragOffsetPx;
+  const effectiveWidth = (clip.len + (trimming ? trimDeltaPx / PX_PER_SEC : 0)) * PX_PER_SEC;
 
   return (
     <div
       className={`clip ${trackKind}${isSelected ? " selected" : ""}${dragging ? " dragging" : ""}`}
       style={{
         left: effectiveLeft,
-        width: clip.len * PX_PER_SEC,
+        width: effectiveWidth,
         cursor: dragging ? "grabbing" : "grab",
-        opacity: dragging ? 0.85 : 1,
-        zIndex: dragging ? 10 : undefined,
+        opacity: dragging || trimming ? 0.85 : 1,
+        zIndex: dragging || trimming ? 10 : undefined,
         userSelect: "none",
       }}
       onPointerDown={handlePointerDown}
@@ -85,17 +122,35 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
         e.stopPropagation();
         onRequestTakes(clip.row_index, e.clientX, e.clientY);
       }}
-      title="Right-click for takes"
+      title="Drag body to move · drag right edge to trim · right-click for takes"
     >
       <div className="clip-label">{clip.label}</div>
       <div className="clip-wave">
         <Wave
-          width={clip.len * PX_PER_SEC}
+          width={effectiveWidth}
           height={28}
           seed={trackIdx * 7 + clipIdx * 3 + 1}
-          count={Math.max(20, Math.floor(clip.len * 1.6))}
+          count={Math.max(20, Math.floor((clip.len + (trimming ? trimDeltaPx / PX_PER_SEC : 0)) * 1.6))}
         />
       </div>
+      {/* Right-edge trim handle. Sits over the rightmost 6px of the clip;
+          its own pointer events don't bubble to the body's drag handler. */}
+      <div
+        onPointerDown={handleTrimDown}
+        onPointerMove={handleTrimMove}
+        onPointerUp={handleTrimUp}
+        title="Drag to trim"
+        style={{
+          position: "absolute",
+          top: 0, right: 0, bottom: 0,
+          width: 6,
+          cursor: "ew-resize",
+          background: trimming || isSelected
+            ? "color-mix(in oklch, var(--fg-0) 30%, transparent)"
+            : "transparent",
+          borderRight: trimming ? "1px solid var(--fg-0)" : "1px solid transparent",
+        }}
+      />
     </div>
   );
 };
@@ -267,6 +322,28 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           sceneSlug: activeSceneSlug,
           rowIndex,
           fields: { start_ms: String(Math.round(newStartSec * 1000)) },
+        }).catch(console.error);
+      }
+    }
+  };
+
+  const handleClipTrim = (ti: number, ci: number, newDurationSec: number) => {
+    // Optimistically update local state so the visual width sticks immediately
+    setScriptRows((prev) => {
+      const rowIndex = activeTracks[ti]?.clips[ci]?.row_index;
+      if (rowIndex == null || !prev[rowIndex]) return prev;
+      const next = [...prev];
+      next[rowIndex] = { ...next[rowIndex], duration_ms: String(Math.round(newDurationSec * 1000)) };
+      return next;
+    });
+    if (realProjectId && activeSceneSlug) {
+      const rowIndex = activeTracks[ti]?.clips[ci]?.row_index;
+      if (rowIndex != null) {
+        updateScriptRow({
+          projectId: realProjectId,
+          sceneSlug: activeSceneSlug,
+          rowIndex,
+          fields: { duration_ms: String(Math.round(newDurationSec * 1000)) },
         }).catch(console.error);
       }
     }
@@ -519,10 +596,45 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                 <div
                   key={t.id}
                   className="track-row"
-                  onDragOver={(e) => { e.preventDefault(); setDropTarget(ti); }}
+                  onDragOver={(e) => {
+                    // Accept drag only if it carries our payload type. Without
+                    // preventDefault the drop event won't fire on this element.
+                    const types = Array.from(e.dataTransfer.types || []);
+                    if (!types.includes("application/x-pharaoh-script-row")) return;
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                    setDropTarget(ti);
+                  }}
                   onDragLeave={() => setDropTarget(null)}
-                  onDrop={(e) => { e.preventDefault(); setDropTarget(null); }}
-                  style={dropTarget === ti ? { boxShadow: "inset 0 0 0 1px var(--fg-0)" } : {}}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    setDropTarget(null);
+                    const data = e.dataTransfer.getData("application/x-pharaoh-script-row");
+                    if (!data) return;
+                    let payload: { rowIndex: number; type: string; track: string };
+                    try { payload = JSON.parse(data); } catch { return; }
+                    // Compute drop position in seconds relative to this track row's left edge
+                    const rect = e.currentTarget.getBoundingClientRect();
+                    const xInTrack = e.clientX - rect.left;
+                    const rawSec = Math.max(0, xInTrack / PX_PER_SEC);
+                    const snapped = Math.round(rawSec / SNAP_SEC) * SNAP_SEC;
+                    // Build the patch: always set start_ms; only swap track when
+                    // the kinds match (don't put a music clip on a dialogue lane)
+                    const patch: Partial<ScriptRow> = { start_ms: String(Math.round(snapped * 1000)) };
+                    const sourceType = payload.type.toUpperCase();
+                    const sourceKind: MockTrack["kind"] =
+                      sourceType === "DIALOGUE" ? "dialogue" :
+                      sourceType === "MUSIC"    ? "music"    :
+                      sourceType === "BED" || sourceType === "SFX" ? "sfx" : "sfx";
+                    if (sourceKind === t.kind && payload.track !== t.id) {
+                      patch.track = t.id;
+                    }
+                    handleUpdateRow(payload.rowIndex, patch);
+                  }}
+                  style={dropTarget === ti ? {
+                    boxShadow: `inset 0 0 0 2px var(--${t.kind === "dialogue" ? "tts" : t.kind === "music" ? "music" : "sfx"})`,
+                    background: `color-mix(in oklch, var(--${t.kind === "dialogue" ? "tts" : t.kind === "music" ? "music" : "sfx"}) 6%, transparent)`,
+                  } : {}}
                 >
                   {t.clips.map((c, ci) => (
                     <DraggableClip
@@ -535,6 +647,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                       isSelected={selected === `${ti}-${ci}`}
                       onSelect={() => setSelected(`${ti}-${ci}`)}
                       onMove={handleClipMove}
+                      onTrim={handleClipTrim}
                       onRequestTakes={(rowIndex, x, y) => setTakesPopover({ rowIndex, x, y })}
                     />
                   ))}
