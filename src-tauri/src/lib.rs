@@ -45,6 +45,8 @@ pub fn run() {
             commands::script::read_script,
             commands::script::write_script,
             commands::script::update_script_row,
+            commands::script::read_fountain,
+            commands::script::write_fountain,
             // Inference / job submission
             commands::inference::detect_hardware,
             commands::inference::check_server_health,

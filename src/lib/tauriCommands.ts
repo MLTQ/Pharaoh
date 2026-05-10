@@ -67,6 +67,21 @@ export const updateScriptRow = (args: {
   fields: Partial<Record<string, string>>;
 }): Promise<ScriptRow> => invoke("update_script_row", args);
 
+/** Read the scene's script.fountain (the prose source of truth for the
+ *  Fountain editor). Returns null if no file exists yet for that scene. */
+export const readFountain = (args: {
+  projectId: string;
+  sceneSlug: string;
+}): Promise<string | null> => invoke("read_fountain", args);
+
+/** Persist the scene's prose to script.fountain (atomic write via .tmp +
+ *  rename). Called on commit by FountainEditor; CSV is regenerated separately. */
+export const writeFountain = (args: {
+  projectId: string;
+  sceneSlug: string;
+  text: string;
+}): Promise<void> => invoke("write_fountain", args);
+
 // ── Inference ────────────────────────────────────────────────────────────────
 
 export interface ServerHealth {
