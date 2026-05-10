@@ -1,21 +1,13 @@
-import React, { useCallback, useEffect, useMemo, useState } from "react";
-import { Icon, Wave, PeaksWave } from "./atoms";
+import React from "react";
+import { EmptyState, Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
-import { listGeneratedAudioAssets, readScript, updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
-import {
-  ASSET_DRAG_MIME,
-  ASSET_POINTER_DROP_EVENT,
-  clearCurrentDraggedAsset,
-  routeAudioToScene,
-  SCRIPT_ASSETS_CHANGED_EVENT,
-  setCurrentDraggedAsset,
-  type AssetPointerDropDetail,
-  type DraggedAssetPayload,
-  type RoutableAssetKind,
-} from "../../lib/assetRouting";
-import type { GeneratedAudioAsset, Job, MockAssets, QaJobStatus, ScriptRow } from "../../lib/types";
+import { useUiStore } from "../../store/uiStore";
+import { useRegenerateStore } from "../../store/regenerateStore";
+import { useToastStore } from "../../store/toastStore";
+import { readSidecar, updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
+import type { Job, MockAssets, QaJobStatus } from "../../lib/types";
 
 interface AssetBrowserProps {
   assets: MockAssets;
@@ -77,47 +69,11 @@ interface TakeGroupProps {
   scriptRows: ScriptRow[];
   onUse: (job: Job) => void;
   onQa: (job: Job, status: QaJobStatus) => void;
+  onRegenerate: (job: Job) => void;
 }
 
-function setAssetDragData(event: React.DragEvent<HTMLElement>, payload: DraggedAssetPayload) {
-  const serialized = JSON.stringify(payload);
-  setCurrentDraggedAsset(payload);
-  event.dataTransfer.effectAllowed = "copy";
-  event.dataTransfer.setData(ASSET_DRAG_MIME, serialized);
-  event.dataTransfer.setData("application/json", serialized);
-  event.dataTransfer.setData("text/plain", serialized);
-}
-
-function beginAssetPointerDrag(event: React.PointerEvent<HTMLElement>, payload: DraggedAssetPayload) {
-  if (event.button !== 0) return;
-  const target = event.target as HTMLElement | null;
-  if (target?.closest("button, input, select, textarea, a")) return;
-
-  setCurrentDraggedAsset(payload);
-  const handlePointerUp = (upEvent: PointerEvent) => {
-    const detail: AssetPointerDropDetail = {
-      asset: payload,
-      clientX: upEvent.clientX,
-      clientY: upEvent.clientY,
-    };
-    window.dispatchEvent(new CustomEvent(ASSET_POINTER_DROP_EVENT, { detail }));
-    clearCurrentDraggedAsset();
-    window.removeEventListener("pointerup", handlePointerUp);
-    window.removeEventListener("pointercancel", handleCancel);
-  };
-  const handleCancel = () => {
-    clearCurrentDraggedAsset();
-    window.removeEventListener("pointerup", handlePointerUp);
-    window.removeEventListener("pointercancel", handleCancel);
-  };
-
-  window.addEventListener("pointerup", handlePointerUp);
-  window.addEventListener("pointercancel", handleCancel);
-}
-
-const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, scriptRows, onUse, onQa }) => {
-  const kind = jobs[0].model as RoutableAssetKind;
-  const color = KIND_COLOR[kind] ?? "currentColor";
+const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa, onRegenerate }) => {
+  const color = KIND_COLOR[jobs[0].model] ?? "currentColor";
   return (
     <div style={{ borderBottom: "1px solid var(--line-1)" }}>
       {jobs.map((job, ti) => {
@@ -150,6 +106,12 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, scriptRows, on
               borderLeft: isActive ? `2px solid ${color}` : "2px solid transparent",
               cursor: job.output_path ? "grab" : undefined,
             }}
+            onContextMenu={(e) => {
+              // Right-click → regenerate with same params (reads sidecar)
+              e.preventDefault();
+              onRegenerate(job);
+            }}
+            title="Right-click to regenerate with same params"
           >
             <div className="swatch" />
             <div className="wave">
@@ -437,27 +399,27 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
     }
   };
 
-  const handleUsePersistent = (asset: PersistentAsset) => {
-    if (!realProjectId || !activeSceneSlug || asset.active) return;
-    routeAudioToScene({
-      projectId: realProjectId,
-      sceneSlug: activeSceneSlug,
-      kind: asset.kind,
-      audioPath: asset.audioPath,
-      durationMs: asset.durationMs,
-    })
-      .then(refreshPersistentAssets)
-      .catch(console.error);
-  };
-
-  const handlePersistentQa = (asset: PersistentAsset, status: QaJobStatus) => {
-    updateSidecarQa({
-      audioPath: asset.audioPath,
-      qaStatus: status,
-      qaNotes: "",
-    })
-      .then(refreshPersistentAssets)
-      .catch(console.error);
+  // Read the sidecar for the asset and route the user to the matching
+  // generator panel with the original params loaded. The panel watches
+  // useRegenerateStore and hydrates its inputs.
+  const setRegenerate = useRegenerateStore((s) => s.setPending);
+  const setView = useUiStore((s) => s.setView);
+  const pushToast = useToastStore((s) => s.push);
+  const handleRegenerate = async (job: Job) => {
+    if (!job.output_path) return;
+    try {
+      const meta = await readSidecar(job.output_path);
+      if (!meta) {
+        pushToast({ kind: "warn", title: "No sidecar — can't regenerate with same params" });
+        return;
+      }
+      const model = job.model === "post" ? "tts" : job.model;
+      setRegenerate({ model, meta, source_path: job.output_path });
+      setView(model);
+      pushToast({ kind: "info", title: `Regenerating with same params · ${model}` });
+    } catch (e) {
+      pushToast({ kind: "error", title: `Read sidecar failed: ${e}` });
+    }
   };
 
   function renderSection(
@@ -480,6 +442,14 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
           <span>{label} · {total}</span>
           <span style={{ color: "var(--fg-4)" }}>{eyebrow}</span>
         </div>
+        {total === 0 && (
+          <EmptyState
+            icon={model === "tts" ? "mic" : model === "sfx" ? "waves" : "music"}
+            title={`No ${label.toLowerCase()} yet`}
+            body={`Generated ${label.toLowerCase()} for this scene appears here.`}
+            compact
+          />
+        )}
         {Array.from(groups.entries()).map(([key, groupJobs]) => (
           <TakeGroup
             key={key}
@@ -488,6 +458,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             scriptRows={scriptRows}
             onUse={handleUse}
             onQa={handleQa}
+            onRegenerate={handleRegenerate}
           />
         ))}
         {persistent.map((asset) => (

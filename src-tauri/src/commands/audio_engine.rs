@@ -419,6 +419,19 @@ pub async fn render_scene_with_projects_dir(
 
         let mut filters: Vec<String> = Vec::new();
 
+        // Honor a user-set duration: if the row was edge-trimmed, atrim caps
+        // the source at duration_ms so it actually stops, not just fades.
+        // Done before delay so the trim is applied to the source position.
+        let duration_ms_opt = row.duration_ms.parse::<u64>().ok();
+        if let Some(dur_ms) = duration_ms_opt {
+            if dur_ms > 0 {
+                filters.push(format!(
+                    "atrim=end={:.3},asetpts=PTS-STARTPTS",
+                    dur_ms as f32 / 1000.0
+                ));
+            }
+        }
+
         // Fade in
         if let Ok(fi_ms) = row.fade_in_ms.parse::<u64>() {
             if fi_ms > 0 {
@@ -427,9 +440,9 @@ pub async fn render_scene_with_projects_dir(
         }
 
         // Fade out (requires duration_ms to compute start of fade)
-        if let (Ok(fo_ms), Ok(dur_ms)) = (
+        if let (Ok(fo_ms), Some(dur_ms)) = (
             row.fade_out_ms.parse::<u64>(),
-            row.duration_ms.parse::<u64>(),
+            duration_ms_opt,
         ) {
             if fo_ms > 0 && dur_ms > fo_ms {
                 let fo_start_s = (dur_ms - fo_ms) as f32 / 1000.0;

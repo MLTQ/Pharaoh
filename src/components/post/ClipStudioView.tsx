@@ -102,6 +102,9 @@ interface CropWaveformProps {
   onFadeInCurveChange: (amount: number) => void;
   onFadeOutCurveChange: (amount: number) => void;
   onViewportChange: (ms: number) => void;
+  // Mouse wheel → cursor-anchored zoom. Caller bumps zoom and shifts viewport
+  // so the timestamp under the cursor stays put on screen.
+  onZoomChange: (nextZoom: number, nextViewportStartMs: number) => void;
 }
 
 const CropWaveform: React.FC<CropWaveformProps> = ({
@@ -124,6 +127,7 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   onFadeInCurveChange,
   onFadeOutCurveChange,
   onViewportChange,
+  onZoomChange,
 }) => {
   const ref = useRef<HTMLDivElement | null>(null);
   const duration = durationMs ?? 0;
@@ -252,9 +256,37 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
     window.addEventListener("pointerup", onUp, { once: true });
   };
 
+  // ── Cursor-anchored zoom ─────────────────────────────────────────────
+  // Wheel up/right zooms in, wheel down/left zooms out. The timestamp under
+  // the cursor stays fixed on screen so the user gets a "magnify here" feel
+  // instead of jumping back to viewport-start.
+  const handleWheel = (e: React.WheelEvent<HTMLDivElement>) => {
+    if (!active) return;
+    e.preventDefault();
+    const rect = ref.current?.getBoundingClientRect();
+    if (!rect) return;
+    const cursorPct = clamp((e.clientX - rect.left) / rect.width, 0, 1);
+    const msAtCursor = visibleStartMs + cursorPct * viewportDuration;
+    // Trackpad two-finger gives small deltaY; wheel gives larger. Either way
+    // we treat each "tick" as a 1.15× zoom step (smooth on trackpad, snappy
+    // on a mouse wheel). Holding shift reverses for some mice.
+    const direction = e.deltaY > 0 ? -1 : 1;
+    const factor = Math.pow(1.15, direction * Math.min(3, Math.abs(e.deltaY) / 40));
+    const nextZoom = clamp(zoom * factor, 1, 100);
+    if (Math.abs(nextZoom - zoom) < 0.001) return;
+    const nextViewportDuration = duration / nextZoom;
+    const nextViewportStart = clamp(
+      msAtCursor - cursorPct * nextViewportDuration,
+      0,
+      Math.max(0, duration - nextViewportDuration),
+    );
+    onZoomChange(nextZoom, nextViewportStart);
+  };
+
   return (
     <div
       ref={ref}
+      onWheel={handleWheel}
       style={{
         position: "relative",
         minHeight: waveformHeight + 14,
@@ -936,6 +968,10 @@ export const ClipStudioView: React.FC = () => {
                 onFadeInCurveChange={setFadeInCurve}
                 onFadeOutCurveChange={setFadeOutCurve}
                 onViewportChange={setViewportStartMs}
+                onZoomChange={(nextZoom, nextViewportStartMs) => {
+                  setZoom(nextZoom);
+                  setViewportStartMs(nextViewportStartMs);
+                }}
               />
               <div style={{ display: "grid", gridTemplateColumns: "auto minmax(120px, 1fr) auto minmax(120px, 1fr)", gap: 9, alignItems: "center" }}>
                 <span className="eyebrow">Zoom</span>

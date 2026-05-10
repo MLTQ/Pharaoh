@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { useUiStore } from "../../store/uiStore";
 import { useJobStore } from "../../store/jobStore";
+import { useAudioStore } from "../../store/audioStore";
 import type { ScriptRow, TrackType, Character, ViewId } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -81,7 +82,7 @@ interface ScriptCardProps {
   onUpdate: (patch: Partial<ScriptRow>) => void;
   onGenerate: () => void;
   onPlace: () => void;
-  onDragStart: () => void;
+  onDragStart: (e: React.DragEvent<HTMLDivElement>) => void;
   onDragOver: (e: React.DragEvent) => void;
   onDrop: () => void;
   onDragEnd: () => void;
@@ -436,6 +437,48 @@ const AddRowForm: React.FC<AddRowFormProps> = ({ sceneNo, characters, onAdd, onC
 
 // ── Main component ─────────────────────────────────────────────────────────
 
+// ── Table Read button ──────────────────────────────────────────────────────
+//
+// "Table read" plays every DIALOGUE row's resolved take back-to-back, no
+// SFX/music/timeline gaps. The audio-drama equivalent of a screenplay cold
+// read — fastest way to hear if a scene's lines hold together before
+// composing the full mix.
+
+const TableReadButton: React.FC<{ rows: ScriptRow[] }> = ({ rows }) => {
+  const playSequence = useAudioStore((s) => s.playSequence);
+  const stop = useAudioStore((s) => s.stop);
+  const playing = useAudioStore((s) => s.playing);
+  const dialoguePaths = rows
+    .filter((r) => r.type === "DIALOGUE" && r.file !== "")
+    .map((r) => r.file);
+  const isReading = playing != null && dialoguePaths.includes(playing);
+
+  if (dialoguePaths.length === 0) return null;
+  return (
+    <button
+      className="btn btn-sm"
+      onClick={() => {
+        if (isReading) { stop(); return; }
+        playSequence(dialoguePaths);
+      }}
+      title={
+        isReading
+          ? "Stop table read"
+          : `Table read: play ${dialoguePaths.length} dialogue line${dialoguePaths.length === 1 ? "" : "s"} back-to-back`
+      }
+      style={{
+        padding: "2px 8px", fontSize: 9.5,
+        background: isReading ? "color-mix(in oklch, var(--tts) 14%, transparent)" : undefined,
+        borderColor: isReading ? "var(--tts)" : undefined,
+        color: isReading ? "var(--tts)" : undefined,
+        fontFamily: "var(--font-mono)", letterSpacing: "0.04em", textTransform: "uppercase",
+      }}
+    >
+      {isReading ? "stop" : `read · ${dialoguePaths.length}`}
+    </button>
+  );
+};
+
 export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
   rows, characters, sceneNo, sceneSlug, onAdd, onDelete, onUpdate,
 }) => {
@@ -444,8 +487,29 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
   const [dragIndex, setDragIndex] = useState<number | null>(null);
   const [dragOverIndex, setDragOverIndex] = useState<number | null>(null);
 
-  // ── Drag-to-reorder ──
-  const handleDragStart = (i: number) => setDragIndex(i);
+  // ── Drag-to-reorder + drag-to-place ──
+  // The card supports two drag operations:
+  //   1. Drop on another card → reorder within the script list
+  //   2. Drop on a timeline track row → place this row at that timeline
+  //      position (writes start_ms and possibly track to script.csv)
+  // The timeline detects (2) via the custom MIME type set in dataTransfer.
+  const handleDragStart = (i: number, e?: React.DragEvent<HTMLDivElement>) => {
+    setDragIndex(i);
+    if (e?.dataTransfer) {
+      const row = rows[i];
+      const payload = JSON.stringify({
+        rowIndex: i,
+        type: row.type,
+        track: row.track,
+        hasFile: row.file !== "",
+      });
+      // Custom MIME so the timeline can distinguish script-row drags from
+      // arbitrary OS drags. Plain text/plain fallback for paste-type tooling.
+      e.dataTransfer.setData("application/x-pharaoh-script-row", payload);
+      e.dataTransfer.setData("text/plain", `script row ${i + 1}`);
+      e.dataTransfer.effectAllowed = "copyMove";
+    }
+  };
   const handleDragOver = (e: React.DragEvent, i: number) => {
     e.preventDefault();
     setDragOverIndex(i);
@@ -498,14 +562,17 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
         }}>
           Script · {rows.length}
         </span>
-        <button
-          className="btn btn-sm"
-          onClick={() => setAddingRow(true)}
-          style={{ padding: "2px 8px", fontSize: 13, lineHeight: 1 }}
-          title="Add row"
-        >
-          +
-        </button>
+        <div style={{ display: "flex", gap: 4 }}>
+          <TableReadButton rows={rows} />
+          <button
+            className="btn btn-sm"
+            onClick={() => setAddingRow(true)}
+            style={{ padding: "2px 8px", fontSize: 13, lineHeight: 1 }}
+            title="Add row"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Rows */}
@@ -539,7 +606,7 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
             onUpdate={(patch) => onUpdate(i, patch)}
             onGenerate={() => handleGenerate(row)}
             onPlace={() => handlePlace(i)}
-            onDragStart={() => handleDragStart(i)}
+            onDragStart={(e) => handleDragStart(i, e)}
             onDragOver={(e) => handleDragOver(e, i)}
             onDrop={() => handleDrop(i)}
             onDragEnd={handleDragEnd}

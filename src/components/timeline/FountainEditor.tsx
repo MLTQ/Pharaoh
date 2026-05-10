@@ -11,7 +11,7 @@ import { useUiStore } from "../../store/uiStore";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useToastStore } from "../../store/toastStore";
 import { useProjectStore } from "../../store/projectStore";
-import { draftScene } from "../../lib/tauriCommands";
+import { draftScene, readFountain, writeFountain } from "../../lib/tauriCommands";
 import type { ScriptRow, TrackType, Character, ViewId, Scene } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -279,13 +279,78 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
 
   const taRef     = useRef<HTMLTextAreaElement>(null);
   const overlayRef = useRef<HTMLDivElement>(null);
+  // Debounce handle for atomic-writing the fountain file. Keeps disk I/O
+  // off the critical typing path while still flushing on scene/unmount.
+  const fountainSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Once we've done the initial load (whether from disk or from rows) we
+  // start writing back. Without this gate the very first render would
+  // immediately overwrite a user's existing script.fountain with the
+  // rows-derived placeholder.
+  const initialLoadDone = useRef(false);
 
   const { setView } = useUiStore();
   const { submitTts, submitSfx, submitMusic } = useGenerateJob();
   const pushToast = useToastStore((s) => s.push);
   const toast = (kind: "info" | "warn" | "error", title: string) => pushToast({ kind, title });
-  const { project, realProject, realScenes } = useProjectStore();
+  const { project, realProject, realScenes, realProjectId } = useProjectStore();
   const [drafting, setDrafting] = useState(false);
+
+  // ── Disk persistence ─────────────────────────────────────────────────────
+  // On mount (or scene switch) prefer the on-disk script.fountain over the
+  // CSV-derived reconstruction — it preserves the writer's formatting.
+  useEffect(() => {
+    if (!realProjectId || !sceneSlug) {
+      // No project context (demo / launcher) — keep the in-memory rows-derived
+      // text, mark loaded so user edits start saving once a project opens.
+      initialLoadDone.current = true;
+      return;
+    }
+    let cancelled = false;
+    initialLoadDone.current = false;
+    readFountain({ projectId: realProjectId, sceneSlug })
+      .then((onDisk) => {
+        if (cancelled) return;
+        if (onDisk != null && onDisk.trim() !== "") {
+          // Restore the writer's saved prose, then let the parse effect run
+          // to derive blocks. Skip the CSV-derived reconstruction entirely.
+          setText(onDisk);
+        }
+        initialLoadDone.current = true;
+      })
+      .catch(() => { initialLoadDone.current = true; });
+    return () => { cancelled = true; };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realProjectId, sceneSlug]);
+
+  // Persist text changes to disk (debounced 600ms) once we know we're past
+  // the initial load. The writer's prose is always recoverable across
+  // restarts, even if the app is force-quit mid-edit.
+  useEffect(() => {
+    if (!initialLoadDone.current) return;
+    if (!realProjectId || !sceneSlug) return;
+    if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
+    fountainSaveTimer.current = setTimeout(() => {
+      writeFountain({ projectId: realProjectId, sceneSlug, text }).catch(console.error);
+    }, 600);
+    return () => {
+      if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
+    };
+  }, [text, realProjectId, sceneSlug]);
+
+  // Flush on unmount / scene switch / before-unload so nothing is lost
+  useEffect(() => {
+    const flush = () => {
+      if (!realProjectId || !sceneSlug || !initialLoadDone.current) return;
+      if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
+      writeFountain({ projectId: realProjectId, sceneSlug, text }).catch(console.error);
+    };
+    window.addEventListener("beforeunload", flush);
+    return () => {
+      window.removeEventListener("beforeunload", flush);
+      flush();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [realProjectId, sceneSlug]);
 
   const handleDraftScene = async () => {
     if (!realProject) {

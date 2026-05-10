@@ -44,6 +44,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, project_id, rest @ ..] if group == "project" && action == "update" => {
             project_update(&config, project_id, rest).await
         }
+        [group, action, project_id, rest @ ..] if group == "project" && action == "archive" => {
+            project_archive(&config, project_id, rest).await
+        }
         [group, action, project_id] if group == "scene" && action == "list" => {
             scene_list(&config, project_id).await
         }
@@ -153,6 +156,11 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         {
             compose_final(&config, project_id, rest).await
         }
+        [group, action, project_id, rest @ ..]
+            if group == "storyboard" && action == "rewrite" =>
+        {
+            storyboard_rewrite(&config, project_id, rest).await
+        }
         [group, action, rest @ ..] if group == "generate" && action == "tts-custom" => {
             generate_tts_custom(&config, rest).await
         }
@@ -209,6 +217,7 @@ fn usage() -> &'static str {
   pharaoh project status <project_id>
   pharaoh project create --title <title> [--logline <text>] [--tone <text>]
   pharaoh project update <project_id> [--title <text>] [--synopsis <text>] [--tone <text>]
+  pharaoh project archive <project_id> [--output <path>]
   pharaoh scene list <project_id>
   pharaoh scene get <project_id> <scene_slug_or_id>
   pharaoh scene create <project_id> --title <title> [--slug <slug>] [--index <n>]
@@ -241,6 +250,7 @@ fn usage() -> &'static str {
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
+  pharaoh storyboard rewrite <project_id> [--model <name>] [--api-key-env <var>]
   pharaoh post import <project_id> <source_audio> [--label <text>]
   pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>] [--fade-in-ms <n>] [--fade-out-ms <n>] [--fade-in-curve tri|qsin|qua] [--fade-out-curve tri|qsin|qua]
   pharaoh post normalize <input_wav> [--target-lufs -16]
@@ -480,6 +490,36 @@ async fn project_update(
     print_json(&project)
 }
 
+/// `pharaoh project archive <project> [--output <path>]`
+///
+/// Bundles the project into a zip. Defaults the output to
+/// ./pharaoh-archive-<title-slug>-<date>.zip in the current directory.
+async fn project_archive(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    // Resolve a default output path: ./pharaoh-archive-<slug>-<YYYYMMDD>.zip
+    let project = load_project(config, project_id).ok();
+    let title_slug = project.as_ref()
+        .map(|p| p.title.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>())
+        .unwrap_or_else(|| project_id.to_string());
+    let default_output = format!(
+        "./pharaoh-archive-{}-{}.zip",
+        title_slug.trim_matches('_'),
+        Utc::now().format("%Y%m%d"),
+    );
+    let output = flag_opt(&flags, "output").unwrap_or(default_output);
+    let result = crate::commands::archive::archive_project_with_projects_dir(
+        &projects_dir,
+        project_id,
+        Path::new(&output),
+    )?;
+    print_json(&result)
+}
+
 async fn scene_list(config: &crate::models::AppConfig, project_id: &str) -> Result<()> {
     let projects_dir = PathBuf::from(&config.projects_dir);
     let path = project_dir(&projects_dir, project_id).join("storyboard.json");
@@ -630,6 +670,105 @@ async fn compose_render_scene(
         "scene_slug": scene_slug,
         "output_path": output_path,
     }))
+}
+
+/// `pharaoh storyboard rewrite <project> [--model <name>]`
+///
+/// Loads the project, all scenes, and every scene's compiled prose (from
+/// script.csv prompts), then asks the configured LLM to do a Chekhov's
+/// Gun continuity pass. Prints markdown to stdout.
+async fn storyboard_rewrite(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let model_override = flag_opt(&flags, "model");
+    let api_key_env_override = flag_opt(&flags, "api_key_env");
+
+    let project = load_project(config, project_id)?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let project_root = project_dir(&projects_dir, project_id);
+    let storyboard_path = project_root.join("storyboard.json");
+    if !storyboard_path.exists() {
+        return Err(Error::Other("project has no storyboard.json".into()));
+    }
+    let storyboard: Storyboard = read_json(&storyboard_path)?;
+
+    // Build prose per scene from script.csv prompts. Each row contributes a
+    // line — DIALOGUE rows become "CHARACTER: text", others become bracketed
+    // cues like "[SFX: door creak]". This is enough context for continuity
+    // review without needing the full audio.
+    let mut scene_summaries: Vec<serde_json::Value> = Vec::new();
+    let cast_by_id: std::collections::HashMap<&str, &str> = project
+        .characters
+        .iter()
+        .map(|c| (c.id.as_str(), c.name.as_str()))
+        .collect();
+    for scene in &storyboard.scenes {
+        let csv_path = script_path(&projects_dir, project_id, &scene.slug);
+        let rows = if csv_path.exists() {
+            read_script_rows(&csv_path).unwrap_or_default()
+        } else {
+            Vec::new()
+        };
+        let mut prose = String::new();
+        for row in &rows {
+            let kind = row.track_type.to_uppercase();
+            let line = match kind.as_str() {
+                "DIALOGUE" => {
+                    let name = cast_by_id.get(row.character.as_str()).copied().unwrap_or(row.character.as_str());
+                    let mut s = format!("{}: {}", name.to_uppercase(), row.prompt);
+                    if !row.instruct.is_empty() {
+                        s = format!("{} [({})]", s, row.instruct);
+                    }
+                    s
+                }
+                "DIRECTION" => format!("[ACTION: {}]", row.prompt),
+                "SFX" | "BED" | "MUSIC" => format!("[{}: {}]", kind, row.prompt),
+                _ => format!("[{}: {}]", kind, row.prompt),
+            };
+            prose.push_str(&line);
+            prose.push('\n');
+        }
+        let scene_no = format!("S{:02}", scene.index + 1);
+        scene_summaries.push(serde_json::json!({
+            "slug": scene.slug,
+            "no": scene_no,
+            "title": scene.title,
+            "description": scene.description,
+            "location": scene.location,
+            "prose": prose.trim(),
+        }));
+    }
+
+    let args = serde_json::json!({
+        "project_title": project.title,
+        "logline": project.logline,
+        "synopsis": project.synopsis,
+        "tone": project.tone,
+        "characters": project.characters.iter().map(|c| serde_json::json!({
+            "name": c.name,
+            "description": c.description,
+            "voice_direction": c.voice_assignment.instruct_default,
+        })).collect::<Vec<_>>(),
+        "scenes": scene_summaries,
+        "model": model_override,
+        "api_key_env": api_key_env_override,
+    });
+
+    let parsed: crate::commands::llm::StoryboardReviewArgs = serde_json::from_value(args)
+        .map_err(|e| Error::Other(format!("review args build failed: {}", e)))?;
+    let result = crate::commands::llm::storyboard_review_impl(parsed).await?;
+
+    // Print as plain markdown to stdout — this is meant to be piped into a
+    // user's editor or read directly. JSON wrapper would be noise.
+    println!("{}", result.review);
+    eprintln!(
+        "\n— continuity review · {} · {}→{} tok",
+        result.model, result.input_tokens, result.output_tokens
+    );
+    Ok(())
 }
 
 /// `pharaoh compose final <project> [--crossfade <ms>] [--target-lufs <n>]`

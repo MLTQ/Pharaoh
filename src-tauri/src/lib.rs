@@ -5,6 +5,9 @@ mod error;
 mod fountain;
 mod models;
 
+#[cfg(test)]
+mod integration_tests;
+
 use models::{AppConfig, AppState};
 use tauri::Manager;
 use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
@@ -45,6 +48,8 @@ pub fn run() {
             commands::script::read_script,
             commands::script::write_script,
             commands::script::update_script_row,
+            commands::script::read_fountain,
+            commands::script::write_fountain,
             // Inference / job submission
             commands::inference::detect_hardware,
             commands::inference::check_server_health,
@@ -74,6 +79,11 @@ pub fn run() {
             commands::audio_enhance::upscale_audio_asset,
             // LLM
             commands::llm::draft_scene,
+            commands::llm::storyboard_review,
+            // Setup integrity
+            commands::setup_check::check_setup,
+            // Project archive
+            commands::archive::archive_project,
             // Audio engine (ffmpeg)
             commands::audio_engine::import_audio_asset,
             commands::audio_engine::normalize_clip,

@@ -16,14 +16,16 @@ import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ClipStudioView } from "./components/post/ClipStudioView";
 import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
+import { ProjectChooser } from "./components/launcher/ProjectChooser";
 import { ToastHost } from "./components/shared/ToastHost";
+import { SetupBanner } from "./components/shared/SetupBanner";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
-import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
 import { useRenderMetaStore } from "./store/renderMetaStore";
 import { useAudioStore } from "./store/audioStore";
+import { useToastStore } from "./store/toastStore";
 import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
 import { WORKSPACE_OF } from "./lib/types";
 
@@ -71,11 +73,14 @@ export default function App() {
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
   const activeWorkspace = WORKSPACE_OF[view];
-  const { isPlaying, play, pause, positionMs } = usePlaybackStore();
-  // The transport bar reflects whatever's actually playing through audioStore.
-  // The legacy playbackStore is stub state; audioStore is the real engine.
+  // Transport state — single source of truth. audioStore is the real engine
+  // (HTMLAudioElement + RAF position tracking); the old usePlaybackStore stub
+  // has been removed.
   const audioPlayingPath = useAudioStore((s) => s.playing);
+  const audioPositionSec = useAudioStore((s) => s.position);
   const stopAudio       = useAudioStore((s) => s.stop);
+  const isPlaying = audioPlayingPath !== null;
+  const positionMs = Math.round(audioPositionSec * 1000);
   const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
@@ -95,6 +100,66 @@ export default function App() {
     document.documentElement.dataset.colorTemp = colorTemp === "forest" ? "" : colorTemp;
     document.documentElement.dataset.density   = density === "compact" ? "compact" : "";
   }, [colorTemp, density]);
+
+  // ── Global keyboard shortcuts ──
+  // Single listener that gates on active element so it doesn't fire while
+  // typing into inputs / textareas / contenteditable. Only the project chooser
+  // and scene navigation work cross-view; per-surface shortcuts (J/K/L scrub,
+  // Cmd-Z, etc.) live in their own components.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement | null;
+      const tag = target?.tagName?.toLowerCase();
+      const inEditor = target?.isContentEditable || tag === "input" || tag === "textarea" || tag === "select";
+      const cmd = e.metaKey || e.ctrlKey;
+
+      // Cmd/Ctrl-K — quick project switcher (the rail folder icon's gesture)
+      if (cmd && e.key.toLowerCase() === "k" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        // Anchor near the rail's folder icon (bottom-left)
+        setProjectChooser({ x: 56, y: window.innerHeight - 80 });
+        return;
+      }
+
+      // Cmd/Ctrl-S — confirm save. We already autosave; this just reassures
+      // users with the muscle-memory and triggers an explicit flush via the
+      // beforeunload-style listeners that components install.
+      if (cmd && e.key.toLowerCase() === "s" && !e.shiftKey && !e.altKey) {
+        e.preventDefault();
+        // Dispatch a synthetic beforeunload so any debounced writers flush
+        // immediately. They install with `addEventListener("beforeunload", flush)`.
+        window.dispatchEvent(new Event("beforeunload"));
+        useToastStore.getState().push({ kind: "info", title: "Saved" });
+        return;
+      }
+
+      // Skip the rest when the user is typing
+      if (inEditor) return;
+
+      // ← / → arrow keys: previous/next scene when no input is focused.
+      // Loops at the ends — better than dead-stopping for long episodes.
+      if ((e.key === "ArrowLeft" || e.key === "ArrowRight") && scenes.length > 1) {
+        e.preventDefault();
+        const dir = e.key === "ArrowLeft" ? -1 : 1;
+        const idx = Math.max(0, scenes.findIndex((s) => s.no === activeSceneNo));
+        const next = scenes[(idx + dir + scenes.length) % scenes.length];
+        setActiveScene(next.no);
+        return;
+      }
+
+      // Space — stop audio if anything's playing. Per-surface space handlers
+      // (ClipStudio crop preview) take precedence by stopping propagation
+      // before this fires.
+      if (e.code === "Space" && !e.repeat && !e.metaKey && !e.ctrlKey && !e.altKey) {
+        if (audioPlayingPath) {
+          e.preventDefault();
+          stopAudio();
+        }
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [scenes, activeSceneNo, audioPlayingPath, setActiveScene, stopAudio]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -123,6 +188,11 @@ export default function App() {
     return `${m}:${s}`;
   };
 
+  // Project chooser popover anchor — toggled by the rail's folder icon.
+  // Declared before the launcher early-return so hook order is stable across
+  // realProjectId transitions (otherwise React errors on hook count change).
+  const [projectChooser, setProjectChooser] = useState<{ x: number; y: number } | null>(null);
+
   // ── No project: launcher shell ───────────────────────────────────────────
   if (!realProjectId) {
     return (
@@ -143,6 +213,9 @@ export default function App() {
         <div style={{ gridColumn: 2, gridRow: 1, position: "relative" }}>
           {view === "settings" ? <SettingsView /> : <ProjectLauncherView />}
         </div>
+        {/* Setup banner is part of the launcher experience too — first-run
+            users hit ffmpeg-missing before any project exists. */}
+        <SetupBanner />
       </div>
     );
   }
@@ -300,9 +373,12 @@ export default function App() {
         })}
         <div className="rail-spacer" />
         <button
-          className="rail-btn"
+          className={`rail-btn ${projectChooser ? "active" : ""}`}
           title="Switch project"
-          onClick={() => { useProjectStore.setState({ realProjectId: null, scenes: [], characters: [] }); setView("pyramid"); }}
+          onClick={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            setProjectChooser({ x: rect.right, y: rect.top + rect.height / 2 });
+          }}
         >
           <Icon name="folder" style={{ width: 18, height: 18 }} />
         </button>
@@ -619,18 +695,17 @@ export default function App() {
       <div className="transport">
         <div className="tp-controls">
           <button className="tp-btn"><Icon name="skip_back" style={{ width: 14, height: 14 }} /></button>
-          {/* If something is actually playing through audioStore, this button
-              stops it. Otherwise it falls back to the placeholder transport
-              state so existing seeded UIs still toggle. */}
+          {/* When audio is actually playing, the button stops it. When idle,
+              there's nothing to "play" without a clip selected — the per-clip
+              PlayButtons elsewhere are how users initiate playback. */}
           <button
             className="tp-btn play"
-            onClick={() => {
-              if (audioPlayingPath) { stopAudio(); return; }
-              isPlaying ? pause() : play();
-            }}
-            title={audioPlayingPath ? "Stop preview" : isPlaying ? "Pause" : "Play"}
+            onClick={() => { if (audioPlayingPath) stopAudio(); }}
+            disabled={!audioPlayingPath}
+            title={audioPlayingPath ? "Stop preview" : "Nothing playing — start from a clip's play button"}
+            style={!audioPlayingPath ? { opacity: 0.5, cursor: "default" } : undefined}
           >
-            <Icon name={(audioPlayingPath || isPlaying) ? "pause" : "play"} style={{ width: 12, height: 12 }} />
+            <Icon name={isPlaying ? "pause" : "play"} style={{ width: 12, height: 12 }} />
           </button>
           <button className="tp-btn"><Icon name="skip_fwd" style={{ width: 14, height: 14 }} /></button>
           <button className="tp-btn" style={{ color: "oklch(0.78 0.14 30)" }}>
@@ -679,6 +754,14 @@ export default function App() {
         </div>
       </div>
       <ToastHost />
+      <SetupBanner />
+      {projectChooser && (
+        <ProjectChooser
+          anchorX={projectChooser.x}
+          anchorY={projectChooser.y}
+          onClose={() => setProjectChooser(null)}
+        />
+      )}
     </div>
   );
 }
