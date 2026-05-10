@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
 import { EmptyState, Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
@@ -6,8 +6,24 @@ import { useProjectStore } from "../../store/projectStore";
 import { useUiStore } from "../../store/uiStore";
 import { useRegenerateStore } from "../../store/regenerateStore";
 import { useToastStore } from "../../store/toastStore";
-import { readSidecar, updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
-import type { Job, MockAssets, QaJobStatus } from "../../lib/types";
+import {
+  listGeneratedAudioAssets,
+  readScript,
+  readSidecar,
+  updateScriptRow,
+  updateSidecarQa,
+} from "../../lib/tauriCommands";
+import {
+  ASSET_DRAG_MIME,
+  ASSET_POINTER_DROP_EVENT,
+  clearCurrentDraggedAsset,
+  routeAudioToScene,
+  SCRIPT_ASSETS_CHANGED_EVENT,
+  setCurrentDraggedAsset,
+  type DraggedAssetPayload,
+  type RoutableAssetKind,
+} from "../../lib/assetRouting";
+import type { GeneratedAudioAsset, Job, MockAssets, QaJobStatus, ScriptRow } from "../../lib/types";
 
 interface AssetBrowserProps {
   assets: MockAssets;
@@ -55,6 +71,40 @@ function durationFromRow(row: ScriptRow): number | null {
   return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
 }
 
+function setAssetDragData(event: React.DragEvent, payload: DraggedAssetPayload): void {
+  const serialized = JSON.stringify(payload);
+  setCurrentDraggedAsset(payload);
+  event.dataTransfer.effectAllowed = "copy";
+  event.dataTransfer.setData(ASSET_DRAG_MIME, serialized);
+  event.dataTransfer.setData("application/json", serialized);
+  event.dataTransfer.setData("text/plain", serialized);
+}
+
+function beginAssetPointerDrag(event: React.PointerEvent, payload: DraggedAssetPayload): void {
+  if (event.button !== 0) return;
+  const target = event.target as HTMLElement | null;
+  if (target?.closest("button, input, select, textarea, a")) return;
+
+  setCurrentDraggedAsset(payload);
+
+  const handlePointerUp = (upEvent: PointerEvent) => {
+    window.dispatchEvent(new CustomEvent(ASSET_POINTER_DROP_EVENT, {
+      detail: { asset: payload, clientX: upEvent.clientX, clientY: upEvent.clientY },
+    }));
+    clearCurrentDraggedAsset();
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointercancel", handlePointerCancel);
+  };
+  const handlePointerCancel = () => {
+    clearCurrentDraggedAsset();
+    window.removeEventListener("pointerup", handlePointerUp);
+    window.removeEventListener("pointercancel", handlePointerCancel);
+  };
+
+  window.addEventListener("pointerup", handlePointerUp);
+  window.addEventListener("pointercancel", handlePointerCancel);
+}
+
 // ── Take group ─────────────────────────────────────────────────────────────
 
 const QA_COLORS: Record<QaJobStatus, string> = {
@@ -72,7 +122,7 @@ interface TakeGroupProps {
   onRegenerate: (job: Job) => void;
 }
 
-const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa, onRegenerate }) => {
+const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, scriptRows, onUse, onQa, onRegenerate }) => {
   const color = KIND_COLOR[jobs[0].model] ?? "currentColor";
   return (
     <div style={{ borderBottom: "1px solid var(--line-1)" }}>
@@ -81,6 +131,7 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa, o
         const qaColor = QA_COLORS[job.qa_status];
         const row = job.row_index != null ? scriptRows[job.row_index] : undefined;
         const sub = truncate(job.description);
+        const kind = job.model as RoutableAssetKind;
         const dragPayload = job.output_path ? {
           kind,
           audioPath: job.output_path,
@@ -397,6 +448,32 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
         fields: { file: job.output_path },
       }).catch(console.error);
     }
+  };
+
+  const handleUsePersistent = async (asset: PersistentAsset) => {
+    if (!realProjectId || !activeSceneSlug || asset.active) return;
+    try {
+      await routeAudioToScene({
+        projectId: realProjectId,
+        sceneSlug: activeSceneSlug,
+        kind: asset.kind,
+        audioPath: asset.audioPath,
+        durationMs: asset.durationMs,
+      });
+      refreshPersistentAssets();
+    } catch (error) {
+      pushToast({ kind: "error", title: `Could not send asset to scene: ${error}` });
+    }
+  };
+
+  const handlePersistentQa = (asset: PersistentAsset, status: QaJobStatus) => {
+    updateSidecarQa({
+      audioPath: asset.audioPath,
+      qaStatus: status,
+      qaNotes: "",
+    })
+      .then(refreshPersistentAssets)
+      .catch((error) => pushToast({ kind: "error", title: `QA update failed: ${error}` }));
   };
 
   // Read the sidecar for the asset and route the user to the matching

@@ -10,7 +10,7 @@ import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { routeAudioToScene } from "../../lib/assetRouting";
 import { usePeaksStore } from "../../store/peaksStore";
 import { useRegenerateStore } from "../../store/regenerateStore";
-import type { GeneratedAudioAsset, MockScene } from "../../lib/types";
+import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
 

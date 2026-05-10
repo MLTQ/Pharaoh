@@ -4,7 +4,7 @@ import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { FountainEditor } from "./FountainEditor";
 import { TakesPopover } from "./TakesPopover";
-import { useProjectStore } from "../../store/projectStore";
+import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
@@ -396,6 +396,112 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     return Array.from(map.values());
   }, [realProjectId, scriptRows, tracks]);
 
+  const trackNameForAssetDrop = (asset: DraggedAsset, compatibleTarget?: MockTrack): string => {
+    if (compatibleTarget) return compatibleTarget.name;
+
+    const base = defaultTrackNameForAsset(asset);
+    if (asset.kind === "tts") {
+      const existingDialogueTrack = activeTracks.find((track) =>
+        track.kind === "dialogue" && track.name.toLowerCase() === base.toLowerCase()
+      );
+      return existingDialogueTrack?.name ?? uniqueTrackName(base, activeTracks);
+    }
+
+    return uniqueTrackName(base, activeTracks);
+  };
+
+  const placeDraggedAsset = async (asset: DraggedAsset, startSec: number, targetTrack?: MockTrack) => {
+    if (!realProjectId || !activeSceneSlug) return;
+
+    const requiredTrackKind = trackKindForAsset(asset.kind);
+    const compatibleTarget = targetTrack?.kind === requiredTrackKind ? targetTrack : undefined;
+    const track = trackNameForAssetDrop(asset, compatibleTarget);
+    const startMs = Math.round(startSec * 1000);
+    const rowType = rowTypeForAsset(asset.kind);
+
+    const shouldReuseExisting = asset.kind === "tts" || !!compatibleTarget;
+    const existingIndex = shouldReuseExisting
+      ? scriptRows.findIndex((row) => row.file === asset.audioPath && row.type === rowType)
+      : -1;
+
+    if (existingIndex >= 0) {
+      const patch: Partial<ScriptRow> = {
+        track,
+        file: asset.audioPath,
+        start_ms: String(startMs),
+      };
+      if (asset.durationMs != null) patch.duration_ms = String(asset.durationMs);
+      if (asset.kind === "tts") patch.character = asset.character ?? track;
+
+      setScriptRows((prev) => prev.map((row, index) => index === existingIndex ? { ...row, ...patch } : row));
+      await updateScriptRow({
+        projectId: realProjectId,
+        sceneSlug: activeSceneSlug,
+        rowIndex: existingIndex,
+        fields: patch as Record<string, string>,
+      });
+    } else {
+      const nextRows = [
+        ...scriptRows,
+        blankScriptRow(scene.no, asset, track, startMs),
+      ];
+      setScriptRows(nextRows);
+      await writeScript({ projectId: realProjectId, sceneSlug: activeSceneSlug, rows: nextRows });
+    }
+
+    window.dispatchEvent(new CustomEvent(SCRIPT_ASSETS_CHANGED_EVENT, {
+      detail: { projectId: realProjectId, sceneSlug: activeSceneSlug },
+    }));
+  };
+
+  const handleAssetDrop = (event: React.DragEvent, targetTrack?: MockTrack) => {
+    const asset = parseDraggedAsset(event);
+    if (!asset) return false;
+
+    event.preventDefault();
+    event.stopPropagation();
+    setDropTarget(null);
+
+    const rect = tracksRowsRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
+    const localX = event.clientX - rect.left;
+    const rawSec = Math.max(0, localX / PX_PER_SEC);
+    const snapped = Math.round(rawSec / SNAP_SEC) * SNAP_SEC;
+    placeDraggedAsset(asset, snapped, targetTrack).catch((error) => {
+      console.error("[CompositionView] asset drop failed", error);
+    });
+    return true;
+  };
+
+  useEffect(() => {
+    const handlePointerAssetDrop = (event: Event) => {
+      const detail = (event as CustomEvent<AssetPointerDropDetail>).detail;
+      if (!detail?.asset || !tracksRowsRef.current) return;
+
+      const rect = tracksRowsRef.current.getBoundingClientRect();
+      if (
+        detail.clientX < rect.left
+        || detail.clientX > rect.right
+        || detail.clientY < rect.top
+        || detail.clientY > rect.bottom
+      ) {
+        return;
+      }
+
+      const localX = detail.clientX - rect.left;
+      const localY = detail.clientY - rect.top;
+      const startSec = Math.max(0, Math.round((localX / PX_PER_SEC) / SNAP_SEC) * SNAP_SEC);
+      const trackIndex = Math.floor(localY / 76);
+      const targetTrack = trackIndex >= 0 && trackIndex < activeTracks.length ? activeTracks[trackIndex] : undefined;
+
+      placeDraggedAsset(detail.asset, startSec, targetTrack).catch((error) => {
+        console.error("[CompositionView] pointer asset drop failed", error);
+      });
+    };
+
+    window.addEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
+    return () => window.removeEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
+  }, [activeTracks, activeSceneSlug, realProjectId, scriptRows]);
+
   const [clipStarts, setClipStarts] = useState<number[][]>([]);
   useEffect(() => {
     setClipStarts(activeTracks.map((t) => t.clips.map((c) => c.start)));
@@ -763,16 +869,23 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                   key={t.id}
                   className="track-row"
                   onDragOver={(e) => {
-                    // Accept drag only if it carries our payload type. Without
+                    // Accept asset drops and script-row moves. Without
                     // preventDefault the drop event won't fire on this element.
                     const types = Array.from(e.dataTransfer.types || []);
-                    if (!types.includes("application/x-pharaoh-script-row")) return;
+                    const isAssetDrop =
+                      types.includes(ASSET_DRAG_MIME)
+                      || types.includes("application/json")
+                      || types.includes("text/plain")
+                      || !!getCurrentDraggedAsset();
+                    if (!isAssetDrop && !types.includes("application/x-pharaoh-script-row")) return;
                     e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
+                    e.dataTransfer.dropEffect = isAssetDrop ? "copy" : "move";
                     setDropTarget(ti);
                   }}
                   onDragLeave={() => setDropTarget(null)}
                   onDrop={(e) => {
+                    if (handleAssetDrop(e, t)) return;
+
                     e.preventDefault();
                     setDropTarget(null);
                     const data = e.dataTransfer.getData("application/x-pharaoh-script-row");
