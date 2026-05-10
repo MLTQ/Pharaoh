@@ -5,6 +5,9 @@ mod error;
 mod fountain;
 mod models;
 
+#[cfg(test)]
+mod integration_tests;
+
 use models::{AppConfig, AppState};
 use tauri::Manager;
 use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
