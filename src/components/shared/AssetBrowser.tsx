@@ -1,5 +1,5 @@
 import React from "react";
-import { Icon, Wave, PeaksWave } from "./atoms";
+import { EmptyState, Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
@@ -177,6 +177,14 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
           <span>{label} · {total}</span>
           <span style={{ color: "var(--fg-4)" }}>{eyebrow}</span>
         </div>
+        {total === 0 && (
+          <EmptyState
+            icon={model === "tts" ? "mic" : model === "sfx" ? "waves" : "music"}
+            title={`No ${label.toLowerCase()} yet`}
+            body={`Generated ${label.toLowerCase()} for this scene appears here.`}
+            compact
+          />
+        )}
         {Array.from(groups.entries()).map(([key, groupJobs]) => (
           <TakeGroup
             key={key}

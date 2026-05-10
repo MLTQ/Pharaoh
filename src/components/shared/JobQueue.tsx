@@ -1,4 +1,5 @@
 import React from "react";
+import { EmptyState } from "./atoms";
 import type { Job } from "../../lib/types";
 
 interface JobQueueProps {
@@ -15,6 +16,14 @@ export const JobQueue: React.FC<JobQueueProps> = ({ jobs }) => {
         <span>RUNNING · {running}</span>
         <span style={{ color: "var(--fg-4)" }}>{queued} queued</span>
       </div>
+      {jobs.length === 0 && (
+        <EmptyState
+          icon="waves"
+          title="No jobs running"
+          body="Generations from Voice / Sound / Score show up here with live progress and the resulting take."
+          compact
+        />
+      )}
       {jobs.map((j) => (
         <div key={j.id} className="job-row">
           <div className="top">

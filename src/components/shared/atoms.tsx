@@ -161,3 +161,58 @@ export const StatusRing: React.FC<StatusRingProps> = ({ status }) => {
     : "draft";
   return <span className={`status-ring ${cls}`} />;
 };
+
+// ── EmptyState ──────────────────────────────────────────────────────────────
+//
+// Consistent placeholder for "nothing here yet" across asset browsers, job
+// queues, character lists, agent feeds, etc. Keeping the visual identical
+// across surfaces makes the absence read as a deliberate state instead of
+// an unfinished page.
+
+interface EmptyStateProps {
+  icon?: Parameters<typeof Icon>[0]["name"];
+  title: string;
+  body?: React.ReactNode;
+  // Primary affordance — usually "create the first thing"
+  ctaLabel?: string;
+  onCta?: () => void;
+  // Subtler than the standard padding for tight side-rails
+  compact?: boolean;
+}
+
+export const EmptyState: React.FC<EmptyStateProps> = ({
+  icon, title, body, ctaLabel, onCta, compact,
+}) => (
+  <div style={{
+    padding: compact ? "16px 12px" : "32px 20px",
+    textAlign: "center",
+    border: "1px dashed var(--line-2)",
+    borderRadius: "var(--r)",
+    color: "var(--fg-3)",
+    background: "transparent",
+    margin: compact ? "8px" : "16px",
+  }}>
+    {icon && (
+      <div style={{ display: "flex", justifyContent: "center", marginBottom: 10, opacity: 0.4 }}>
+        <Icon name={icon} style={{ width: compact ? 18 : 24, height: compact ? 18 : 24 }} />
+      </div>
+    )}
+    <div style={{ fontSize: compact ? 11 : 12.5, color: "var(--fg-2)", fontWeight: 500, marginBottom: body || ctaLabel ? 6 : 0 }}>
+      {title}
+    </div>
+    {body && (
+      <div style={{ fontSize: compact ? 10 : 11, color: "var(--fg-4)", lineHeight: 1.55 }}>
+        {body}
+      </div>
+    )}
+    {ctaLabel && onCta && (
+      <button
+        className="btn btn-sm"
+        onClick={onCta}
+        style={{ marginTop: 12 }}
+      >
+        {ctaLabel}
+      </button>
+    )}
+  </div>
+);
