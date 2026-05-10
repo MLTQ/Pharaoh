@@ -21,7 +21,6 @@ import { ToastHost } from "./components/shared/ToastHost";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
-import { usePlaybackStore } from "./store/playbackStore";
 import { useModelStore } from "./store/modelStore";
 import { useRenderMetaStore } from "./store/renderMetaStore";
 import { useAudioStore } from "./store/audioStore";
@@ -72,11 +71,14 @@ export default function App() {
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
   const activeWorkspace = WORKSPACE_OF[view];
-  const { isPlaying, play, pause, positionMs } = usePlaybackStore();
-  // The transport bar reflects whatever's actually playing through audioStore.
-  // The legacy playbackStore is stub state; audioStore is the real engine.
+  // Transport state — single source of truth. audioStore is the real engine
+  // (HTMLAudioElement + RAF position tracking); the old usePlaybackStore stub
+  // has been removed.
   const audioPlayingPath = useAudioStore((s) => s.playing);
+  const audioPositionSec = useAudioStore((s) => s.position);
   const stopAudio       = useAudioStore((s) => s.stop);
+  const isPlaying = audioPlayingPath !== null;
+  const positionMs = Math.round(audioPositionSec * 1000);
   const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
@@ -628,18 +630,17 @@ export default function App() {
       <div className="transport">
         <div className="tp-controls">
           <button className="tp-btn"><Icon name="skip_back" style={{ width: 14, height: 14 }} /></button>
-          {/* If something is actually playing through audioStore, this button
-              stops it. Otherwise it falls back to the placeholder transport
-              state so existing seeded UIs still toggle. */}
+          {/* When audio is actually playing, the button stops it. When idle,
+              there's nothing to "play" without a clip selected — the per-clip
+              PlayButtons elsewhere are how users initiate playback. */}
           <button
             className="tp-btn play"
-            onClick={() => {
-              if (audioPlayingPath) { stopAudio(); return; }
-              isPlaying ? pause() : play();
-            }}
-            title={audioPlayingPath ? "Stop preview" : isPlaying ? "Pause" : "Play"}
+            onClick={() => { if (audioPlayingPath) stopAudio(); }}
+            disabled={!audioPlayingPath}
+            title={audioPlayingPath ? "Stop preview" : "Nothing playing — start from a clip's play button"}
+            style={!audioPlayingPath ? { opacity: 0.5, cursor: "default" } : undefined}
           >
-            <Icon name={(audioPlayingPath || isPlaying) ? "pause" : "play"} style={{ width: 12, height: 12 }} />
+            <Icon name={isPlaying ? "pause" : "play"} style={{ width: 12, height: 12 }} />
           </button>
           <button className="tp-btn"><Icon name="skip_fwd" style={{ width: 14, height: 14 }} /></button>
           <button className="tp-btn" style={{ color: "oklch(0.78 0.14 30)" }}>
