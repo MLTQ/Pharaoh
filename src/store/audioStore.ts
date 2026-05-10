@@ -35,6 +35,7 @@ interface AudioState {
   play: (path: string, offsetSeconds?: number, stopAtSeconds?: number | null) => Promise<void>;
   stop: () => void;
   toggle: (path: string) => Promise<void>;
+  playSequence: (paths: string[]) => Promise<void>;
 }
 
 export const useAudioStore = create<AudioState>((set, get) => ({
@@ -112,6 +113,34 @@ export const useAudioStore = create<AudioState>((set, get) => ({
       get().stop();
     } else {
       await get().play(path);
+    }
+  },
+
+  // Audio-drama "table read" support. Plays a series of paths back-to-back
+  // (typically the placed DIALOGUE clips of a scene). Returns when the
+  // sequence completes naturally; if the user invokes stop() or starts a
+  // different playback mid-sequence, this aborts gracefully.
+  playSequence: async (paths: string[]) => {
+    for (const path of paths) {
+      // If the sequence was interrupted (user stopped or started something
+      // else), abort the rest of the queue.
+      const prevPlaying = get().playing;
+      if (prevPlaying != null && prevPlaying !== path && prevPlaying !== paths[paths.indexOf(path) - 1]) {
+        return;
+      }
+      await get().play(path);
+      // Wait until either the clip ends naturally or the user interrupts.
+      // Polled because the store's set() doesn't expose a per-key event.
+      await new Promise<void>((resolve) => {
+        const id = setInterval(() => {
+          const cur = get().playing;
+          if (cur !== path) { clearInterval(id); resolve(); }
+        }, 50);
+      });
+      if (get().playing != null && get().playing !== path) {
+        // User started another clip — stop the table-read sequence
+        return;
+      }
     }
   },
 }));

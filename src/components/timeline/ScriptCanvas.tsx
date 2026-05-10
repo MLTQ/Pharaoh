@@ -1,6 +1,7 @@
 import React, { useState, useRef } from "react";
 import { useUiStore } from "../../store/uiStore";
 import { useJobStore } from "../../store/jobStore";
+import { useAudioStore } from "../../store/audioStore";
 import type { ScriptRow, TrackType, Character, ViewId } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -436,6 +437,48 @@ const AddRowForm: React.FC<AddRowFormProps> = ({ sceneNo, characters, onAdd, onC
 
 // ── Main component ─────────────────────────────────────────────────────────
 
+// ── Table Read button ──────────────────────────────────────────────────────
+//
+// "Table read" plays every DIALOGUE row's resolved take back-to-back, no
+// SFX/music/timeline gaps. The audio-drama equivalent of a screenplay cold
+// read — fastest way to hear if a scene's lines hold together before
+// composing the full mix.
+
+const TableReadButton: React.FC<{ rows: ScriptRow[] }> = ({ rows }) => {
+  const playSequence = useAudioStore((s) => s.playSequence);
+  const stop = useAudioStore((s) => s.stop);
+  const playing = useAudioStore((s) => s.playing);
+  const dialoguePaths = rows
+    .filter((r) => r.type === "DIALOGUE" && r.file !== "")
+    .map((r) => r.file);
+  const isReading = playing != null && dialoguePaths.includes(playing);
+
+  if (dialoguePaths.length === 0) return null;
+  return (
+    <button
+      className="btn btn-sm"
+      onClick={() => {
+        if (isReading) { stop(); return; }
+        playSequence(dialoguePaths);
+      }}
+      title={
+        isReading
+          ? "Stop table read"
+          : `Table read: play ${dialoguePaths.length} dialogue line${dialoguePaths.length === 1 ? "" : "s"} back-to-back`
+      }
+      style={{
+        padding: "2px 8px", fontSize: 9.5,
+        background: isReading ? "color-mix(in oklch, var(--tts) 14%, transparent)" : undefined,
+        borderColor: isReading ? "var(--tts)" : undefined,
+        color: isReading ? "var(--tts)" : undefined,
+        fontFamily: "var(--font-mono)", letterSpacing: "0.04em", textTransform: "uppercase",
+      }}
+    >
+      {isReading ? "stop" : `read · ${dialoguePaths.length}`}
+    </button>
+  );
+};
+
 export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
   rows, characters, sceneNo, sceneSlug, onAdd, onDelete, onUpdate,
 }) => {
@@ -519,14 +562,17 @@ export const ScriptCanvas: React.FC<ScriptCanvasProps> = ({
         }}>
           Script · {rows.length}
         </span>
-        <button
-          className="btn btn-sm"
-          onClick={() => setAddingRow(true)}
-          style={{ padding: "2px 8px", fontSize: 13, lineHeight: 1 }}
-          title="Add row"
-        >
-          +
-        </button>
+        <div style={{ display: "flex", gap: 4 }}>
+          <TableReadButton rows={rows} />
+          <button
+            className="btn btn-sm"
+            onClick={() => setAddingRow(true)}
+            style={{ padding: "2px 8px", fontSize: 13, lineHeight: 1 }}
+            title="Add row"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* Rows */}
