@@ -322,6 +322,25 @@ export interface RenderMeta {
 export const readRenderMeta = (renderPath: string): Promise<RenderMeta | null> =>
   invoke("read_render_meta", { renderPath });
 
+// ── Setup integrity ─────────────────────────────────────────────────────────
+
+export interface ToolStatus {
+  ok: boolean;
+  version: string | null;
+  hint: string;
+}
+export interface SetupReport {
+  ffmpeg: ToolStatus;
+  sox: ToolStatus;
+  render_ready: boolean;
+}
+
+/** Detect required CLI tools (ffmpeg, sox). Called once at app start so the
+ *  frontend can show an install banner instead of letting the user discover
+ *  a missing tool only when a render fails. */
+export const checkSetup = (): Promise<SetupReport> =>
+  invoke("check_setup");
+
 // ── LLM (Anthropic) ─────────────────────────────────────────────────────────
 
 export interface DraftSceneArgs {

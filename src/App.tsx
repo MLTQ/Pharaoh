@@ -18,6 +18,7 @@ import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ProjectChooser } from "./components/launcher/ProjectChooser";
 import { ToastHost } from "./components/shared/ToastHost";
+import { SetupBanner } from "./components/shared/SetupBanner";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
@@ -151,6 +152,9 @@ export default function App() {
         <div style={{ gridColumn: 2, gridRow: 1, position: "relative" }}>
           {view === "settings" ? <SettingsView /> : <ProjectLauncherView />}
         </div>
+        {/* Setup banner is part of the launcher experience too — first-run
+            users hit ffmpeg-missing before any project exists. */}
+        <SetupBanner />
       </div>
     );
   }
@@ -689,6 +693,7 @@ export default function App() {
         </div>
       </div>
       <ToastHost />
+      <SetupBanner />
       {projectChooser && (
         <ProjectChooser
           anchorX={projectChooser.x}

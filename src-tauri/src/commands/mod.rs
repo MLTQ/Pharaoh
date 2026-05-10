@@ -3,6 +3,7 @@ pub mod audio_engine;
 pub mod audio_enhance;
 pub mod inference;
 pub mod llm;
+pub mod setup_check;
 pub mod project;
 pub mod script;
 pub mod settings;
