@@ -7,6 +7,7 @@ import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
+import { useRegenerateStore } from "../../store/regenerateStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 interface MusicPanelProps {
@@ -143,6 +144,18 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
   useEffect(() => {
     setScene(defaultScene);
   }, [defaultScene]);
+
+  // Pickup point for "regenerate with same params" — see TTSPanel for shape.
+  const regenerateRequest = useRegenerateStore((s) => s.pending);
+  const clearRegenerate = useRegenerateStore((s) => s.clearPending);
+  useEffect(() => {
+    if (!regenerateRequest || regenerateRequest.model !== "music") return;
+    const meta = regenerateRequest.meta;
+    if (meta.prompt) setCaption(meta.prompt);
+    if (meta.duration_actual_ms != null) setDuration(meta.duration_actual_ms / 1000);
+    if (meta.seed != null) setSeed(meta.seed);
+    clearRegenerate();
+  }, [regenerateRequest, clearRegenerate]);
 
   // Stable signature: only changes when a music job for this scene settles.
   const completedJobsKey = useMemo(

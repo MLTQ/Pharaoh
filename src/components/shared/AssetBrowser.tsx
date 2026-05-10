@@ -3,7 +3,10 @@ import { EmptyState, Icon, Wave, PeaksWave } from "./atoms";
 import { PlayButton } from "./PlayButton";
 import { useJobStore, takeKey } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
-import { updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
+import { useUiStore } from "../../store/uiStore";
+import { useRegenerateStore } from "../../store/regenerateStore";
+import { useToastStore } from "../../store/toastStore";
+import { readSidecar, updateScriptRow, updateSidecarQa } from "../../lib/tauriCommands";
 import type { Job, MockAssets, QaJobStatus } from "../../lib/types";
 
 interface AssetBrowserProps {
@@ -33,9 +36,10 @@ interface TakeGroupProps {
   activeJobId: string | null;
   onUse: (job: Job) => void;
   onQa: (job: Job, status: QaJobStatus) => void;
+  onRegenerate: (job: Job) => void;
 }
 
-const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa }) => {
+const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa, onRegenerate }) => {
   const color = KIND_COLOR[jobs[0].model] ?? "currentColor";
   return (
     <div style={{ borderBottom: "1px solid var(--line-1)" }}>
@@ -50,6 +54,12 @@ const TakeGroup: React.FC<TakeGroupProps> = ({ jobs, activeJobId, onUse, onQa })
               background: isActive ? `color-mix(in oklch, ${color} 8%, var(--bg-1))` : undefined,
               borderLeft: isActive ? `2px solid ${color}` : "2px solid transparent",
             }}
+            onContextMenu={(e) => {
+              // Right-click → regenerate with same params (reads sidecar)
+              e.preventDefault();
+              onRegenerate(job);
+            }}
+            title="Right-click to regenerate with same params"
           >
             <div className="swatch" />
             <div className="wave">
@@ -158,6 +168,29 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
     }
   };
 
+  // Read the sidecar for the asset and route the user to the matching
+  // generator panel with the original params loaded. The panel watches
+  // useRegenerateStore and hydrates its inputs.
+  const setRegenerate = useRegenerateStore((s) => s.setPending);
+  const setView = useUiStore((s) => s.setView);
+  const pushToast = useToastStore((s) => s.push);
+  const handleRegenerate = async (job: Job) => {
+    if (!job.output_path) return;
+    try {
+      const meta = await readSidecar(job.output_path);
+      if (!meta) {
+        pushToast({ kind: "warn", title: "No sidecar — can't regenerate with same params" });
+        return;
+      }
+      const model = job.model === "post" ? "tts" : job.model;
+      setRegenerate({ model, meta, source_path: job.output_path });
+      setView(model);
+      pushToast({ kind: "info", title: `Regenerating with same params · ${model}` });
+    } catch (e) {
+      pushToast({ kind: "error", title: `Read sidecar failed: ${e}` });
+    }
+  };
+
   function renderSection(
     label: string,
     eyebrow: string,
@@ -192,6 +225,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
             activeJobId={activeTakes[key] ?? null}
             onUse={handleUse}
             onQa={handleQa}
+            onRegenerate={handleRegenerate}
           />
         ))}
         {mockItems.map((a, i) => (

@@ -8,6 +8,7 @@ import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
+import { useRegenerateStore } from "../../store/regenerateStore";
 import type { GeneratedAudioAsset, MockScene } from "../../lib/types";
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
@@ -63,6 +64,28 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   useEffect(() => {
     setScene(defaultScene);
   }, [defaultScene]);
+
+  // Pickup point for "regenerate with same params" — AssetBrowser stashes a
+  // sidecar in the regenerateStore and routes here. We hydrate the inputs
+  // from the meta and clear the request so the next mount doesn't re-fire.
+  const regenerateRequest = useRegenerateStore((s) => s.pending);
+  const clearRegenerate = useRegenerateStore((s) => s.clearPending);
+  useEffect(() => {
+    if (!regenerateRequest || regenerateRequest.model !== "tts") return;
+    const meta = regenerateRequest.meta;
+    if (meta.prompt) setLine(meta.prompt);
+    if (meta.instruct) setDirection(meta.instruct);
+    if (meta.temperature != null) setTemperature(meta.temperature);
+    if (meta.top_p != null) setTopP(meta.top_p);
+    if (meta.seed != null) setSeed(meta.seed);
+    // Speaker hint: try to match a character whose voice assignment uses
+    // this preset speaker. Falls back to leaving the existing selection.
+    if (meta.speaker) {
+      const match = characters.find((c) => c.voice_assignment.speaker === meta.speaker);
+      if (match) setSpeakerId(match.id);
+    }
+    clearRegenerate();
+  }, [regenerateRequest, characters, clearRegenerate]);
 
   // Only re-fetch when a relevant job *settles* (complete/failed) — not on every
   // progress tick. The jobs array updates ~2x/sec during generation; depending

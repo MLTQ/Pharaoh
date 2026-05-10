@@ -7,6 +7,7 @@ import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
+import { useRegenerateStore } from "../../store/regenerateStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 const AUDIO_LDM_NEGATIVE = "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts";
@@ -189,6 +190,25 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
   useEffect(() => {
     setScene(defaultScene);
   }, [defaultScene]);
+
+  // Pickup point for "regenerate with same params" — see TTSPanel for shape.
+  const regenerateRequest = useRegenerateStore((s) => s.pending);
+  const clearRegenerate = useRegenerateStore((s) => s.clearPending);
+  useEffect(() => {
+    if (!regenerateRequest || regenerateRequest.model !== "sfx") return;
+    const meta = regenerateRequest.meta;
+    if (meta.prompt) setValue(meta.prompt);
+    if (meta.duration_actual_ms != null) setDuration(meta.duration_actual_ms / 1000);
+    if (meta.seed != null) setSeed(meta.seed);
+    // model_variant decides backend (Woosh-* → woosh, AudioLDM-* → audioldm)
+    if (meta.model_variant) {
+      setModelVariant(meta.model_variant);
+      const lower = meta.model_variant.toLowerCase();
+      if (lower.startsWith("woosh"))    setBackend("woosh");
+      else if (lower.startsWith("audioldm")) setBackend("audioldm");
+    }
+    clearRegenerate();
+  }, [regenerateRequest, clearRegenerate]);
 
   // Stable signature: only changes when an SFX job for this scene settles.
   const completedJobsKey = useMemo(
