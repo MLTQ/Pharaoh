@@ -15,9 +15,9 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 - **Commands**: `project list`, `project status`, `project create`, `project update`, `scene list`, `scene get`, `scene create`, `scene update`.
 
 ### Script Commands
-- **Does**: Reads, writes, and patches scene `script.csv` rows.
-- **Interacts with**: `read_script_rows`, `write_script_rows`, `update_script_row_fields` in `app_support.rs`.
-- **Commands**: `script read`, `script write`, `script update-row`.
+- **Does**: Reads, writes, and patches scene `script.csv` rows; persists and compiles per-scene `script.fountain` prose used by the GUI editor.
+- **Interacts with**: `read_script_rows`, `write_script_rows`, `update_script_row_fields` in `app_support.rs`, `parse_document` / `blocks_to_rows` in `fountain.rs`.
+- **Commands**: `script read`, `script write`, `script fountain-read`, `script fountain-write`, `script update-row`.
 
 ### Character Commands
 - **Does**: Manages project characters and voice assignments, including headless voice design/clone probe generation.
@@ -25,9 +25,15 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 - **Commands**: `character list`, `character create`, `character update`, `character delete`, `character voice-set`, `character voice-design-test`, `character voice-clone-test`.
 
 ### Server And Setup Commands
-- **Does**: Reports inference server health, reads/updates configured endpoint paths, triggers model load/unload endpoints, and summarizes local setup paths.
-- **Interacts with**: App config, `/health`, `/load`, `/unload` endpoints.
-- **Commands**: `server health`, `server config`, `server config-set`, `model load`, `model unload`, `setup status`.
+- **Does**: Reports inference server health, reads/updates configured endpoint paths, triggers model load/unload endpoints, summarizes local setup paths, and exposes hardware detection used by Settings.
+- **Interacts with**: App config, `/health`, `/load`, `/unload` endpoints, `detect_hardware` in `inference.rs`.
+- **Commands**: `server health`, `server config`, `server config-set`, `model load`, `model unload`, `setup status`, `setup hardware`.
+
+### LLM Authoring Commands
+- **Does**: Runs the GUI's Anthropic-backed scene draft/revision pass from on-disk project and scene context, optionally persisting and compiling the result.
+- **Interacts with**: `draft_scene_impl` and `storyboard_review_impl` in `llm.rs`, Fountain helpers in `fountain.rs`.
+- **Commands**: `llm draft-scene`, `storyboard review`, `storyboard rewrite`.
+- **Rationale**: Agents need the same first-draft and continuity-review loops as GUI users, but with explicit write/compile controls.
 
 ### Scene Row Generation
 - **Does**: Reads `script.csv`, chooses the proper inference endpoint per row type, waits for completion, and binds outputs back into the script.
@@ -57,6 +63,12 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 ### `compose_render_scene`
 - **Does**: Renders a scene using the same Rust audio engine used by the GUI.
 - **Interacts with**: `render_scene_with_projects_dir` in `commands/audio_engine.rs`.
+
+### Composition And Audio Inspection Commands
+- **Does**: Renders scenes/episodes, reads render metadata, and exposes waveform-oriented helpers for duration, peaks, and zero-crossing lookup.
+- **Interacts with**: `audio_engine.rs` render helpers and `audio.rs` WAV inspection helpers.
+- **Commands**: `compose render scene`, `compose final`, `compose meta`, `audio peaks`, `audio duration`, `audio zero-crossings`.
+- **Rationale**: Clip Studio and Mix workflows need scriptable inspection primitives so agents can crop, place, and verify audio without the GUI canvas.
 
 ### Asset Commands
 - **Does**: Lists generated/imported assets from sidecars, reads metadata, updates QA status/notes, lists takes, and assigns an asset to a script row.

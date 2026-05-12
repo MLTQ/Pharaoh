@@ -1,4 +1,5 @@
 use std::collections::HashMap;
+use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use chrono::Utc;
@@ -11,15 +12,17 @@ use crate::app_support::{
     read_script_rows, scene_dir, script_path, update_script_row_fields, write_json,
     write_script_rows,
 };
+use crate::commands::audio::{find_zero_crossings, get_duration_ms, get_waveform_peaks};
 use crate::commands::audio_engine::{
     import_audio_asset_with_projects_dir, process_clip_asset, ClipProcessRequest,
     ImportAudioRequest,
 };
 use crate::commands::audio_engine::{
-    normalize_clip, render_episode_with_projects_dir, render_scene_with_projects_dir, resample_to_48k,
+    normalize_clip, render_episode_with_projects_dir, render_scene_with_projects_dir,
+    resample_to_48k,
 };
 use crate::commands::audio_enhance::{output_path_for, write_upscale_sidecar};
-use crate::commands::inference::finalize_generation_output;
+use crate::commands::inference::{detect_hardware, finalize_generation_output};
 use crate::commands::sidecar::{read_sidecar, update_sidecar_qa, write_sidecar};
 use crate::error::{Error, Result};
 use crate::models::{
@@ -68,6 +71,16 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             if group == "script" && action == "write" =>
         {
             script_write(&config, project_id, scene_slug, input_path).await
+        }
+        [group, action, project_id, scene_slug]
+            if group == "script" && action == "fountain-read" =>
+        {
+            script_fountain_read(&config, project_id, scene_slug).await
+        }
+        [group, action, project_id, scene_slug, input_path, rest @ ..]
+            if group == "script" && action == "fountain-write" =>
+        {
+            script_fountain_write(&config, project_id, scene_slug, input_path, rest).await
         }
         [group, action, project_id, scene_slug, row_index, rest @ ..]
             if group == "script" && action == "update-row" =>
@@ -151,15 +164,34 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         {
             compose_render_scene(&config, project_id, scene_slug).await
         }
-        [group, action, project_id, rest @ ..]
-            if group == "compose" && action == "final" =>
-        {
+        [group, action, project_id, rest @ ..] if group == "compose" && action == "final" => {
             compose_final(&config, project_id, rest).await
         }
-        [group, action, project_id, rest @ ..]
-            if group == "storyboard" && action == "rewrite" =>
-        {
+        [group, action, project_id, rest @ ..] if group == "storyboard" && action == "rewrite" => {
             storyboard_rewrite(&config, project_id, rest).await
+        }
+        [group, action, project_id, rest @ ..] if group == "storyboard" && action == "review" => {
+            storyboard_rewrite(&config, project_id, rest).await
+        }
+        [group, action, project_id, scene_slug, rest @ ..]
+            if group == "llm" && action == "draft-scene" =>
+        {
+            llm_draft_scene(&config, project_id, scene_slug, rest).await
+        }
+        [group, action, audio_path, num_peaks] if group == "audio" && action == "peaks" => {
+            let num_peaks = num_peaks
+                .parse::<usize>()
+                .map_err(|_| Error::Other(format!("invalid peak count: {}", num_peaks)))?;
+            audio_peaks(audio_path, num_peaks).await
+        }
+        [group, action, audio_path] if group == "audio" && action == "duration" => {
+            audio_duration(audio_path).await
+        }
+        [group, action, audio_path, near_ms] if group == "audio" && action == "zero-crossings" => {
+            let near_ms = near_ms
+                .parse::<u64>()
+                .map_err(|_| Error::Other(format!("invalid near_ms: {}", near_ms)))?;
+            audio_zero_crossings(audio_path, near_ms).await
         }
         [group, action, rest @ ..] if group == "generate" && action == "tts-custom" => {
             generate_tts_custom(&config, rest).await
@@ -194,6 +226,10 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             post_upscale(&config, input_path, rest).await
         }
         [group, action] if group == "setup" && action == "status" => setup_status(&config).await,
+        [group, action] if group == "setup" && action == "hardware" => setup_hardware().await,
+        [group, action, render_path] if group == "compose" && action == "meta" => {
+            compose_meta(render_path).await
+        }
         [group, action, subaction, project_id, scene_slug, row_index]
             if group == "generate" && action == "row" && subaction == "scene" =>
         {
@@ -224,6 +260,8 @@ fn usage() -> &'static str {
   pharaoh scene update <project_id> <scene_slug_or_id> [--status draft|generating|assets_ready|composed|rendered]
   pharaoh script read <project_id> <scene_slug>
   pharaoh script write <project_id> <scene_slug> <script.csv|script.json>
+  pharaoh script fountain-read <project_id> <scene_slug>
+  pharaoh script fountain-write <project_id> <scene_slug> <script.fountain|-> [--compile true|false]
   pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
   pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
   pharaoh character list <project_id>
@@ -249,14 +287,21 @@ fn usage() -> &'static str {
   pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
+  pharaoh compose meta <render_wav>
   pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
+  pharaoh llm draft-scene <project_id> <scene_slug> [--model <name>] [--api-key-env <var>] [--write-fountain true|false] [--compile true|false]
+  pharaoh storyboard review <project_id> [--model <name>] [--api-key-env <var>]
   pharaoh storyboard rewrite <project_id> [--model <name>] [--api-key-env <var>]
+  pharaoh audio peaks <audio_path> <num_peaks>
+  pharaoh audio duration <audio_path>
+  pharaoh audio zero-crossings <audio_path> <near_ms>
   pharaoh post import <project_id> <source_audio> [--label <text>]
   pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>] [--fade-in-ms <n>] [--fade-out-ms <n>] [--fade-in-curve tri|qsin|qua] [--fade-out-curve tri|qsin|qua]
   pharaoh post normalize <input_wav> [--target-lufs -16]
   pharaoh post resample <input_wav> <output_wav>
   pharaoh post upscale <input_wav> [--model basic|speech] [--steps 50] [--guidance 3.5] [--seed 0]
   pharaoh setup status
+  pharaoh setup hardware
   pharaoh generate row scene <project_id> <scene_slug> <row_index>
   pharaoh generate all scene <project_id> <scene_slug>"
 }
@@ -503,8 +548,21 @@ async fn project_archive(
     let projects_dir = PathBuf::from(&config.projects_dir);
     // Resolve a default output path: ./pharaoh-archive-<slug>-<YYYYMMDD>.zip
     let project = load_project(config, project_id).ok();
-    let title_slug = project.as_ref()
-        .map(|p| p.title.to_lowercase().chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c } else { '_' }).collect::<String>())
+    let title_slug = project
+        .as_ref()
+        .map(|p| {
+            p.title
+                .to_lowercase()
+                .chars()
+                .map(|c| {
+                    if c.is_ascii_alphanumeric() || c == '-' {
+                        c
+                    } else {
+                        '_'
+                    }
+                })
+                .collect::<String>()
+        })
         .unwrap_or_else(|| project_id.to_string());
     let default_output = format!(
         "./pharaoh-archive-{}-{}.zip",
@@ -664,7 +722,8 @@ async fn compose_render_scene(
     scene_slug: &str,
 ) -> Result<()> {
     let projects_dir = PathBuf::from(&config.projects_dir);
-    let output_path = render_scene_with_projects_dir(&projects_dir, project_id, scene_slug, None).await?;
+    let output_path =
+        render_scene_with_projects_dir(&projects_dir, project_id, scene_slug, None).await?;
     print_json(&json!({
         "project_id": project_id,
         "scene_slug": scene_slug,
@@ -717,7 +776,10 @@ async fn storyboard_rewrite(
             let kind = row.track_type.to_uppercase();
             let line = match kind.as_str() {
                 "DIALOGUE" => {
-                    let name = cast_by_id.get(row.character.as_str()).copied().unwrap_or(row.character.as_str());
+                    let name = cast_by_id
+                        .get(row.character.as_str())
+                        .copied()
+                        .unwrap_or(row.character.as_str());
                     let mut s = format!("{}: {}", name.to_uppercase(), row.prompt);
                     if !row.instruct.is_empty() {
                         s = format!("{} [({})]", s, row.instruct);
@@ -771,6 +833,89 @@ async fn storyboard_rewrite(
     Ok(())
 }
 
+/// `pharaoh llm draft-scene <project> <scene> [--write-fountain true]`
+///
+/// Runs the same Anthropic scene-drafting pass used by the GUI, assembled from
+/// on-disk project/storyboard state. By default it prints JSON only; with
+/// `--write-fountain true` it also persists script.fountain and compiles the
+/// generated Fountain text back to script.csv.
+async fn llm_draft_scene(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let write_fountain: bool = flag_parse(&flags, "write_fountain", false)?;
+    let compile_after_write: bool = flag_parse(&flags, "compile", true)?;
+    let project = load_project(config, project_id)?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let storyboard: Storyboard =
+        read_json(&project_dir(&projects_dir, project_id).join("storyboard.json"))?;
+    let scene = find_scene(&storyboard, scene_slug)
+        .ok_or_else(|| Error::Other(format!("scene {} not found", scene_slug)))?;
+    let previous_path = fountain_path(&projects_dir, project_id, &scene.slug);
+    let previous_fountain = if previous_path.exists() {
+        Some(
+            std::fs::read_to_string(&previous_path)
+                .map_err(|e| Error::Other(format!("read {}: {}", previous_path.display(), e)))?,
+        )
+    } else {
+        None
+    };
+
+    let args = crate::commands::llm::DraftSceneArgs {
+        project_title: project.title.clone(),
+        logline: project.logline.clone(),
+        synopsis: project.synopsis.clone(),
+        tone: project.tone.clone(),
+        characters: project
+            .characters
+            .iter()
+            .map(|character| crate::commands::llm::DraftCharacter {
+                name: character.name.clone(),
+                description: character.description.clone(),
+                voice_direction: character.voice_assignment.instruct_default.clone(),
+            })
+            .collect(),
+        scene_title: scene.title.clone(),
+        scene_description: scene.description.clone(),
+        scene_location: scene.location.clone(),
+        previous_fountain,
+        model: flag_opt(&flags, "model"),
+        api_key_env: flag_opt(&flags, "api_key_env"),
+    };
+    let result = crate::commands::llm::draft_scene_impl(args).await?;
+
+    let mut written_path: Option<PathBuf> = None;
+    let mut compiled_rows: Option<usize> = None;
+    if write_fountain {
+        let path = write_scene_fountain(config, project_id, &scene.slug, &result.fountain)?;
+        written_path = Some(path);
+        if compile_after_write {
+            compiled_rows = Some(compile_fountain_for_scene(
+                config,
+                project_id,
+                &scene.slug,
+                &result.fountain,
+            )?);
+        } else {
+            update_project_timestamp(config, project_id)?;
+        }
+    }
+
+    print_json(&json!({
+        "project_id": project_id,
+        "scene_slug": scene.slug,
+        "fountain": result.fountain,
+        "model": result.model,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "written_path": written_path,
+        "compiled_rows": compiled_rows,
+    }))
+}
+
 /// `pharaoh compose final <project> [--crossfade <ms>] [--target-lufs <n>]`
 async fn compose_final(
     config: &crate::models::AppConfig,
@@ -780,16 +925,32 @@ async fn compose_final(
     let flags = parse_flags(rest)?;
     let crossfade_ms: u64 = flag_parse(&flags, "crossfade", 500)?;
     let target_lufs: Option<f32> = flag_opt(&flags, "target_lufs")
-        .map(|v| v.parse::<f32>().map_err(|_| Error::Other("invalid --target-lufs".into())))
+        .map(|v| {
+            v.parse::<f32>()
+                .map_err(|_| Error::Other("invalid --target-lufs".into()))
+        })
         .transpose()?;
     let projects_dir = PathBuf::from(&config.projects_dir);
     let output_path = render_episode_with_projects_dir(
-        &projects_dir, project_id, crossfade_ms, target_lufs, None,
-    ).await?;
+        &projects_dir,
+        project_id,
+        crossfade_ms,
+        target_lufs,
+        None,
+    )
+    .await?;
     print_json(&json!({
         "project_id": project_id,
         "output_path": output_path,
         "crossfade_ms": crossfade_ms,
+    }))
+}
+
+async fn compose_meta(render_path: &str) -> Result<()> {
+    let meta = crate::commands::audio_engine::read_render_meta(render_path.to_string()).await?;
+    print_json(&json!({
+        "render_path": render_path,
+        "meta": meta,
     }))
 }
 
@@ -823,6 +984,135 @@ async fn script_write(
     let projects_dir = PathBuf::from(&config.projects_dir);
     write_script_rows(&script_path(&projects_dir, project_id, scene_slug), &rows)?;
     print_json(&json!({ "project_id": project_id, "scene_slug": scene_slug, "rows": rows.len() }))
+}
+
+fn fountain_path(projects_dir: &Path, project_id: &str, scene_slug: &str) -> PathBuf {
+    scene_dir(projects_dir, project_id, scene_slug).join("script.fountain")
+}
+
+fn read_text_input(input_path: &str) -> Result<String> {
+    if input_path == "-" {
+        let mut text = String::new();
+        std::io::stdin().read_to_string(&mut text)?;
+        return Ok(text);
+    }
+    std::fs::read_to_string(input_path)
+        .map_err(|e| Error::Other(format!("cannot read {}: {}", input_path, e)))
+}
+
+fn write_scene_fountain(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+    text: &str,
+) -> Result<PathBuf> {
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let path = fountain_path(&projects_dir, project_id, scene_slug);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let tmp = path.with_extension("fountain.tmp");
+    std::fs::write(&tmp, text.as_bytes())
+        .map_err(|e| Error::Other(format!("write {}: {}", tmp.display(), e)))?;
+    std::fs::rename(&tmp, &path).map_err(|e| {
+        Error::Other(format!(
+            "rename {} to {}: {}",
+            tmp.display(),
+            path.display(),
+            e
+        ))
+    })?;
+    Ok(path)
+}
+
+fn compile_fountain_for_scene(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+    text: &str,
+) -> Result<usize> {
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let project = load_project(config, project_id)?;
+    let storyboard: Storyboard =
+        read_json(&project_dir(&projects_dir, project_id).join("storyboard.json"))?;
+    let scene = find_scene(&storyboard, scene_slug)
+        .ok_or_else(|| Error::Other(format!("scene {} not found", scene_slug)))?;
+    let doc = crate::fountain::parse_document(text);
+    if doc.scenes.len() > 1 {
+        return Err(Error::Other(
+            "fountain-write targets one existing scene; use script import for multi-scene files"
+                .into(),
+        ));
+    }
+    let scene_no = format!("S{:02}", scene.index + 1);
+    let cast_by_name: HashMap<String, String> = project
+        .characters
+        .iter()
+        .map(|c| (c.name.to_ascii_uppercase(), c.id.clone()))
+        .collect();
+    let rows = doc
+        .scenes
+        .first()
+        .map(|parsed_scene| {
+            crate::fountain::blocks_to_rows(&parsed_scene.blocks, &scene_no, |name| {
+                cast_by_name.get(&name.to_ascii_uppercase()).cloned()
+            })
+        })
+        .unwrap_or_default();
+    let row_count = rows.len();
+    write_script_rows(&script_path(&projects_dir, project_id, scene_slug), &rows)?;
+    update_project_timestamp(config, project_id)?;
+    Ok(row_count)
+}
+
+async fn script_fountain_read(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+) -> Result<()> {
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let path = fountain_path(&projects_dir, project_id, scene_slug);
+    let text = if path.exists() {
+        Some(
+            std::fs::read_to_string(&path)
+                .map_err(|e| Error::Other(format!("read {}: {}", path.display(), e)))?,
+        )
+    } else {
+        None
+    };
+    print_json(&json!({
+        "project_id": project_id,
+        "scene_slug": scene_slug,
+        "path": path,
+        "fountain": text,
+    }))
+}
+
+async fn script_fountain_write(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+    input_path: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let should_compile: bool = flag_parse(&flags, "compile", true)?;
+    let text = read_text_input(input_path)?;
+    let path = write_scene_fountain(config, project_id, scene_slug, &text)?;
+    let compiled_rows = if should_compile {
+        Some(compile_fountain_for_scene(
+            config, project_id, scene_slug, &text,
+        )?)
+    } else {
+        update_project_timestamp(config, project_id)?;
+        None
+    };
+    print_json(&json!({
+        "project_id": project_id,
+        "scene_slug": scene_slug,
+        "path": path,
+        "compiled_rows": compiled_rows,
+    }))
 }
 
 async fn script_update_row(
@@ -1034,7 +1324,13 @@ async fn script_import(
 fn sanitize_slug(s: &str) -> String {
     s.to_lowercase()
         .chars()
-        .map(|c| if c.is_ascii_alphanumeric() || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_ascii_alphanumeric() || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect::<String>()
         .trim_matches('_')
         .replace("__", "_")
@@ -1374,6 +1670,32 @@ fn character_output_path(
         .join(format!("{}_{}.wav", suffix, Utc::now().timestamp_millis()))
         .to_string_lossy()
         .to_string()
+}
+
+async fn audio_peaks(audio_path: &str, num_peaks: usize) -> Result<()> {
+    let peaks = get_waveform_peaks(audio_path.to_string(), num_peaks)?;
+    print_json(&json!({
+        "audio_path": audio_path,
+        "num_peaks": num_peaks,
+        "peaks": peaks,
+    }))
+}
+
+async fn audio_duration(audio_path: &str) -> Result<()> {
+    let duration_ms = get_duration_ms(audio_path.to_string())?;
+    print_json(&json!({
+        "audio_path": audio_path,
+        "duration_ms": duration_ms,
+    }))
+}
+
+async fn audio_zero_crossings(audio_path: &str, near_ms: u64) -> Result<()> {
+    let crossings_ms = find_zero_crossings(audio_path.to_string(), near_ms)?;
+    print_json(&json!({
+        "audio_path": audio_path,
+        "near_ms": near_ms,
+        "crossings_ms": crossings_ms,
+    }))
 }
 
 async fn generate_tts_custom(config: &crate::models::AppConfig, rest: &[String]) -> Result<()> {
@@ -2587,6 +2909,11 @@ async fn setup_status(config: &crate::models::AppConfig) -> Result<()> {
         }
     });
     print_json(&status)
+}
+
+async fn setup_hardware() -> Result<()> {
+    let profile = detect_hardware().await;
+    print_json(&profile)
 }
 
 async fn submit_job<T: Serialize>(

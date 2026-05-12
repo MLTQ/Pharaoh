@@ -238,14 +238,21 @@ pharaoh server health all
 pharaoh server config
 pharaoh server config-set --post-url http://remote-host:18004
 pharaoh setup status
+pharaoh setup hardware
 
 # Projects/scenes/scripts
 pharaoh project list
 pharaoh project create --title "The Salt Vault" --tone "intimate, dread"
 pharaoh scene create <project_id> --title "The Door Below"
 pharaoh script read <project_id> <scene_slug>
+pharaoh script fountain-read <project_id> <scene_slug>
+pharaoh script fountain-write <project_id> <scene_slug> ./scene.fountain
 pharaoh script update-row <project_id> <scene_slug> 3 --prompt "new line" --instruct "low, afraid"
 pharaoh script import <project_id> ./episode.fountain --dry-run
+
+# Agent writing/review
+pharaoh llm draft-scene <project_id> <scene_slug> --write-fountain true
+pharaoh storyboard review <project_id>
 
 # Characters and voice probes
 pharaoh character list <project_id>
@@ -263,10 +270,14 @@ pharaoh generate music --caption "slow bowed strings, dread" --duration-seconds 
 pharaoh generate row scene <project_id> <scene_slug> 4
 pharaoh generate all scene <project_id> <scene_slug>
 pharaoh compose render scene <project_id> <scene_slug>
+pharaoh compose meta ~/pharaoh-projects/<project_id>/scenes/<scene_slug>/render/render.wav
 
 # Assets and post
 pharaoh asset list <project_id> --kind sfx --scene <scene_slug>
 pharaoh asset meta ./take.wav
+pharaoh audio duration ./take.wav
+pharaoh audio peaks ./take.wav 120
+pharaoh audio zero-crossings ./take.wav 4500
 pharaoh asset qa ./take.wav --status approved --notes "usable after trim"
 pharaoh asset use <project_id> <scene_slug> 4 ./take.wav
 pharaoh post import <project_id> ./field_recording.wav --label "booth selects"
