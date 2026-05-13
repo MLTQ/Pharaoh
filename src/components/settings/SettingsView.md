@@ -1,13 +1,18 @@
 # SettingsView.tsx
 
 ## Purpose
-Settings panel for inference server URLs, model download commands, post-processing server setup, and install guidance.
+Settings panel for inference server URLs, model download commands, automated dependency setup, post-processing server setup, and install guidance.
 
 ## Components
 
 ### Model cards
-- **Does**: Render per-server URL, health, model download instructions, and install commands; URL edits update live config and persist to app config.
-- **Interacts with**: `modelStore.ts`, Tauri settings commands.
+- **Does**: Render per-server URL, health, model download instructions, automated setup buttons, and fallback install commands; URL edits update live config and persist to app config.
+- **Interacts with**: `modelStore.ts`, Tauri settings commands, `setup_inference_servers` in `setup.rs`.
+
+### Server setup buttons
+- **Does**: Run `inference/setup.sh` profiles from the GUI for core TTS/Music dependencies, optional AudioLDM, and optional AudioSR; displays recent setup output as a compact live log.
+- **Interacts with**: `inference_setup` Tauri events emitted by `setup.rs`.
+- **Rationale**: Keeps model-server dependency installs agent/user operable from Settings while retaining copyable commands for remote hosts or manual troubleshooting.
 
 ### SFX downloads
 - **Does**: Shows Woosh checkpoint instructions, a resumable native AudioLDM checkpoint download command, and the AudioLDM Hugging Face fallback command.
@@ -26,6 +31,7 @@ Settings panel for inference server URLs, model download commands, post-processi
 | `sfx_server.py` | Native AudioLDM is installed with `PHARAOH_INSTALL_AUDIOLDM=1`; native checkpoints land in `~/pharaoh-models/sfx/audioldm`; diffusers fallback may use the HF local directory | Changing setup guidance without updating server resolution |
 | Users | Woosh remains the required short-foley setup | Hiding Woosh behind AudioLDM setup |
 | `UpscaleView.tsx` | AudioSR setup command installs `inference/.venv-audiosr/bin/audiosr` and `post_url` points at the Post server | Showing a local-only CLI workflow |
+| `setup.rs` | Settings passes Tauri camelCase args (`wooshDir`) and listens for `SetupProgress`-shaped events | Changing command arg names or event payload shape |
 
 ## Notes
 - AudioLDM dependencies are installed separately with `PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh`; the native model command only places the `.ckpt` expected by the upstream CLI.

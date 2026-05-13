@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 use tauri::{AppHandle, Emitter};
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use crate::error::{Error, Result};
 
 // ── Event payload ─────────────────────────────────────────────────────────────
@@ -56,6 +56,18 @@ fn emit(app: &AppHandle, step: usize, label: &str, bytes_done: u64, bytes_total:
         label: label.to_string(),
         bytes_done, bytes_total,
         done, error,
+    });
+}
+
+fn emit_inference(app: &AppHandle, step: usize, total_steps: usize, label: &str, done: bool, error: Option<String>) {
+    let _ = app.emit("inference_setup", SetupProgress {
+        step,
+        total_steps,
+        label: label.to_string(),
+        bytes_done: 0,
+        bytes_total: 0,
+        done,
+        error,
     });
 }
 
@@ -203,4 +215,102 @@ pub async fn setup_woosh(app: AppHandle, dest_dir: String) -> Result<()> {
     // ── Done ─────────────────────────────────────────────────────────────────
     emit(&app, TOTAL_STEPS, "Setup complete", 0, 0, true, None);
     Ok(())
+}
+
+// ── Inference server setup ───────────────────────────────────────────────────
+
+/// Run `inference/setup.sh` from Settings.
+///
+/// `profile` selects optional environments:
+/// - `core`: TTS + Music server dependencies.
+/// - `audioldm`: Core + optional AudioLDM SFX+ dependencies.
+/// - `audiosr`: Core + optional AudioSR Post dependencies.
+/// - `all`: Core + both optional dependency stacks.
+#[tauri::command]
+pub async fn setup_inference_servers(
+    app: AppHandle,
+    profile: String,
+    woosh_dir: Option<String>,
+) -> Result<()> {
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    let inference_dir = manifest_dir
+        .parent()
+        .ok_or_else(|| Error::Other("could not resolve project root".into()))?
+        .join("inference");
+    let setup_script = inference_dir.join("setup.sh");
+    if !setup_script.exists() {
+        return Err(Error::Other(format!("setup script not found at {}", setup_script.display())));
+    }
+
+    let profile = profile.to_ascii_lowercase();
+    let total_steps = 2;
+    emit_inference(&app, 1, total_steps, &format!("Starting inference setup profile: {}", profile), false, None);
+
+    let mut command = tokio::process::Command::new("bash");
+    command
+        .arg(&setup_script)
+        .current_dir(&inference_dir)
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+
+    match profile.as_str() {
+        "core" => {}
+        "audioldm" => {
+            command.env("PHARAOH_INSTALL_AUDIOLDM", "1");
+        }
+        "audiosr" => {
+            command.env("PHARAOH_INSTALL_AUDIOSR", "1");
+        }
+        "all" => {
+            command.env("PHARAOH_INSTALL_AUDIOLDM", "1");
+            command.env("PHARAOH_INSTALL_AUDIOSR", "1");
+        }
+        other => {
+            let msg = format!("unknown setup profile: {}", other);
+            emit_inference(&app, total_steps, total_steps, &msg, false, Some(msg.clone()));
+            return Err(Error::Other(msg));
+        }
+    }
+
+    if let Some(dir) = woosh_dir.filter(|value| !value.trim().is_empty()) {
+        command.env("PHARAOH_WOOSH_DIR", expand_home(&dir));
+    }
+
+    let mut child = command
+        .spawn()
+        .map_err(|e| Error::Other(format!("failed to run setup.sh: {}", e)))?;
+
+    if let Some(stdout) = child.stdout.take() {
+        let app_out = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stdout).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                emit_inference(&app_out, 1, total_steps, &line, false, None);
+            }
+        });
+    }
+
+    if let Some(stderr) = child.stderr.take() {
+        let app_err = app.clone();
+        tokio::spawn(async move {
+            let mut lines = BufReader::new(stderr).lines();
+            while let Ok(Some(line)) = lines.next_line().await {
+                emit_inference(&app_err, 1, total_steps, &line, false, None);
+            }
+        });
+    }
+
+    let status = child
+        .wait()
+        .await
+        .map_err(|e| Error::Other(format!("setup.sh wait failed: {}", e)))?;
+
+    if status.success() {
+        emit_inference(&app, total_steps, total_steps, "Inference setup complete", true, None);
+        Ok(())
+    } else {
+        let msg = format!("setup.sh exited with {}", status);
+        emit_inference(&app, total_steps, total_steps, &msg, false, Some(msg.clone()));
+        Err(Error::Other(msg))
+    }
 }

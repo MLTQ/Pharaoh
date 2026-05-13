@@ -488,6 +488,114 @@ function WooshSetupPanel({ wooshDir, hw }: { wooshDir: string; hw: HardwareProfi
   );
 }
 
+function ServerSetupPanel({
+  profile,
+  wooshDir,
+  buttonLabel,
+  detail,
+  accent,
+}: {
+  profile: "core" | "audioldm" | "audiosr" | "all";
+  wooshDir?: string;
+  buttonLabel: string;
+  detail: string;
+  accent: string;
+}) {
+  const [phase, setPhase] = useState<"idle" | "running" | "done" | "error">("idle");
+  const [lines, setLines] = useState<SetupProgress[]>([]);
+  const unlistenRef = useRef<(() => void) | null>(null);
+
+  const start = async () => {
+    setPhase("running");
+    setLines([]);
+
+    const unlisten = await listen<SetupProgress>("inference_setup", (e) => {
+      const p = e.payload;
+      setLines((prev) => [...prev.slice(-7), p]);
+      if (p.done) { setPhase("done"); unlisten(); }
+      if (p.error) { setPhase("error"); unlisten(); }
+    });
+    unlistenRef.current = unlisten;
+
+    invoke("setup_inference_servers", {
+      profile,
+      wooshDir: wooshDir || null,
+    }).catch((e: unknown) => {
+      setPhase("error");
+      setLines((prev) => [...prev, {
+        step: -1,
+        total_steps: 2,
+        label: String(e),
+        bytes_done: 0,
+        bytes_total: 0,
+        done: false,
+        error: String(e),
+      }]);
+    });
+  };
+
+  useEffect(() => () => { unlistenRef.current?.(); }, []);
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+        <button
+          className="btn"
+          disabled={phase === "running"}
+          onClick={start}
+          style={{
+            borderColor: accent,
+            color: accent,
+            background: `color-mix(in oklch, ${accent} 10%, transparent)`,
+          }}
+        >
+          {phase === "running" ? "Installing..." : buttonLabel}
+        </button>
+        <span style={{ fontSize: 10.5, color: "var(--fg-4)" }}>
+          {detail}
+        </span>
+      </div>
+
+      {lines.length > 0 && (
+        <div style={{
+          border: "1px solid var(--line-1)",
+          background: "var(--bg-0)",
+          borderRadius: 2,
+          padding: "7px 9px",
+          display: "flex",
+          flexDirection: "column",
+          gap: 4,
+          maxHeight: 150,
+          overflow: "hidden",
+        }}>
+          {lines.map((line, idx) => (
+            <div
+              key={`${line.step}-${idx}-${line.label}`}
+              style={{
+                display: "flex",
+                gap: 7,
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                lineHeight: 1.45,
+                color: line.error
+                  ? "var(--sfx)"
+                  : line.done
+                    ? "var(--st-rendered)"
+                    : "var(--fg-3)",
+              }}
+            >
+              <span style={{ flexShrink: 0 }}>
+                {line.error ? "x" : line.done ? "ok" : ">"}
+              </span>
+              <span style={{ wordBreak: "break-word" }}>{line.label}</span>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── Woosh install helper ──────────────────────────────────────────────────────
 
 function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
@@ -832,12 +940,51 @@ export const SettingsView: React.FC = () => {
                         <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
                           Optional AudioLDM dependencies for long soundscapes
                         </div>
+                        <ServerSetupPanel
+                          profile="audioldm"
+                          wooshDir={wooshDir}
+                          buttonLabel="Install AudioLDM deps"
+                          detail="Runs setup.sh with PHARAOH_INSTALL_AUDIOLDM=1"
+                          accent="var(--sfx)"
+                        />
+                        <div style={{ height: 6 }} />
                         <CopyableCommand command="PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh" />
                       </div>
                     </div>
-                  ) : (
-                    <CopyableCommand command={m.install!} />
-                  )}
+                  ) : m.kind === "tts" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <ServerSetupPanel
+                        profile="core"
+                        wooshDir={wooshDir}
+                        buttonLabel="Install speech server deps"
+                        detail="Runs setup.sh for TTS and Music virtualenvs"
+                        accent={accent}
+                      />
+                      <CopyableCommand command={m.install!} />
+                    </div>
+                  ) : m.kind === "music" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <ServerSetupPanel
+                        profile="core"
+                        wooshDir={wooshDir}
+                        buttonLabel="Install music server deps"
+                        detail="Runs setup.sh for TTS and Music virtualenvs"
+                        accent={accent}
+                      />
+                      <CopyableCommand command={m.install!} />
+                    </div>
+                  ) : m.kind === "post" ? (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                      <ServerSetupPanel
+                        profile="audiosr"
+                        wooshDir={wooshDir}
+                        buttonLabel="Install AudioSR deps"
+                        detail="Runs setup.sh with PHARAOH_INSTALL_AUDIOSR=1"
+                        accent={accent}
+                      />
+                      <CopyableCommand command={m.install!} />
+                    </div>
+                  ) : null}
                 </div>
               </div>
             </div>
