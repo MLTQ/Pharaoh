@@ -78,6 +78,19 @@ jobs:
         if: runner.os == 'Linux'
         run: npm run tauri build -- --bundles appimage
 
+      - name: Smoke-test Linux AppImage CLI
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          appimage="$(find src-tauri/target/release/bundle/appimage -maxdepth 1 -type f -name '*.AppImage' | head -n 1)"
+          if [ -z "$appimage" ]; then
+            echo "No AppImage found under src-tauri/target/release/bundle/appimage" >&2
+            exit 1
+          fi
+          chmod +x "$appimage"
+          APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" setup hardware > appimage-cli-smoke.json
+          test -s appimage-cli-smoke.json
+
       - name: Package macOS binary
         if: runner.os != 'Linux'
         shell: bash
@@ -187,6 +200,12 @@ jobs:
             Automated Pharaoh build from `${{ github.sha }}`.
 
             The `nightly` release is replaced on every successful `master` build. Versioned `v*` tags publish stable releases.
+
+            Linux AppImage CLI usage:
+            `./pharaoh-linux-x64-appimage.AppImage setup hardware`
+
+            Linux GUI notes:
+            Launch the AppImage from a graphical X11 or Wayland desktop session. On Arch-based systems, install the GTK/WebKit runtime packages if they are missing, typically `webkit2gtk-4.1`, `gtk3`, `libayatana-appindicator`, `librsvg`, and `fuse2`.
           overwrite_files: true
           files: |
             release-artifacts/*.tar.gz
