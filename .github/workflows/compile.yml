@@ -117,19 +117,77 @@ jobs:
     name: Publish GitHub Release
     needs: tauri
     runs-on: ubuntu-22.04
-    if: startsWith(github.ref, 'refs/tags/v') || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
+    if: (github.event_name == 'push' && (github.ref == 'refs/heads/master' || startsWith(github.ref, 'refs/tags/v'))) || (github.event_name == 'workflow_dispatch' && github.event.inputs.tag_name != '')
     steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-artifacts
           merge-multiple: true
 
+      - name: Resolve release metadata
+        id: release_meta
+        shell: bash
+        env:
+          DISPATCH_TAG: ${{ github.event.inputs.tag_name }}
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            tag="${GITHUB_REF_NAME}"
+            name="Pharaoh ${GITHUB_REF_NAME}"
+            prerelease="false"
+            make_latest="true"
+            generate_notes="true"
+          elif [[ "${GITHUB_EVENT_NAME}" == "workflow_dispatch" && -n "${DISPATCH_TAG}" ]]; then
+            tag="${DISPATCH_TAG}"
+            name="Pharaoh ${DISPATCH_TAG}"
+            if [[ "${DISPATCH_TAG}" == v* ]]; then
+              prerelease="false"
+              make_latest="true"
+            else
+              prerelease="true"
+              make_latest="false"
+            fi
+            generate_notes="true"
+          else
+            tag="nightly"
+            name="Pharaoh nightly"
+            prerelease="true"
+            make_latest="false"
+            generate_notes="false"
+          fi
+
+          {
+            echo "tag_name=${tag}"
+            echo "release_name=${name}"
+            echo "prerelease=${prerelease}"
+            echo "make_latest=${make_latest}"
+            echo "generate_notes=${generate_notes}"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Move rolling release tag
+        if: github.event_name == 'push' && github.ref == 'refs/heads/master'
+        run: |
+          git tag -f nightly "$GITHUB_SHA"
+          git push -f origin refs/tags/nightly
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.event.inputs.tag_name || github.ref_name }}
-          generate_release_notes: true
+          tag_name: ${{ steps.release_meta.outputs.tag_name }}
+          name: ${{ steps.release_meta.outputs.release_name }}
+          prerelease: ${{ steps.release_meta.outputs.prerelease }}
+          make_latest: ${{ steps.release_meta.outputs.make_latest }}
+          generate_release_notes: ${{ steps.release_meta.outputs.generate_notes }}
+          body: |
+            Automated Pharaoh build from `${{ github.sha }}`.
+
+            The `nightly` release is replaced on every successful `master` build. Versioned `v*` tags publish stable releases.
+          overwrite_files: true
           files: |
             release-artifacts/*.tar.gz
             release-artifacts/*.AppImage
