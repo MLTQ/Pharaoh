@@ -54,7 +54,16 @@ jobs:
           cache: npm
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup_script="${RUNNER_TEMP}/rustup-init.sh"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$rustup_script"
+          sh "$rustup_script" -y --profile minimal --default-toolchain stable
+          echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
+          "$HOME/.cargo/bin/rustup" default stable
+          "$HOME/.cargo/bin/cargo" --version
+          "$HOME/.cargo/bin/rustc" --version
 
       - name: Cache Rust build artifacts
         uses: Swatinem/rust-cache@v2

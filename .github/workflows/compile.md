@@ -6,8 +6,9 @@ Builds Pharaoh on macOS and Linux, uploads CI artifacts, and publishes GitHub re
 ## Components
 
 ### `tauri` job
-- **Does**: Installs platform dependencies, builds the frontend, checks the Rust backend, compiles the Tauri app, and packages release artifacts.
-- **Interacts with**: `npm run build`, `cargo check`, `npm run tauri build`, and `actions/upload-artifact`.
+- **Does**: Installs platform dependencies, installs and verifies the stable Rust toolchain, builds the frontend, checks the Rust backend, compiles the Tauri app, and packages release artifacts.
+- **Interacts with**: `rustup`, `npm run build`, `cargo check`, `npm run tauri build`, and `actions/upload-artifact`.
+- **Rationale**: The workflow installs Rust explicitly so macOS and Linux both resolve `cargo` through the verified rustup toolchain path.
 
 ### `Smoke-test Linux AppImage CLI`
 - **Does**: Executes the built AppImage with `setup hardware` before publishing it.
