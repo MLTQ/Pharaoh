@@ -192,18 +192,26 @@ export default function App() {
   // Declared before the launcher early-return so hook order is stable across
   // realProjectId transitions (otherwise React errors on hook count change).
   const [projectChooser, setProjectChooser] = useState<{ x: number; y: number } | null>(null);
+  const [launcherPanel, setLauncherPanel] = useState<"projects" | "settings">("projects");
 
   // ── No project: launcher shell ───────────────────────────────────────────
   if (!realProjectId) {
     return (
-      <div className="app" style={{ gridTemplateColumns: "var(--rail-w) 1fr", gridTemplateRows: "1fr" }}>
+      <div className="app" style={{ gridTemplateColumns: "56px minmax(0, 1fr)", gridTemplateRows: "1fr" }}>
         {/* Minimal rail */}
         <div className="rail" style={{ gridRow: "1" }}>
+          <button
+            className={`rail-btn ${launcherPanel === "projects" ? "active" : ""}`}
+            title="Projects"
+            onClick={() => setLauncherPanel("projects")}
+          >
+            <Icon name="folder" style={{ width: 18, height: 18 }} />
+          </button>
           <div className="rail-spacer" />
           <button
-            className={`rail-btn ${view === "settings" ? "active" : ""}`}
+            className={`rail-btn ${launcherPanel === "settings" ? "active" : ""}`}
             title="Settings"
-            onClick={() => setView("settings")}
+            onClick={() => setLauncherPanel("settings")}
           >
             <Icon name="settings" style={{ width: 18, height: 18 }} />
           </button>
@@ -211,7 +219,11 @@ export default function App() {
 
         {/* Full-area content */}
         <div style={{ gridColumn: 2, gridRow: 1, position: "relative" }}>
-          {view === "settings" ? <SettingsView /> : <ProjectLauncherView />}
+          {launcherPanel === "settings" ? (
+            <SettingsView />
+          ) : (
+            <ProjectLauncherView onOpenSettings={() => setLauncherPanel("settings")} />
+          )}
         </div>
         {/* Setup banner is part of the launcher experience too — first-run
             users hit ffmpeg-missing before any project exists. */}

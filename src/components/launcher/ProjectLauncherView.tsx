@@ -162,7 +162,7 @@ const ProjectCard: React.FC<{
 
 // ── Main view ─────────────────────────────────────────────────────────────────
 
-export const ProjectLauncherView: React.FC = () => {
+export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettings }) => {
   const [projects, setProjects] = useState<Project[]>([]);
   const [projectsDir, setProjectsDir] = useState("");
   const [loading, setLoading]   = useState(true);
@@ -308,7 +308,7 @@ export const ProjectLauncherView: React.FC = () => {
         <div style={{ marginTop: 24, textAlign: "center" }}>
           <button
             className="btn btn-sm"
-            onClick={() => setView("settings")}
+            onClick={onOpenSettings ?? (() => setView("settings"))}
             style={{ fontSize: 10.5, color: "var(--fg-4)" }}
           >
             ⚙ Settings
