@@ -349,7 +349,8 @@ def generate_tts(
         try:
             project = _project_json(project_id)
             character = next(
-                (c for c in project.get("characters", []) if c["id"] == char_id),
+                (c for c in project.get("characters", [])
+                 if c["id"] == char_id or c.get("name", "").upper() == char_id.upper()),
                 None,
             )
             if character:
@@ -531,7 +532,8 @@ def generate_chatterbox(
         try:
             project = _project_json(project_id)
             character = next(
-                (c for c in project.get("characters", []) if c["id"] == char_id),
+                (c for c in project.get("characters", [])
+                 if c["id"] == char_id or c.get("name", "").upper() == char_id.upper()),
                 None,
             )
             if character:
