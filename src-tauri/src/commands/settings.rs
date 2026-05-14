@@ -61,7 +61,7 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
 #[tauri::command]
 pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
     let state = app.state::<AppState>();
-    let (tts_url, sfx_url, music_url, post_url) = {
+    let (tts_url, sfx_url, music_url, post_url, mcp_url) = {
         let cfg = state
             .server_config
             .read()
@@ -71,6 +71,7 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
             cfg.sfx_url.clone(),
             cfg.music_url.clone(),
             cfg.post_url.clone(),
+            cfg.mcp_url.clone(),
         )
     };
     let http = state.http.clone();
@@ -86,17 +87,19 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
             .ok()
     }
 
-    let (tts, sfx, music) = tokio::join!(
+    let (tts, sfx, music, post, mcp) = tokio::join!(
         try_health(http.clone(), tts_url),
         try_health(http.clone(), sfx_url),
         try_health(http.clone(), music_url),
+        try_health(http.clone(), post_url),
+        try_health(http.clone(), mcp_url),
     );
-    let post = try_health(http, post_url).await;
 
     Ok(AllServerHealth {
         tts,
         sfx,
         music,
         post,
+        mcp,
     })
 }

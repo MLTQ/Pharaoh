@@ -108,6 +108,7 @@ pub struct ServerConfig {
     pub sfx_url: String,
     pub music_url: String,
     pub post_url: String,
+    pub mcp_url: String,
 }
 
 impl Default for ServerConfig {
@@ -117,12 +118,17 @@ impl Default for ServerConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: "http://127.0.0.1:18004".to_string(),
+            mcp_url: "http://127.0.0.1:18000".to_string(),
         }
     }
 }
 
 fn default_post_url() -> String {
     "http://127.0.0.1:18004".to_string()
+}
+
+fn default_mcp_url() -> String {
+    "http://127.0.0.1:18000".to_string()
 }
 
 // ── Persistent app config ────────────────────────────────────────────────
@@ -134,6 +140,8 @@ pub struct AppConfig {
     pub music_url: String,
     #[serde(default = "default_post_url")]
     pub post_url: String,
+    #[serde(default = "default_mcp_url")]
+    pub mcp_url: String,
     /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
     pub tts_public: bool,
     pub sfx_public: bool,
@@ -152,6 +160,7 @@ impl AppConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: default_post_url(),
+            mcp_url: default_mcp_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
@@ -172,6 +181,7 @@ pub struct AllServerHealth {
     pub sfx: Option<ServerHealth>,
     pub music: Option<ServerHealth>,
     pub post: Option<ServerHealth>,
+    pub mcp: Option<ServerHealth>,
 }
 
 pub struct AppState {
@@ -188,6 +198,7 @@ impl AppState {
             sfx_url: app_config.sfx_url.clone(),
             music_url: app_config.music_url.clone(),
             post_url: app_config.post_url.clone(),
+            mcp_url: app_config.mcp_url.clone(),
         };
         Self {
             http: reqwest::Client::new(),
