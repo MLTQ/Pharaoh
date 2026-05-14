@@ -665,18 +665,23 @@ export const SettingsView: React.FC = () => {
   const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post };
 
   const [urls, setUrls] = useState({
-    tts:   `http://127.0.0.1:18001`,
-    sfx:   `http://127.0.0.1:18002`,
-    music: `http://127.0.0.1:18003`,
-    post:  `http://127.0.0.1:18004`,
+    tts:        `http://127.0.0.1:18001`,
+    sfx:        `http://127.0.0.1:18002`,
+    music:      `http://127.0.0.1:18003`,
+    post:       `http://127.0.0.1:18004`,
+    chatterbox: `http://127.0.0.1:18005`,
   });
+  const [chatterboxHealth, setChatterboxHealth] = useState<"unknown" | "online" | "offline">("unknown");
 
   const [wooshDir, setWooshDir] = useState("");
 
   // Load persisted config on mount
   useEffect(() => {
     invoke<AppConfig>("get_app_config").then((cfg) => {
-      setUrls({ tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url, post: cfg.post_url });
+      setUrls({
+        tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url, post: cfg.post_url,
+        chatterbox: cfg.chatterbox_url ?? "http://127.0.0.1:18005",
+      });
       setWooshDir(cfg.woosh_dir ?? "");
     }).catch(() => {});
   }, []);
@@ -685,6 +690,20 @@ export const SettingsView: React.FC = () => {
     await updateServerConfig({ [`${kind}_url`]: urls[kind] });
     const cfg = await invoke<AppConfig>("get_app_config");
     await invoke("save_app_config", { config: { ...cfg, [`${kind}_url`]: urls[kind] } });
+  };
+
+  const handleChatterboxUrlBlur = async () => {
+    const cfg = await invoke<AppConfig>("get_app_config");
+    await invoke("save_app_config", { config: { ...cfg, chatterbox_url: urls.chatterbox } });
+  };
+
+  const checkChatterboxHealth = async () => {
+    try {
+      const res = await fetch(`${urls.chatterbox}/health`);
+      setChatterboxHealth(res.ok ? "online" : "offline");
+    } catch {
+      setChatterboxHealth("offline");
+    }
   };
 
   const handleBrowseWoosh = async () => {
@@ -990,6 +1009,73 @@ export const SettingsView: React.FC = () => {
             </div>
           );
         })}
+
+        {/* ── Chatterbox Turbo card ──────────────────────────────────────── */}
+        <div style={{
+          border: "1px solid var(--line-1)", background: "var(--bg-1)",
+          borderRadius: 3, marginBottom: 14, overflow: "hidden",
+        }}>
+          <div style={{
+            borderBottom: "1px solid var(--line-1)", padding: "12px 16px",
+            display: "flex", alignItems: "center", gap: 10,
+          }}>
+            <span style={{
+              width: 8, height: 8, borderRadius: "50%",
+              background: chatterboxHealth === "online" ? "#22c55e" : chatterboxHealth === "offline" ? "#ef4444" : "var(--fg-4)",
+              boxShadow: chatterboxHealth === "online" ? "0 0 5px #22c55e" : "none",
+              flexShrink: 0,
+            }} />
+            <span style={{ fontWeight: 600, fontSize: 13 }}>Chatterbox Turbo</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:18005</span>
+            <span style={{ flex: 1 }} />
+            <span style={{ fontSize: 11, color: "var(--fg-3)" }}>0-shot voice cloning + paralinguistic tags · 0.5B</span>
+          </div>
+          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
+            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+              <div style={{ flex: 1 }}>
+                <Label>Server URL</Label>
+                <input
+                  type="text"
+                  value={urls.chatterbox}
+                  onChange={(e) => setUrls((prev) => ({ ...prev, chatterbox: e.target.value }))}
+                  onBlur={handleChatterboxUrlBlur}
+                  style={{
+                    width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
+                    background: "var(--bg-0)", border: "1px solid var(--line-1)",
+                    borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
+                    boxSizing: "border-box",
+                  }}
+                />
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                <Label>Health</Label>
+                <button
+                  onClick={checkChatterboxHealth}
+                  style={{
+                    fontFamily: "var(--font-mono)", fontSize: 10,
+                    padding: "4px 10px", background: "var(--bg-0)",
+                    border: "1px solid var(--line-1)", borderRadius: 2,
+                    color: chatterboxHealth === "online" ? "#22c55e" : chatterboxHealth === "offline" ? "#ef4444" : "var(--fg-4)",
+                    cursor: "pointer",
+                  }}
+                >
+                  {chatterboxHealth}
+                </button>
+              </div>
+            </div>
+            <div style={{ fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6 }}>
+              Start with:{" "}
+              <code style={{ fontFamily: "var(--font-mono)", fontSize: 10, background: "var(--bg-0)", padding: "1px 4px", borderRadius: 2 }}>
+                PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh
+              </code>
+              {" "}then{" "}
+              <code style={{ fontFamily: "var(--font-mono)", fontSize: 10, background: "var(--bg-0)", padding: "1px 4px", borderRadius: 2 }}>
+                inference/.venv-chatterbox/bin/python inference/chatterbox_server.py
+              </code>
+              . Model weights download from HuggingFace on first /load call.
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   );

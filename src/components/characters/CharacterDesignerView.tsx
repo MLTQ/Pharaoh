@@ -10,16 +10,18 @@ import {
   submitTtsVoiceClone,
 } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
-import type { Character, GeneratedAudioAsset } from "../../lib/types";
+import type { Character, GeneratedAudioAsset, PaletteEntry } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
 const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
 const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
 
-const charSceneSlug = (charId: string) => `__char__${charId}`;
+const charSceneSlug    = (charId: string) => `__char__${charId}`;
+const paletteSceneSlug = (charId: string, emotion: string) => `__palette__${charId}__${emotion}`;
 const DESIGN_ROW = 0;
 const CLONE_ROW  = 1;
+const PALETTE_ROW = 0; // one row per palette scene slug
 
 function newCharId() {
   return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
@@ -54,7 +56,7 @@ async function pickAudioFile(): Promise<string | null> {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-type DesignTab = "design" | "clone";
+type DesignTab = "design" | "palette" | "clone";
 
 export const CharacterDesignerView: React.FC = () => {
   const {
@@ -83,6 +85,18 @@ export const CharacterDesignerView: React.FC = () => {
   const [referencePeaks, setReferencePeaks] = useState<Record<string, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // ── Palette state ──
+  const [paletteEntries, setPaletteEntries] = useState<PaletteEntry[]>(
+    char?.voice_assignment.emotional_palette ?? []
+  );
+  const [addingEmotion, setAddingEmotion]     = useState(false);
+  const [newEmotionKey, setNewEmotionKey]     = useState("");
+  const [newEmotionLabel, setNewEmotionLabel] = useState("");
+  const [newEmotionDesc, setNewEmotionDesc]   = useState("");
+  const [paletteTestLine, setPaletteTestLine] = useState(DEFAULT_TEST_LINE);
+  const [expandedEmotion, setExpandedEmotion] = useState<string | null>(null);
+  const [paletteGenError, setPaletteGenError] = useState<string | null>(null);
+
   useEffect(() => {
     if (!char) return;
     setLocalName(char.name);
@@ -90,8 +104,12 @@ export const CharacterDesignerView: React.FC = () => {
     setVoiceDesc(char.voice_assignment.instruct_default ?? "");
     setInstruct(char.voice_assignment.instruct_default ?? "");
     setRefTranscript(char.voice_assignment.ref_transcript ?? "");
+    setPaletteEntries(char.voice_assignment.emotional_palette ?? []);
     setGenError(null);
-    setTab(char.voice_assignment.model === "Clone" ? "clone" : "design");
+    setPaletteGenError(null);
+    setAddingEmotion(false);
+    const model = char.voice_assignment.model;
+    setTab(model === "Clone" ? "clone" : model === "Chatterbox" ? "palette" : "design");
   }, [char?.id]);
 
   // ── Jobs ──
@@ -163,6 +181,91 @@ export const CharacterDesignerView: React.FC = () => {
       scene_id: null, scene_slug: slug, row_index: rowIndex,
       output_path: null, peaks: null, qa_status: "unreviewed", error: null,
     });
+  };
+
+  // ── Palette helpers ──
+
+  const savePalette = (entries: PaletteEntry[]) => {
+    setPaletteEntries(entries);
+    saveVoice({ emotional_palette: entries });
+  };
+
+  const handleAddEmotion = () => {
+    const key = newEmotionKey.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!key) return;
+    if (paletteEntries.some((e) => e.emotion === key)) {
+      setPaletteGenError(`Emotion "${key}" already exists.`);
+      return;
+    }
+    const entry: PaletteEntry = {
+      emotion: key,
+      label: newEmotionLabel.trim() || key.charAt(0).toUpperCase() + key.slice(1),
+      voice_description: newEmotionDesc.trim(),
+      ref_audio_path: null,
+      ref_transcript: null,
+      qa_status: "unreviewed",
+    };
+    const next = [...paletteEntries, entry];
+    savePalette(next);
+    setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDesc("");
+    setAddingEmotion(false);
+    setExpandedEmotion(key);
+    setPaletteGenError(null);
+  };
+
+  const handleRemoveEmotion = (emotion: string) => {
+    if (!window.confirm(`Remove "${emotion}" from the palette?`)) return;
+    savePalette(paletteEntries.filter((e) => e.emotion !== emotion));
+  };
+
+  const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
+    if (!char || !entry.voice_description.trim()) {
+      setPaletteGenError("Add a voice description for this emotion first.");
+      return;
+    }
+    setPaletteGenError(null);
+    const emotionSlug = paletteSceneSlug(char.id, entry.emotion);
+    const seed = Math.floor(Math.random() * 9999);
+    const ts = Date.now();
+    const palDir = realProjectId && projectsDir
+      ? `${projectsDir}/${realProjectId}/characters/${char.id}/palette`
+      : "/tmp";
+    const out = `${palDir}/${entry.emotion}_${seed}_${ts}.wav`;
+    try {
+      const jobId = await submitTtsVoiceDesign({
+        projectId: realProjectId ?? "demo",
+        sceneSlug: emotionSlug,
+        rowIndex: PALETTE_ROW,
+        params: {
+          text: paletteTestLine || DEFAULT_TEST_LINE,
+          voice_description: entry.voice_description,
+          language: "en", seed,
+          temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
+          output_path: out,
+        },
+      });
+      addJob({
+        id: jobId, model: "tts",
+        description: `Palette · ${char.name} · ${entry.label}`,
+        status: "pending", progress: 0, eta: "…",
+        started_at: new Date().toISOString(),
+        scene_id: null, scene_slug: emotionSlug, row_index: PALETTE_ROW,
+        output_path: null, peaks: null, qa_status: "unreviewed", error: null,
+      });
+    } catch (e: unknown) {
+      setPaletteGenError(e instanceof Error ? e.message : "Generation failed");
+    }
+  };
+
+  const handlePromotePaletteTake = (emotion: string, audioPath: string) => {
+    const next = paletteEntries.map((e) =>
+      e.emotion === emotion
+        ? { ...e, ref_audio_path: audioPath, qa_status: "approved" as const }
+        : e
+    );
+    savePalette(next);
+    // Promote model to Chatterbox once first reference is approved
+    saveVoice({ model: "Chatterbox", emotional_palette: next });
   };
 
   // ── Generation ──
@@ -259,6 +362,7 @@ export const CharacterDesignerView: React.FC = () => {
         instruct_default: "",
         ref_audio_path: null,
         ref_transcript: null,
+        emotional_palette: [],
       },
     });
     setNewName(""); setAddingChar(false);
@@ -336,7 +440,9 @@ export const CharacterDesignerView: React.FC = () => {
           const active = c.id === char.id;
           const hue = CHAR_HUE(c.id);
           const modelLabel = c.voice_assignment.model === "Clone" ? "clone"
-            : c.voice_assignment.model === "VoiceDesign" ? "design" : "custom";
+            : c.voice_assignment.model === "VoiceDesign" ? "design"
+            : c.voice_assignment.model === "Chatterbox" ? "chatterbox"
+            : "custom";
           return (
             <div
               key={c.id}
@@ -430,6 +536,7 @@ export const CharacterDesignerView: React.FC = () => {
             }}>
               {char.voice_assignment.model === "Clone" ? "Clone"
                 : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
+                : char.voice_assignment.model === "Chatterbox" ? "Chatterbox"
                 : "Custom"}
             </span>
             <button
@@ -465,8 +572,8 @@ export const CharacterDesignerView: React.FC = () => {
           display: "flex", borderBottom: "1px solid var(--line-1)",
           background: "var(--bg-1)", flexShrink: 0,
         }}>
-          {(["design", "clone"] as DesignTab[]).map((t) => {
-            const label = t === "design" ? "Voice Design" : "Clone";
+          {(["design", "palette", "clone"] as DesignTab[]).map((t) => {
+            const label = t === "design" ? "Voice Design" : t === "palette" ? "Emotional Palette" : "Clone";
             const active = tab === t;
             return (
               <button key={t} onClick={() => setTab(t)} style={{
@@ -559,6 +666,233 @@ export const CharacterDesignerView: React.FC = () => {
               {designJobs.length === 0 && !runningDesign && (
                 <EmptyTakes label="No takes yet — write a description and generate above." />
               )}
+            </div>
+          )}
+
+          {/* ── EMOTIONAL PALETTE ────────────────────────────────────────── */}
+          {tab === "palette" && (
+            <div>
+              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
+                Define named emotional states for this character. Each state gets a Qwen3 VoiceDesign
+                reference clip — Chatterbox Turbo then 0-shot clones from the matching reference for
+                every production line. Assign emotions in the script's <em>emotion</em> column.
+              </p>
+
+              {/* Add emotion / test line row */}
+              <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <label style={labelStyle}>Test line for takes</label>
+                  <input
+                    className="input"
+                    value={paletteTestLine}
+                    onChange={(e) => setPaletteTestLine(e.target.value)}
+                    style={{ width: "100%", fontSize: 12 }}
+                    placeholder="Line to synthesise for audition…"
+                  />
+                </div>
+                <button
+                  className="btn btn-primary"
+                  onClick={() => { setAddingEmotion(true); setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDesc(""); setPaletteGenError(null); }}
+                  style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
+                >
+                  + Add Emotion
+                </button>
+              </div>
+
+              {/* Add emotion inline form */}
+              {addingEmotion && (
+                <div style={{
+                  padding: "12px 14px", marginBottom: 14,
+                  border: "1px solid var(--tts)", borderRadius: "var(--r)",
+                  background: "color-mix(in oklch, var(--tts) 6%, var(--bg-1))",
+                  display: "flex", flexDirection: "column", gap: 8,
+                }}>
+                  <div style={{ display: "flex", gap: 8 }}>
+                    <div style={{ flex: 1 }}>
+                      <label style={labelStyle}>Emotion key (slug)</label>
+                      <input
+                        className="input" autoFocus
+                        value={newEmotionKey}
+                        onChange={(e) => setNewEmotionKey(e.target.value)}
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="neutral, sardonic, tense…"
+                      />
+                    </div>
+                    <div style={{ flex: 1 }}>
+                      <label style={labelStyle}>Display label</label>
+                      <input
+                        className="input"
+                        value={newEmotionLabel}
+                        onChange={(e) => setNewEmotionLabel(e.target.value)}
+                        style={{ width: "100%", fontSize: 12 }}
+                        placeholder="Neutral (defaults to key)"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label style={labelStyle}>Voice description for this emotion</label>
+                    <textarea
+                      className="input"
+                      value={newEmotionDesc}
+                      onChange={(e) => setNewEmotionDesc(e.target.value)}
+                      rows={2}
+                      style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                      placeholder="e.g. Same burnished alto, but slower and more deliberate — each word chosen carefully."
+                    />
+                  </div>
+                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                    <button className="btn btn-sm" onClick={() => setAddingEmotion(false)}>Cancel</button>
+                    <button
+                      className="btn btn-sm btn-primary"
+                      onClick={handleAddEmotion}
+                      disabled={!newEmotionKey.trim()}
+                      style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {paletteGenError && <div style={errorStyle}>{paletteGenError}</div>}
+
+              {/* Palette entry cards */}
+              {paletteEntries.length === 0 && !addingEmotion && (
+                <div style={{
+                  padding: "24px 16px", textAlign: "center",
+                  border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+                  color: "var(--fg-4)", fontSize: 12,
+                }}>
+                  No emotions yet. Add one above — start with "neutral".
+                </div>
+              )}
+
+              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                {paletteEntries.map((entry) => {
+                  const emotionSlug = char ? paletteSceneSlug(char.id, entry.emotion) : "";
+                  const entryJobs = [...jobs]
+                    .filter((j) => j.scene_slug === emotionSlug && j.row_index === PALETTE_ROW && j.status === "complete" && j.output_path)
+                    .reverse();
+                  const runningEntry = jobs.some((j) => j.scene_slug === emotionSlug && (j.status === "running" || j.status === "pending"));
+                  const isExpanded = expandedEmotion === entry.emotion;
+
+                  return (
+                    <div key={entry.emotion} style={{
+                      border: `1px solid ${entry.qa_status === "approved" ? "var(--st-rendered)" : "var(--line-1)"}`,
+                      borderRadius: "var(--r)",
+                      background: "var(--bg-1)",
+                      overflow: "hidden",
+                    }}>
+                      {/* Card header */}
+                      <div
+                        style={{
+                          display: "flex", alignItems: "center", gap: 8,
+                          padding: "8px 12px", cursor: "pointer",
+                          background: isExpanded ? "color-mix(in oklch, var(--bg-2) 60%, transparent)" : "transparent",
+                        }}
+                        onClick={() => setExpandedEmotion(isExpanded ? null : entry.emotion)}
+                      >
+                        <span style={{
+                          fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.06em",
+                          color: isExpanded ? "var(--fg-1)" : "var(--fg-3)", userSelect: "none",
+                        }}>
+                          {isExpanded ? "▾" : "▸"}
+                        </span>
+                        <span style={{ fontWeight: 500, fontSize: 12, color: "var(--fg-1)", flex: 1 }}>
+                          {entry.label}
+                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)", marginLeft: 6 }}>
+                            {entry.emotion}
+                          </span>
+                        </span>
+                        {entry.qa_status === "approved" ? (
+                          <span style={{ fontSize: 9.5, color: "var(--st-rendered)", fontFamily: "var(--font-mono)" }}>✓ approved</span>
+                        ) : entry.ref_audio_path ? (
+                          <span style={{ fontSize: 9.5, color: "var(--fg-4)", fontFamily: "var(--font-mono)" }}>○ unreviewed</span>
+                        ) : null}
+                        <button
+                          className="btn btn-sm"
+                          style={{ color: "var(--sfx)", borderColor: "transparent", padding: "1px 5px", fontSize: 11 }}
+                          onClick={(e) => { e.stopPropagation(); handleRemoveEmotion(entry.emotion); }}
+                          title="Remove emotion"
+                        >×</button>
+                      </div>
+
+                      {/* Expanded body */}
+                      {isExpanded && (
+                        <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--line-1)" }}>
+                          <div style={{ marginBottom: 10 }}>
+                            <label style={labelStyle}>Voice description for this emotion</label>
+                            <textarea
+                              className="input"
+                              value={entry.voice_description}
+                              onChange={(e) => {
+                                const next = paletteEntries.map((pe) =>
+                                  pe.emotion === entry.emotion ? { ...pe, voice_description: e.target.value } : pe
+                                );
+                                savePalette(next);
+                              }}
+                              rows={2}
+                              style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                              placeholder="Describe how this emotion should colour the voice…"
+                            />
+                          </div>
+
+                          {/* Reference status */}
+                          {entry.ref_audio_path && (
+                            <div style={{
+                              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
+                              padding: "7px 10px",
+                              background: "color-mix(in oklch, var(--st-rendered) 8%, var(--bg-2))",
+                              borderRadius: "var(--r)",
+                              border: "1px solid color-mix(in oklch, var(--st-rendered) 30%, var(--line-1))",
+                            }}>
+                              <PlayButton path={entry.ref_audio_path} size={11} />
+                              <span style={{
+                                flex: 1, fontFamily: "var(--font-mono)", fontSize: 9.5,
+                                color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                              }}>
+                                {entry.ref_audio_path.split("/").pop()}
+                              </span>
+                              <span style={{ fontSize: 9.5, color: "var(--st-rendered)", flexShrink: 0 }}>reference</span>
+                            </div>
+                          )}
+
+                          {/* Generate button + running state */}
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+                            <button
+                              className="btn btn-primary"
+                              onClick={() => handleGeneratePaletteTake(entry)}
+                              disabled={runningEntry || !entry.voice_description.trim()}
+                              style={{
+                                background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
+                                opacity: !entry.voice_description.trim() ? 0.4 : 1,
+                              }}
+                            >
+                              {runningEntry ? "Generating…" : "Generate Take"}
+                            </button>
+                            {runningEntry && <RunningBadge label="Synthesising…" />}
+                          </div>
+
+                          {/* Takes list */}
+                          {entryJobs.length > 0 && (
+                            <TakeList label={`Takes · ${entryJobs.length}`}>
+                              {entryJobs.map((job, i) => (
+                                <TakeRow
+                                  key={job.id} job={job} index={i}
+                                  saveLabel="Approve as reference"
+                                  isSaved={entry.ref_audio_path === job.output_path && entry.qa_status === "approved"}
+                                  onSave={() => handlePromotePaletteTake(entry.emotion, job.output_path!)}
+                                  onQa={(s) => setQaStatus(job.id, s)}
+                                />
+                              ))}
+                            </TakeList>
+                          )}
+                        </div>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           )}
 
@@ -762,12 +1096,29 @@ export const CharacterDesignerView: React.FC = () => {
           <div style={{ color: "var(--tts)", fontWeight: 500 }}>
             {char.voice_assignment.model === "Clone" ? "Voice Clone"
               : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
+              : char.voice_assignment.model === "Chatterbox" ? "Chatterbox"
               : "Custom"}
           </div>
           {refPath
             ? <div style={{ color: "var(--st-rendered)", fontSize: 10, marginTop: 4 }}>✓ Reference set</div>
             : <div style={{ color: "var(--fg-4)", fontSize: 10, marginTop: 4 }}>No reference</div>}
         </MetaSection>
+
+        {paletteEntries.length > 0 && (
+          <MetaSection label="Palette">
+            <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+              {paletteEntries.map((e) => (
+                <div key={e.emotion} style={{ display: "flex", alignItems: "center", gap: 5 }}>
+                  <span style={{
+                    width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
+                    background: e.qa_status === "approved" ? "var(--st-rendered)" : "var(--fg-4)",
+                  }} />
+                  <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>{e.label}</span>
+                </div>
+              ))}
+            </div>
+          </MetaSection>
+        )}
 
         {char.voice_assignment.instruct_default && (
           <MetaSection label="Voice instructions">

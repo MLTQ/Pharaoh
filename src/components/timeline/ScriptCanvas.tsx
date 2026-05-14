@@ -336,7 +336,7 @@ const AddRowForm: React.FC<AddRowFormProps> = ({ sceneNo, characters, onAdd, onC
       prompt: prompt.trim(),
       file: "", start_ms: "", duration_ms: "", loop: "",
       pan: "", gain_db: "", instruct: "", fade_in_ms: "",
-      fade_out_ms: "", reverb_send: "", notes: "",
+      fade_out_ms: "", reverb_send: "", emotion: "", notes: "",
     });
   };
 

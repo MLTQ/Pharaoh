@@ -1,11 +1,32 @@
 // ── Project data model ──────────────────────────────────────────────────────
 
-export interface VoiceAssignment {
-  model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned";
-  speaker: string | null;
-  instruct_default: string | null;
+/**
+ * A single emotional state entry in a character's vocal palette.
+ * Each entry has its own Qwen3 VoiceDesign-generated reference clip used
+ * as the conditioning signal for Chatterbox Turbo 0-shot cloning.
+ */
+export interface PaletteEntry {
+  /** Slug key used in script.csv `emotion` column (e.g. "neutral", "sardonic") */
+  emotion: string;
+  /** Human-readable display label */
+  label: string;
+  /** Qwen3 VoiceDesign prompt used to generate the reference clip */
+  voice_description: string;
+  /** Absolute path to the locked reference .wav (null = not yet generated/approved) */
   ref_audio_path: string | null;
   ref_transcript: string | null;
+  qa_status: "unreviewed" | "approved";
+}
+
+export interface VoiceAssignment {
+  model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned" | "Chatterbox";
+  speaker: string | null;
+  instruct_default: string | null;
+  /** Legacy single-reference path (used by Clone tab). */
+  ref_audio_path: string | null;
+  ref_transcript: string | null;
+  /** Named emotional states for the Chatterbox Turbo palette workflow. */
+  emotional_palette: PaletteEntry[];
 }
 
 export interface Character {
@@ -40,9 +61,11 @@ export interface AppConfig {
   sfx_url: string;
   music_url: string;
   post_url: string;
+  chatterbox_url: string;
   tts_public: boolean;
   sfx_public: boolean;
   music_public: boolean;
+  chatterbox_public: boolean;
   projects_dir: string;
   models_dir: string;
   woosh_dir: string;
@@ -53,6 +76,7 @@ export interface AllServerHealth {
   sfx: ServerHealth | null;
   music: ServerHealth | null;
   post: ServerHealth | null;
+  chatterbox: ServerHealth | null;
 }
 
 export interface ServerHealth {
@@ -111,6 +135,8 @@ export interface ScriptRow {
   fade_in_ms: string;
   fade_out_ms: string;
   reverb_send: string;
+  /** Palette emotion key for Chatterbox routing (e.g. "neutral", "tense"). Empty = use default. */
+  emotion: string;
   notes: string;
 }
 

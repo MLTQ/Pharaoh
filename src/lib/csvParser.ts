@@ -4,7 +4,7 @@ import type { ScriptRow, TrackType } from "./types";
 export const SCRIPT_HEADERS = [
   "scene", "track", "type", "character", "prompt", "file",
   "start_ms", "duration_ms", "loop", "pan", "gain_db", "instruct",
-  "fade_in_ms", "fade_out_ms", "reverb_send", "notes",
+  "fade_in_ms", "fade_out_ms", "reverb_send", "emotion", "notes",
 ] as const;
 
 // ── Parse ───────────────────────────────────────────────────────────────────
@@ -31,6 +31,7 @@ export function parseScript(csvText: string): ScriptRow[] {
     fade_in_ms:  row.fade_in_ms  ?? "50",
     fade_out_ms: row.fade_out_ms ?? "50",
     reverb_send: row.reverb_send ?? "0",
+    emotion:     row.emotion     ?? "",
     notes:       row.notes       ?? "",
   }));
 }

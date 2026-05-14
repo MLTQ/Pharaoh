@@ -40,6 +40,7 @@ parser.add_argument("--tts-url", default="http://127.0.0.1:18001")
 parser.add_argument("--sfx-url", default="http://127.0.0.1:18002")
 parser.add_argument("--music-url", default="http://127.0.0.1:18003")
 parser.add_argument("--post-url", default="http://127.0.0.1:18004")
+parser.add_argument("--chatterbox-url", default="http://127.0.0.1:18005")
 parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"])
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=18000)
@@ -51,6 +52,7 @@ SERVER_URLS = {
     "sfx": args.sfx_url,
     "music": args.music_url,
     "post": args.post_url,
+    "chatterbox": args.chatterbox_url,
 }
 
 mcp = FastMCP("pharaoh")
@@ -320,17 +322,19 @@ def generate_tts(
     max_new_tokens: int = 2048,
 ) -> str:
     """
-    Submit a TTS generation job for a DIALOGUE script row.
+    Submit a TTS/dialogue generation job for a DIALOGUE script row.
     Returns a job_id immediately. Poll job_status to wait for completion.
     The prompt is read from the row's 'prompt' field; instruct overrides the row's 'instruct' field if provided.
     output_path should be the absolute path where the .wav should be saved.
 
-    Voice modes:
-      - voice_description (preferred): pass a rich natural-language description of the desired voice
-        (e.g. "Deep, gravelly male voice, 50s, world-weary noir detective, slow deliberate pace").
-        Routes to /generate/voice_design — the model synthesises a matching voice from scratch.
-      - speaker + instruct: use a preset speaker name with optional style instruction.
-        Supported speakers: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian.
+    Voice modes (in priority order):
+      1. Chatterbox (automatic): if the character's voice_assignment.model == "Chatterbox" and the
+         row has a non-empty 'emotion' field, automatically resolves the palette reference and routes
+         to the Chatterbox server. No extra parameters needed.
+      2. voice_description: pass a rich natural-language description of the desired voice.
+         Routes to Qwen3-TTS /generate/voice_design.
+      3. speaker + instruct: preset speaker with optional style instruction.
+         Supported speakers: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian.
     """
     rows = _script_rows(project_id, scene_slug)
     if row_index < 0 or row_index >= len(rows):
@@ -338,6 +342,36 @@ def generate_tts(
     row = rows[row_index]
     if row.get("type", "").upper() != "DIALOGUE":
         return json.dumps({"error": "generate_tts only applies to DIALOGUE rows"})
+
+    # ── Chatterbox routing (auto, based on character voice_assignment) ──────────
+    char_id = row.get("character", "")
+    if char_id:
+        try:
+            project = _project_json(project_id)
+            character = next(
+                (c for c in project.get("characters", []) if c["id"] == char_id),
+                None,
+            )
+            if character:
+                va = character.get("voice_assignment", {})
+                if va.get("model") == "Chatterbox":
+                    emotion_key = row.get("emotion", "").strip() or "neutral"
+                    palette = va.get("emotional_palette", [])
+                    entry = next(
+                        (e for e in palette if e["emotion"] == emotion_key),
+                        palette[0] if palette else None,
+                    )
+                    if entry and entry.get("ref_audio_path"):
+                        result = _post("chatterbox", "/generate/clone", {
+                            "text": row["prompt"],
+                            "ref_audio_path": entry["ref_audio_path"],
+                            "ref_transcript": entry.get("ref_transcript") or "",
+                            "seed": seed,
+                            "output_path": output_path,
+                        })
+                        return json.dumps(result)
+        except Exception as exc:
+            log.warning(f"Chatterbox auto-routing failed, falling back to Qwen3: {exc}")
 
     if voice_description:
         # Voice Design mode: synthesise voice from natural-language description
@@ -459,10 +493,211 @@ def generate_music(
 
 
 @mcp.tool()
+def generate_chatterbox(
+    project_id: str,
+    scene_slug: str,
+    row_index: int,
+    output_path: str,
+    ref_audio_path: str = "",
+    emotion: str = "",
+    exaggeration: float = 0.5,
+    cfg_weight: float = 0.5,
+    seed: int = 0,
+) -> str:
+    """
+    Submit a Chatterbox Turbo 0-shot voice clone job for a DIALOGUE script row.
+
+    Chatterbox Turbo clones the vocal identity from ref_audio_path and renders
+    the row's prompt text. Inline paralinguistic tags in the prompt text are
+    honoured (e.g. '[sigh] I knew it.' or 'That's funny. [chuckle]').
+
+    ref_audio_path: if empty, auto-resolves from the character's emotional palette
+                    using the row's 'emotion' field (falls back to first palette entry).
+    emotion:        override the emotion key (ignores row's 'emotion' field).
+    exaggeration:   0–1, how strongly to colour the vocal performance.
+    cfg_weight:     classifier-free guidance strength.
+    """
+    rows = _script_rows(project_id, scene_slug)
+    if row_index < 0 or row_index >= len(rows):
+        return json.dumps({"error": f"row_index {row_index} out of range"})
+    row = rows[row_index]
+    if row.get("type", "").upper() != "DIALOGUE":
+        return json.dumps({"error": "generate_chatterbox only applies to DIALOGUE rows"})
+
+    resolved_ref = ref_audio_path
+    if not resolved_ref:
+        char_id = row.get("character", "")
+        emotion_key = emotion or row.get("emotion", "").strip() or "neutral"
+        try:
+            project = _project_json(project_id)
+            character = next(
+                (c for c in project.get("characters", []) if c["id"] == char_id),
+                None,
+            )
+            if character:
+                palette = character.get("voice_assignment", {}).get("emotional_palette", [])
+                entry = next(
+                    (e for e in palette if e["emotion"] == emotion_key),
+                    palette[0] if palette else None,
+                )
+                if entry and entry.get("ref_audio_path"):
+                    resolved_ref = entry["ref_audio_path"]
+        except Exception as exc:
+            return json.dumps({"error": f"palette resolution failed: {exc}"})
+
+    if not resolved_ref:
+        return json.dumps({"error": (
+            "ref_audio_path not supplied and no approved palette entry found. "
+            "Generate and approve a palette take first."
+        )})
+
+    result = _post("chatterbox", "/generate/clone", {
+        "text": row["prompt"],
+        "ref_audio_path": resolved_ref,
+        "exaggeration": exaggeration,
+        "cfg_weight": cfg_weight,
+        "seed": seed,
+        "output_path": output_path,
+    })
+    return json.dumps(result)
+
+
+@mcp.tool()
+def generate_palette_take(
+    project_id: str,
+    character_id: str,
+    emotion: str,
+    voice_description: str,
+    test_line: str,
+    seed: int = 0,
+    label: str = "",
+) -> str:
+    """
+    Generate a Qwen3 VoiceDesign reference take for a character's palette emotion slot.
+
+    Calls Qwen3-TTS /generate/voice_design to synthesise a voice matching the description,
+    saves it to characters/{character_id}/palette/{emotion}_{seed}.wav, and upserts the
+    palette entry in project.json (qa_status='unreviewed').
+
+    After reviewing the take, call approve_palette_take to lock it as the reference.
+    Multiple takes can be generated with different seeds before approving.
+
+    emotion:          slug key (e.g. "neutral", "sardonic", "tense")
+    voice_description: full Qwen3 VoiceDesign prompt (same format as voice_description in generate_tts)
+    test_line:        the text to synthesise for audition
+    label:            human-readable display name (defaults to capitalised emotion key)
+    """
+    proj_dir = _project_dir(project_id)
+    palette_dir = proj_dir / "characters" / character_id / "palette"
+    palette_dir.mkdir(parents=True, exist_ok=True)
+
+    out_path = str(palette_dir / f"{emotion}_{seed}.wav")
+    result = _post("tts", "/generate/voice_design", {
+        "text": test_line,
+        "voice_description": voice_description,
+        "seed": seed,
+        "output_path": out_path,
+    })
+
+    # Upsert palette entry in project.json
+    proj_path = proj_dir / "project.json"
+    project = json.loads(proj_path.read_text())
+    for char in project.get("characters", []):
+        if char["id"] == character_id:
+            va = char.setdefault("voice_assignment", {})
+            palette = va.setdefault("emotional_palette", [])
+            # Find or create entry for this emotion
+            entry = next((e for e in palette if e["emotion"] == emotion), None)
+            if entry is None:
+                entry = {
+                    "emotion": emotion,
+                    "label": label or emotion.capitalize(),
+                    "voice_description": voice_description,
+                    "ref_audio_path": None,
+                    "ref_transcript": None,
+                    "qa_status": "unreviewed",
+                }
+                palette.append(entry)
+            else:
+                entry["voice_description"] = voice_description
+                if label:
+                    entry["label"] = label
+            break
+    else:
+        return json.dumps({"error": f"character {character_id!r} not found in project"})
+
+    proj_path.write_text(json.dumps(project, indent=2, default=str))
+    return json.dumps({"ok": True, "output_path": out_path, **result})
+
+
+@mcp.tool()
+def approve_palette_take(
+    project_id: str,
+    character_id: str,
+    emotion: str,
+    audio_path: str,
+) -> str:
+    """
+    Lock a palette take as the approved reference for this emotion slot.
+
+    Updates project.json: sets emotional_palette[emotion].ref_audio_path = audio_path
+    and qa_status = 'approved'. Also sets voice_assignment.model = 'Chatterbox' if not
+    already set.
+
+    After approval, generate_tts / generate_chatterbox will automatically use this
+    reference when generating lines with this emotion.
+    """
+    if not Path(audio_path).is_file():
+        return json.dumps({"error": f"audio_path not found: {audio_path}"})
+
+    proj_path = _project_dir(project_id) / "project.json"
+    project = json.loads(proj_path.read_text())
+    for char in project.get("characters", []):
+        if char["id"] == character_id:
+            va = char.setdefault("voice_assignment", {})
+            palette = va.setdefault("emotional_palette", [])
+            entry = next((e for e in palette if e["emotion"] == emotion), None)
+            if entry is None:
+                return json.dumps({"error": f"emotion {emotion!r} not found in palette. Run generate_palette_take first."})
+            entry["ref_audio_path"] = audio_path
+            entry["qa_status"] = "approved"
+            # Promote model to Chatterbox
+            va["model"] = "Chatterbox"
+            break
+    else:
+        return json.dumps({"error": f"character {character_id!r} not found"})
+
+    proj_path.write_text(json.dumps(project, indent=2, default=str))
+    return json.dumps({"ok": True, "character_id": character_id, "emotion": emotion, "ref": audio_path})
+
+
+@mcp.tool()
+def list_character_palette(project_id: str, character_id: str) -> str:
+    """
+    Return all palette entries for a character with their qa_status and ref_audio_path.
+    Use this to check which emotion slots are ready (approved) vs. still need takes.
+    """
+    project = _project_json(project_id)
+    character = next(
+        (c for c in project.get("characters", []) if c["id"] == character_id),
+        None,
+    )
+    if character is None:
+        return json.dumps({"error": f"character {character_id!r} not found"})
+    va = character.get("voice_assignment", {})
+    return json.dumps({
+        "character_id": character_id,
+        "name": character.get("name"),
+        "model": va.get("model"),
+        "emotional_palette": va.get("emotional_palette", []),
+    }, indent=2)
+
+
+@mcp.tool()
 def job_status(server: str, job_id: str) -> str:
     """
     Poll a generation job for status and progress.
-    server: "tts" | "sfx" | "music" | "post"
+    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
     Returns: {status: "pending|running|complete|failed", progress: 0.0-1.0, output_path, error}
     """
     if server not in SERVER_URLS:
@@ -477,6 +712,7 @@ def wait_for_job(server: str, job_id: str, timeout_seconds: int = 300) -> str:
     Block until a generation job completes or fails (polls every 2 seconds).
     Returns the final job record with output_path on success.
     Use this instead of manually polling job_status in a loop.
+    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
     """
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:
@@ -594,19 +830,20 @@ def unload_model(server: str) -> str:
     IMPORTANT: Call this before loading a different heavy model to avoid OOM.
     The inference servers do NOT share memory — each holds its model independently.
     Typical footprints (RAM, no GPU):
-      tts  — ~8–12 GB (voice_design or custom_voice)
-      sfx  — ~4–6 GB (AudioLDM)
-      music — ~14–20 GB (ACE-Step 3.5B)
-      post  — ~2–4 GB (AudioSR)
+      tts         — ~8–12 GB (voice_design or custom_voice)
+      sfx         — ~4–6 GB (AudioLDM)
+      music       — ~14–20 GB (ACE-Step 3.5B)
+      post        — ~2–4 GB (AudioSR)
+      chatterbox  — ~4–6 GB (Chatterbox Turbo 0.5B)
 
     Recommended workflow for CPU-only sessions:
-      1. Generate all TTS → unload_model("tts")
-      2. Generate all SFX (already light, can overlap)
-      3. unload_model("sfx") if RAM is tight
+      1. Build palette: generate_palette_take for each emotion → approve → unload_model("tts")
+      2. Generate all dialogue with Chatterbox → unload_model("chatterbox")
+      3. Generate all SFX
       4. Generate music → unload_model("music")
       5. Generate post-processing as needed
 
-    server: "tts" | "sfx" | "music" | "post"
+    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
     """
     if server not in SERVER_URLS:
         return json.dumps({"error": f"unknown server: {server}. Valid: {list(SERVER_URLS.keys())}"})
@@ -621,7 +858,7 @@ def unload_model(server: str) -> str:
 def server_health(server: str = "") -> str:
     """
     Check health of inference servers.
-    server: "tts" | "sfx" | "music" | "post" | "" (check all)
+    server: "tts" | "sfx" | "music" | "post" | "chatterbox" | "" (check all)
     Returns model_loaded, model_variant, and vram_mb for each.
 
     RAM WARNING: On CPU-only systems, loading multiple heavy models simultaneously

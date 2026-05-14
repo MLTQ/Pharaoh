@@ -402,6 +402,7 @@ pub fn blocks_to_rows(
                 fade_in_ms: "50".to_string(),
                 fade_out_ms: "50".to_string(),
                 reverb_send: "0".to_string(),
+                emotion: String::new(),
                 notes: format!("id:{}", b.id),
             }
         })

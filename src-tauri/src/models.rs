@@ -3,12 +3,30 @@ use serde::{Deserialize, Serialize};
 use std::sync::RwLock;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaletteEntry {
+    /// Slug key matching script.csv `emotion` column (e.g. "neutral", "sardonic")
+    pub emotion: String,
+    /// Human-readable display label
+    pub label: String,
+    /// Qwen3 VoiceDesign prompt used to generate the reference clip
+    pub voice_description: String,
+    /// Absolute path to locked reference .wav (None = not yet generated/approved)
+    pub ref_audio_path: Option<String>,
+    pub ref_transcript: Option<String>,
+    /// "unreviewed" | "approved"
+    pub qa_status: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceAssignment {
     pub model: String,
     pub speaker: Option<String>,
     pub instruct_default: Option<String>,
     pub ref_audio_path: Option<String>,
     pub ref_transcript: Option<String>,
+    /// Named emotional states for the Chatterbox Turbo palette workflow.
+    #[serde(default)]
+    pub emotional_palette: Vec<PaletteEntry>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -108,6 +126,7 @@ pub struct ServerConfig {
     pub sfx_url: String,
     pub music_url: String,
     pub post_url: String,
+    pub chatterbox_url: String,
     pub mcp_url: String,
 }
 
@@ -118,6 +137,7 @@ impl Default for ServerConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: "http://127.0.0.1:18004".to_string(),
+            chatterbox_url: "http://127.0.0.1:18005".to_string(),
             mcp_url: "http://127.0.0.1:18000".to_string(),
         }
     }
@@ -125,6 +145,10 @@ impl Default for ServerConfig {
 
 fn default_post_url() -> String {
     "http://127.0.0.1:18004".to_string()
+}
+
+fn default_chatterbox_url() -> String {
+    "http://127.0.0.1:18005".to_string()
 }
 
 fn default_mcp_url() -> String {
@@ -140,12 +164,16 @@ pub struct AppConfig {
     pub music_url: String,
     #[serde(default = "default_post_url")]
     pub post_url: String,
+    #[serde(default = "default_chatterbox_url")]
+    pub chatterbox_url: String,
     #[serde(default = "default_mcp_url")]
     pub mcp_url: String,
     /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
     pub tts_public: bool,
     pub sfx_public: bool,
     pub music_public: bool,
+    #[serde(default)]
+    pub chatterbox_public: bool,
     pub projects_dir: String,
     pub models_dir: String,
     /// Path to the cloned Woosh repo (https://github.com/SonyResearch/Woosh)
@@ -160,10 +188,12 @@ impl AppConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: default_post_url(),
+            chatterbox_url: default_chatterbox_url(),
             mcp_url: default_mcp_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
+            chatterbox_public: false,
             projects_dir: home.join("pharaoh-projects").to_string_lossy().into_owned(),
             models_dir: home.join("pharaoh-models").to_string_lossy().into_owned(),
             woosh_dir: home
@@ -181,6 +211,7 @@ pub struct AllServerHealth {
     pub sfx: Option<ServerHealth>,
     pub music: Option<ServerHealth>,
     pub post: Option<ServerHealth>,
+    pub chatterbox: Option<ServerHealth>,
     pub mcp: Option<ServerHealth>,
 }
 
@@ -198,6 +229,7 @@ impl AppState {
             sfx_url: app_config.sfx_url.clone(),
             music_url: app_config.music_url.clone(),
             post_url: app_config.post_url.clone(),
+            chatterbox_url: app_config.chatterbox_url.clone(),
             mcp_url: app_config.mcp_url.clone(),
         };
         Self {
@@ -375,5 +407,8 @@ pub struct ScriptRow {
     pub fade_in_ms: String,
     pub fade_out_ms: String,
     pub reverb_send: String,
+    /// Palette emotion key for Chatterbox routing (e.g. "neutral", "tense"). Empty = use default.
+    #[serde(default)]
+    pub emotion: String,
     pub notes: String,
 }

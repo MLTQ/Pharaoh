@@ -18,11 +18,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_VENV="${SCRIPT_DIR}/.venv-tts"
 MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
+CHATTERBOX_VENV="${SCRIPT_DIR}/.venv-chatterbox"
 AUDIOLDM_VENV="${SCRIPT_DIR}/.venv-audioldm"
 AUDIOSR_VENV="${SCRIPT_DIR}/.venv-audiosr"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
 INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
 INSTALL_AUDIOSR="${PHARAOH_INSTALL_AUDIOSR:-0}"
+INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
@@ -95,6 +97,22 @@ else
     hint "Or set PHARAOH_WOOSH_DIR to an existing checkout."
 fi
 
+# ── Optional Chatterbox Turbo ────────────────────────────────────────────────
+step "Chatterbox env (.venv-chatterbox)"
+if [ "${INSTALL_CHATTERBOX}" = "1" ]; then
+    if [ ! -d "${CHATTERBOX_VENV}" ]; then
+        uv venv --python 3.11 "${CHATTERBOX_VENV}"
+        ok "Created ${CHATTERBOX_VENV}"
+    else
+        ok "Reusing ${CHATTERBOX_VENV}"
+    fi
+    uv pip install --python "${CHATTERBOX_VENV}/bin/python" \
+        chatterbox-tts soundfile fastapi uvicorn httpx pydantic
+    ok "Chatterbox deps synced"
+else
+    hint "Optional 0-shot voice cloning + paralinguistic tags: PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh"
+fi
+
 # ── Optional SFX+ (AudioLDM) ─────────────────────────────────────────────────
 step "SFX+ env (AudioLDM)"
 if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
@@ -141,5 +159,6 @@ echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
+echo "  Chatterbox → model weights download from HuggingFace on first /load call"
 echo ""
 echo "See the Models page in the app for the exact model download commands."

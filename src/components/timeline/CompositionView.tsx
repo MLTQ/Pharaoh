@@ -72,6 +72,7 @@ function blankScriptRow(sceneNo: string, asset: DraggedAsset, track: string, sta
     fade_in_ms: "",
     fade_out_ms: "",
     reverb_send: "0",
+    emotion: "",
     notes: "",
   };
 }
