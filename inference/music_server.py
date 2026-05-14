@@ -15,6 +15,8 @@ First-time setup is a single command:
     ./inference/setup.sh
 """
 import asyncio
+import datetime
+import json
 import logging
 import os
 from pathlib import Path
@@ -27,6 +29,33 @@ from pydantic import BaseModel
 from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
+
+
+def _write_sidecar(audio_path: str, meta: dict) -> None:
+    """Write a .meta.json sidecar next to the generated audio file."""
+    sidecar = {
+        "model":              meta.get("model", ""),
+        "model_variant":      meta.get("model_variant", ""),
+        "prompt":             meta.get("prompt", ""),
+        "instruct":           None,
+        "speaker":            None,
+        "language":           None,
+        "seed":               meta.get("seed", 0),
+        "temperature":        None,
+        "top_p":              None,
+        "duration_target_ms": meta.get("duration_target_ms"),
+        "duration_actual_ms": meta.get("duration_actual_ms"),
+        "sample_rate":        meta.get("sample_rate"),
+        "generated_at":       datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "parent":             None,
+        "take_index":         meta.get("take_index", 1),
+        "qa_status":          "unreviewed",
+        "qa_notes":           "",
+    }
+    try:
+        Path(str(audio_path) + ".meta.json").write_text(json.dumps(sidecar, indent=2))
+    except Exception as exc:
+        log.warning(f"Failed to write sidecar for {audio_path}: {exc}")
 
 PORT            = int(os.environ.get("PHARAOH_MUSIC_PORT",    18003))
 MODEL_VARIANT   = os.environ.get("PHARAOH_MUSIC_VARIANT",  "ACE-Step-v1-3.5B")
@@ -236,6 +265,15 @@ async def _run_music(job_id: str, params: dict) -> None:
         else:
             raise ValueError(f"Unsupported music endpoint: {endpoint}")
 
+        dur_ms = int(float(params.get("duration_seconds", 30.0)) * 1000)
+        take   = int(params.get("take_index", 1))
+        _write_sidecar(out_path, {
+            "model": "ace-step-v1", "model_variant": "ACE-Step-v1-3.5B",
+            "prompt": params.get("caption", "") or params.get("prompt", ""),
+            "seed": params.get("seed", 0),
+            "duration_target_ms": dur_ms, "duration_actual_ms": dur_ms,
+            "sample_rate": 44100, "take_index": take,
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
 
     except Exception as exc:

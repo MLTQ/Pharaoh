@@ -6,6 +6,8 @@ Requires: ~/Code/Woosh uv venv with woosh package.
 Model directory: PHARAOH_WOOSH_DIR (default ~/Code/Woosh)
 """
 import asyncio
+import datetime
+import json
 import shutil
 import logging
 import math
@@ -22,6 +24,33 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from _common import JobStore, new_job_id
+
+
+def _write_sidecar(audio_path: str, meta: dict) -> None:
+    """Write a .meta.json sidecar next to the generated audio file."""
+    sidecar = {
+        "model":              meta.get("model", ""),
+        "model_variant":      meta.get("model_variant", ""),
+        "prompt":             meta.get("prompt", ""),
+        "instruct":           None,
+        "speaker":            None,
+        "language":           None,
+        "seed":               meta.get("seed", 0),
+        "temperature":        None,
+        "top_p":              None,
+        "duration_target_ms": meta.get("duration_target_ms"),
+        "duration_actual_ms": meta.get("duration_actual_ms"),
+        "sample_rate":        meta.get("sample_rate"),
+        "generated_at":       datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "parent":             None,
+        "take_index":         1,
+        "qa_status":          "unreviewed",
+        "qa_notes":           "",
+    }
+    try:
+        Path(str(audio_path) + ".meta.json").write_text(json.dumps(sidecar, indent=2))
+    except Exception as exc:
+        log.warning(f"Failed to write sidecar for {audio_path}: {exc}")
 
 log = logging.getLogger(__name__)
 
@@ -521,7 +550,13 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
 
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         await loop.run_in_executor(None, lambda: torchaudio.save(out_path, audio[0], sample_rate=SAMPLE_RATE))
-
+        dur_ms = int(audio.shape[-1] / SAMPLE_RATE * 1000)
+        _write_sidecar(out_path, {
+            "model": "woosh-dflow", "model_variant": "Woosh-DFlow",
+            "prompt": params.get("prompt", ""), "seed": params.get("seed", 0),
+            "duration_target_ms": int(params.get("duration_seconds", 3.0) * 1000),
+            "duration_actual_ms": dur_ms, "sample_rate": SAMPLE_RATE,
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
 
     except Exception as exc:
@@ -624,6 +659,13 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
             shutil.copyfile(candidates[0], out_path)
             log.info("Native AudioLDM wrote %s from %s", out_path, candidates[0])
 
+        _write_sidecar(str(out_path), {
+            "model": "audioldm-audioldm-m-full", "model_variant": "AudioLDM-M-Full",
+            "prompt": params.get("prompt", ""), "seed": params.get("seed", 0),
+            "duration_target_ms": int(params.get("duration_seconds", 3.0) * 1000),
+            "duration_actual_ms": int(params.get("duration_seconds", 3.0) * 1000),
+            "sample_rate": AUDIO_LDM_SAMPLE_RATE,
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=str(out_path))
 
     except Exception as exc:
@@ -681,6 +723,13 @@ async def _run_diffusers_audioldm_sfx(job_id: str, params: dict) -> None:
 
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         scipy.io.wavfile.write(out_path, AUDIO_LDM_SAMPLE_RATE, pcm)
+        _write_sidecar(out_path, {
+            "model": "audioldm-audioldm-m-full", "model_variant": "AudioLDM-M-Full",
+            "prompt": params.get("prompt", ""), "seed": params.get("seed", 0),
+            "duration_target_ms": int(params.get("duration_seconds", 3.0) * 1000),
+            "duration_actual_ms": int(len(pcm) / AUDIO_LDM_SAMPLE_RATE * 1000),
+            "sample_rate": AUDIO_LDM_SAMPLE_RATE,
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
 
     except Exception as exc:

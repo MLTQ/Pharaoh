@@ -21,9 +21,39 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+import datetime
+import json
+
 from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
+
+
+def _write_sidecar(audio_path: str, meta: dict) -> None:
+    """Write a .meta.json sidecar next to the generated audio file."""
+    sidecar = {
+        "model":              meta.get("model", ""),
+        "model_variant":      meta.get("model_variant", ""),
+        "prompt":             meta.get("prompt", ""),
+        "instruct":           meta.get("instruct"),
+        "speaker":            meta.get("speaker"),
+        "language":           meta.get("language"),
+        "seed":               meta.get("seed", 0),
+        "temperature":        meta.get("temperature"),
+        "top_p":              meta.get("top_p"),
+        "duration_target_ms": meta.get("duration_target_ms"),
+        "duration_actual_ms": meta.get("duration_actual_ms"),
+        "sample_rate":        meta.get("sample_rate"),
+        "generated_at":       datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "parent":             None,
+        "take_index":         meta.get("take_index", 1),
+        "qa_status":          "unreviewed",
+        "qa_notes":           "",
+    }
+    try:
+        Path(str(audio_path) + ".meta.json").write_text(json.dumps(sidecar, indent=2))
+    except Exception as exc:
+        log.warning(f"Failed to write sidecar for {audio_path}: {exc}")
 
 PORT           = int(os.environ.get("PHARAOH_TTS_PORT",    18001))
 MODEL_VARIANT  = os.environ.get("PHARAOH_TTS_VARIANT",  "Qwen3-TTS")
@@ -330,6 +360,19 @@ async def _run_tts(job_id: str, params: dict) -> None:
         Path(out_path).parent.mkdir(parents=True, exist_ok=True)
         loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: sf.write(out_path, wavs[0], sr))
+        _write_sidecar(out_path, {
+            "model":              f"qwen3-tts-{endpoint}",
+            "model_variant":      required_type,
+            "prompt":             params.get("text", ""),
+            "instruct":           params.get("instruct") or params.get("voice_description") or None,
+            "speaker":            params.get("speaker") or None,
+            "language":           params.get("language", "en"),
+            "seed":               params.get("seed", 0),
+            "temperature":        params.get("temperature", 0.7),
+            "top_p":              params.get("top_p", 0.9),
+            "duration_actual_ms": int(len(wavs[0]) / sr * 1000),
+            "sample_rate":        sr,
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
 
     except Exception as exc:
