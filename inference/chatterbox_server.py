@@ -95,6 +95,18 @@ def _detect_device() -> str:
 
 def _do_load() -> None:
     global _model
+
+    # perth.PerthImplicitWatermarker depends on pkg_resources (setuptools <71).
+    # If the package loaded but the watermarker class is None, fall back to
+    # DummyWatermarker — audio output is identical, just unwatermarked.
+    import perth
+    if perth.PerthImplicitWatermarker is None:
+        log.warning(
+            "perth.PerthImplicitWatermarker unavailable (pkg_resources missing?). "
+            "Falling back to DummyWatermarker — output audio will not be watermarked."
+        )
+        perth.PerthImplicitWatermarker = perth.DummyWatermarker
+
     from chatterbox.tts import ChatterboxTTS  # type: ignore
 
     device = _detect_device()
@@ -173,14 +185,14 @@ async def _run_clone(job_id: str, params: CloneParams) -> None:
         import torch
 
         def _generate():
-            generator = torch.manual_seed(params.seed) if params.seed else None
+            if params.seed:
+                torch.manual_seed(params.seed)
             wav = _model.generate(
                 params.text,
                 audio_prompt_path=str(ref_path),
                 exaggeration=params.exaggeration,
                 cfg_weight=params.cfg_weight,
                 temperature=params.temperature,
-                **({"generator": generator} if generator is not None else {}),
             )
             return wav
 

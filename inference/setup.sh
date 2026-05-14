@@ -108,6 +108,9 @@ if [ "${INSTALL_CHATTERBOX}" = "1" ]; then
     fi
     uv pip install --python "${CHATTERBOX_VENV}/bin/python" \
         chatterbox-tts soundfile fastapi uvicorn httpx pydantic
+    # chatterbox depends on `perth` which uses pkg_resources (removed in setuptools>=71).
+    # Pin to a version that still ships the pkg_resources shim.
+    uv pip install --python "${CHATTERBOX_VENV}/bin/python" "setuptools<71"
     ok "Chatterbox deps synced"
 else
     hint "Optional 0-shot voice cloning + paralinguistic tags: PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh"
