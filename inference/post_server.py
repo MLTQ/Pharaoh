@@ -5,6 +5,8 @@ Owns neural post-processing work that must run on the ML host. The first
 endpoint wraps AudioSR for 48 kHz audio super-resolution.
 """
 import asyncio
+import datetime
+import json
 import logging
 import os
 import re
@@ -22,6 +24,33 @@ from pydantic import BaseModel
 from _common import JobStore, new_job_id
 
 log = logging.getLogger(__name__)
+
+
+def _write_sidecar(audio_path: str, meta: dict) -> None:
+    """Write a .meta.json sidecar next to the generated audio file."""
+    sidecar = {
+        "model":              meta.get("model", ""),
+        "model_variant":      meta.get("model_variant", ""),
+        "prompt":             meta.get("prompt", ""),
+        "instruct":           None,
+        "speaker":            None,
+        "language":           None,
+        "seed":               meta.get("seed", 0),
+        "temperature":        None,
+        "top_p":              None,
+        "duration_target_ms": meta.get("duration_target_ms"),
+        "duration_actual_ms": meta.get("duration_actual_ms"),
+        "sample_rate":        meta.get("sample_rate"),
+        "generated_at":       datetime.datetime.now(datetime.timezone.utc).isoformat(),
+        "parent":             meta.get("parent"),
+        "take_index":         1,
+        "qa_status":          "unreviewed",
+        "qa_notes":           "",
+    }
+    try:
+        Path(str(audio_path) + ".meta.json").write_text(json.dumps(sidecar, indent=2))
+    except Exception as exc:
+        log.warning(f"Failed to write sidecar for {audio_path}: {exc}")
 
 PORT = int(os.environ.get("PHARAOH_POST_PORT", 18004))
 AUDIOSR_CLI = Path(
@@ -150,6 +179,12 @@ async def _run_upscale(job_id: str, params: UpscaleParams) -> None:
 
         jobs.update(job_id, progress=0.92)
         shutil.copyfile(generated, output_path)
+        _write_sidecar(str(output_path), {
+            "model": "audiosr", "model_variant": f"AudioSR-{params.model_name}",
+            "prompt": f"[upscale: {params.input_path}]",
+            "seed": params.seed, "sample_rate": 48000,
+            "parent": str(params.input_path),
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=str(output_path))
     except Exception as exc:
         log.exception("AudioSR upscale failed")
