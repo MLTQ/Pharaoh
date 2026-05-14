@@ -6,6 +6,8 @@ import type {
 import {
   updateProject as saveProjectToTauri,
   updateScene as saveSceneToTauri,
+  getProject,
+  listScenes,
 } from "../lib/tauriCommands";
 
 // ── Scene conversion ─────────────────────────────────────────────────────────
@@ -85,6 +87,7 @@ interface ProjectState {
   setActiveScene: (no: string) => void;
   updateScene: (no: string, patch: Partial<MockScene>) => void;
   loadRealProject: (project: Project, projectsDir: string, scenes: Scene[]) => void;
+  reloadProjectFromDisk: () => Promise<void>;
   setActiveSceneSlug: (slug: string | null) => void;
   addScene: (scene: Scene) => void;
 }
@@ -249,6 +252,36 @@ export const useProjectStore = create<ProjectState>((set, get) => {
           lastSync: new Date().toISOString().replace("T", " ").slice(0, 16),
         },
       });
+    },
+
+    reloadProjectFromDisk: async () => {
+      const { realProjectId, projectsDir } = get();
+      if (!realProjectId || !projectsDir) return;
+      try {
+        const [project, scenes] = await Promise.all([
+          getProject(realProjectId),
+          listScenes(realProjectId),
+        ]);
+        // Preserve active scene selection across reload
+        const { activeSceneNo, selectedCharId } = get();
+        const mockScenes = scenes.map(realSceneToMock);
+        const activeScene = mockScenes.find((s) => s.no === activeSceneNo) ?? mockScenes[0];
+        const activeSlug = activeScene?.slug ?? null;
+        set({
+          realProject: project,
+          realScenes: scenes,
+          scenes: mockScenes,
+          characters: project.characters,
+          activeSceneNo: activeScene?.no ?? activeSceneNo,
+          activeSceneSlug: activeSlug,
+          // Keep selected character id; it'll still be valid as long as the character exists
+          selectedCharId: project.characters.find((c) => c.id === selectedCharId)
+            ? selectedCharId
+            : (project.characters[0]?.id ?? null),
+        });
+      } catch (e) {
+        console.error("[projectStore] reloadProjectFromDisk failed:", e);
+      }
     },
 
     setActiveSceneSlug: (slug) => set({ activeSceneSlug: slug }),

@@ -69,6 +69,7 @@ export default function App() {
   const {
     project, scenes, assets, activeSceneNo,
     setActiveScene, updateScene, characters, realProjectId,
+    reloadProjectFromDisk,
   } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
@@ -166,6 +167,15 @@ export default function App() {
     initListeners().then((fn) => { unlisten = fn; });
     return () => { unlisten?.(); };
   }, []);
+
+  // Reload project from disk whenever the window regains focus — this keeps
+  // the in-memory store in sync when MCP tools (or any external process) have
+  // written to project.json while the app was in the background.
+  useEffect(() => {
+    const onFocus = () => { if (realProjectId) reloadProjectFromDisk(); };
+    window.addEventListener("focus", onFocus);
+    return () => window.removeEventListener("focus", onFocus);
+  }, [realProjectId, reloadProjectFromDisk]);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
