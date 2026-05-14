@@ -14,6 +14,7 @@ Pharaoh is a Tauri 2 desktop app (React + TypeScript frontend, Rust backend) con
 
 | Port | Service | Models / work |
 |------|---------|---------------|
+| 18000 | MCP | Agent control-plane — no models, proxies to 18001–18004 |
 | 18001 | TTS | Qwen3-TTS CustomVoice, VoiceDesign, and voice clone probes |
 | 18002 | SFX | Woosh short foley plus optional AudioLDM long soundscapes |
 | 18003 | Music | ACE-Step score/music generation |
@@ -114,10 +115,11 @@ The Settings/Models page contains copyable download commands, including the resu
 ```bash
 ./inference/start_servers.sh
 
-curl http://127.0.0.1:18001/health
-curl http://127.0.0.1:18002/health
-curl http://127.0.0.1:18003/health
-curl http://127.0.0.1:18004/health
+curl http://127.0.0.1:18000/health  # MCP
+curl http://127.0.0.1:18001/health  # TTS
+curl http://127.0.0.1:18002/health  # SFX
+curl http://127.0.0.1:18003/health  # Music
+curl http://127.0.0.1:18004/health  # Post
 ```
 
 Useful overrides:
@@ -287,6 +289,84 @@ pharaoh post upscale ./take.wav --model basic --steps 50 --guidance 3.5
 
 All successful CLI commands emit JSON on stdout so agents can parse results.
 
+## Agent Interface (MCP)
+
+Pharaoh exposes an [MCP](https://modelcontextprotocol.io) server at `servers/mcp/run.py` (port 18000 in SSE mode) so Claude and other MCP-capable agents can drive the full pipeline without the GUI or CLI subprocess overhead.
+
+### Claude Desktop setup
+
+Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
+
+```json
+{
+  "mcpServers": {
+    "pharaoh": {
+      "command": "python",
+      "args": [
+        "/path/to/Pharaoh/servers/mcp/run.py",
+        "--projects-dir", "/path/to/pharaoh-projects"
+      ]
+    }
+  }
+}
+```
+
+Install the MCP dependency first:
+
+```bash
+pip install mcp httpx
+# or, inside a venv:
+pip install -r servers/mcp/requirements.txt
+```
+
+### What the MCP server exposes
+
+**Resources** — read project state without running commands:
+
+| URI | Contents |
+|-----|----------|
+| `pharaoh://projects` | List of all projects |
+| `pharaoh://projects/{id}` | `project.json` |
+| `pharaoh://projects/{id}/storyboard` | `storyboard.json` |
+| `pharaoh://projects/{id}/scenes/{slug}/script` | `script.csv` as JSON array |
+| `pharaoh://projects/{id}/scenes/{slug}/assets` | Assets with QA status and metadata |
+| `pharaoh://projects/{id}/pipeline` | Per-scene per-stage completion matrix |
+
+The `pipeline` resource is the agent's primary situational-awareness tool — read it once at the start of a session to know which scenes have scripts, which have assets, which are approved, and which are rendered.
+
+**Tools** — drive the pipeline:
+
+| Tool | What it does |
+|------|-------------|
+| `project_status` | Per-scene completion matrix (same as pipeline resource, as a tool) |
+| `read_script` | Script rows as structured JSON |
+| `update_script_row` | Patch a row in `script.csv` |
+| `generate_tts` | Submit TTS job → `job_id` |
+| `generate_sfx` | Submit SFX job → `job_id` |
+| `generate_music` | Submit music job; `batch_size > 1` fans out multiple seeds for take comparison |
+| `job_status` | Poll a job for status/progress |
+| `wait_for_job` | Block until a job completes (2 s poll, configurable timeout) |
+| `list_assets` | Assets for a scene, filterable by QA status |
+| `qa_approve` | Mark an asset approved |
+| `qa_reject` | Mark an asset rejected with notes |
+| `regenerate_asset` | Re-submit using original sidecar params, new take index |
+| `server_health` | Check inference server status and VRAM |
+| `compose_scene` | Render a scene via the pharaoh CLI |
+| `render_final` | Assemble all scenes into `final.wav` |
+
+### SSE mode (alongside the other servers)
+
+In SSE mode the MCP server starts as an HTTP service the Rust backend can health-check alongside TTS/SFX/Music/Post:
+
+```bash
+python servers/mcp/run.py \
+  --transport sse \
+  --port 18000 \
+  --projects-dir ~/pharaoh-projects
+```
+
+The MCP server loads no models. It reads project state directly from the filesystem and proxies generation requests to the inference servers on ports 18001–18004.
+
 ## Architecture Overview
 
 ```text
@@ -331,6 +411,10 @@ inference/
   post_server.py          Port 18004, AudioSR
   setup.sh                Isolated venv setup
   start_servers.sh        Starts available servers
+
+servers/mcp/
+  run.py                  Port 18000, MCP control-plane agent interface
+  requirements.txt        mcp, httpx
 ```
 
 See `ARCHITECTURE.md` for the original Pyramid specification and companion `*.md` files next to source files for implementation contracts.
