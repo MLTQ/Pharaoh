@@ -567,7 +567,7 @@ def generate_palette_take(
     project_id: str,
     character_id: str,
     emotion: str,
-    voice_description: str,
+    direction: str,
     test_line: str,
     seed: int = 0,
     label: str = "",
@@ -575,59 +575,74 @@ def generate_palette_take(
     """
     Generate a Qwen3 VoiceDesign reference take for a character's palette emotion slot.
 
-    Calls Qwen3-TTS /generate/voice_design to synthesise a voice matching the description,
-    saves it to characters/{character_id}/palette/{emotion}_{seed}.wav, and upserts the
-    palette entry in project.json (qa_status='unreviewed').
+    Combines the character's base_voice_description (vocal identity) with the emotion's
+    direction (short performance instruction) to produce a coherent instruct string, then
+    calls Qwen3-TTS /generate/voice_design. Saves to characters/{character_id}/palette/
+    and upserts the palette entry in project.json (qa_status='unreviewed').
 
     After reviewing the take, call approve_palette_take to lock it as the reference.
     Multiple takes can be generated with different seeds before approving.
 
-    emotion:          slug key (e.g. "neutral", "sardonic", "tense")
-    voice_description: full Qwen3 VoiceDesign prompt (same format as voice_description in generate_tts)
-    test_line:        the text to synthesise for audition
-    label:            human-readable display name (defaults to capitalised emotion key)
+    emotion:   slug key (e.g. "neutral", "sardonic", "tense")
+    direction: short emotional direction to layer on the character's base voice, e.g.
+               "Flat, controlled fear. Each word measured." — NOT a full voice description.
+               The character's base_voice_description is prepended automatically.
+    test_line: the text to synthesise for audition
+    label:     human-readable display name (defaults to capitalised emotion key)
     """
     proj_dir = _project_dir(project_id)
+    proj_path = proj_dir / "project.json"
+    project = json.loads(proj_path.read_text())
+
+    character = next((c for c in project.get("characters", []) if c["id"] == character_id), None)
+    if character is None:
+        return json.dumps({"error": f"character {character_id!r} not found in project"})
+
+    va = character.setdefault("voice_assignment", {})
+    base_desc = va.get("base_voice_description", "").strip()
+
+    # Combine base identity + emotional direction into a single VoiceDesign instruct
+    if base_desc and direction.strip():
+        full_instruct = f"{base_desc} {direction.strip()}"
+    elif base_desc:
+        full_instruct = base_desc
+    else:
+        full_instruct = direction.strip()
+
+    if not full_instruct:
+        return json.dumps({"error": "No voice description available. Set the character's base voice description in the Voice Design tab first."})
+
     palette_dir = proj_dir / "characters" / character_id / "palette"
     palette_dir.mkdir(parents=True, exist_ok=True)
 
     out_path = str(palette_dir / f"{emotion}_{seed}.wav")
     result = _post("tts", "/generate/voice_design", {
         "text": test_line,
-        "voice_description": voice_description,
+        "voice_description": full_instruct,
         "seed": seed,
         "output_path": out_path,
     })
 
     # Upsert palette entry in project.json
-    proj_path = proj_dir / "project.json"
-    project = json.loads(proj_path.read_text())
-    for char in project.get("characters", []):
-        if char["id"] == character_id:
-            va = char.setdefault("voice_assignment", {})
-            palette = va.setdefault("emotional_palette", [])
-            # Find or create entry for this emotion
-            entry = next((e for e in palette if e["emotion"] == emotion), None)
-            if entry is None:
-                entry = {
-                    "emotion": emotion,
-                    "label": label or emotion.capitalize(),
-                    "voice_description": voice_description,
-                    "ref_audio_path": None,
-                    "ref_transcript": None,
-                    "qa_status": "unreviewed",
-                }
-                palette.append(entry)
-            else:
-                entry["voice_description"] = voice_description
-                if label:
-                    entry["label"] = label
-            break
+    palette = va.setdefault("emotional_palette", [])
+    entry = next((e for e in palette if e["emotion"] == emotion), None)
+    if entry is None:
+        entry = {
+            "emotion": emotion,
+            "label": label or emotion.capitalize(),
+            "direction": direction,
+            "ref_audio_path": None,
+            "ref_transcript": None,
+            "qa_status": "unreviewed",
+        }
+        palette.append(entry)
     else:
-        return json.dumps({"error": f"character {character_id!r} not found in project"})
+        entry["direction"] = direction
+        if label:
+            entry["label"] = label
 
     proj_path.write_text(json.dumps(project, indent=2, default=str))
-    return json.dumps({"ok": True, "output_path": out_path, **result})
+    return json.dumps({"ok": True, "output_path": out_path, "full_instruct": full_instruct, **result})
 
 
 @mcp.tool()

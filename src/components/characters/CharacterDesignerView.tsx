@@ -72,7 +72,8 @@ export const CharacterDesignerView: React.FC = () => {
   const [tab, setTab] = useState<DesignTab>("design");
   const [localName, setLocalName]         = useState(char?.name ?? "");
   const [localDesc, setLocalDesc]         = useState(char?.description ?? "");
-  const [voiceDesc, setVoiceDesc]         = useState(char?.voice_assignment.instruct_default ?? "");
+  // base_voice_description: the full VoiceDesign identity prompt, shared across all palette takes
+  const [voiceDesc, setVoiceDesc]         = useState(char?.voice_assignment.base_voice_description ?? "");
   const [testLine, setTestLine]           = useState(DEFAULT_TEST_LINE);
   const [instruct, setInstruct]           = useState(char?.voice_assignment.instruct_default ?? "");
   const [refTranscript, setRefTranscript] = useState(char?.voice_assignment.ref_transcript ?? "");
@@ -89,19 +90,19 @@ export const CharacterDesignerView: React.FC = () => {
   const [paletteEntries, setPaletteEntries] = useState<PaletteEntry[]>(
     char?.voice_assignment.emotional_palette ?? []
   );
-  const [addingEmotion, setAddingEmotion]     = useState(false);
-  const [newEmotionKey, setNewEmotionKey]     = useState("");
-  const [newEmotionLabel, setNewEmotionLabel] = useState("");
-  const [newEmotionDesc, setNewEmotionDesc]   = useState("");
-  const [paletteTestLine, setPaletteTestLine] = useState(DEFAULT_TEST_LINE);
-  const [expandedEmotion, setExpandedEmotion] = useState<string | null>(null);
-  const [paletteGenError, setPaletteGenError] = useState<string | null>(null);
+  const [addingEmotion, setAddingEmotion]         = useState(false);
+  const [newEmotionKey, setNewEmotionKey]         = useState("");
+  const [newEmotionLabel, setNewEmotionLabel]     = useState("");
+  const [newEmotionDirection, setNewEmotionDirection] = useState("");
+  const [paletteTestLine, setPaletteTestLine]     = useState(DEFAULT_TEST_LINE);
+  const [expandedEmotion, setExpandedEmotion]     = useState<string | null>(null);
+  const [paletteGenError, setPaletteGenError]     = useState<string | null>(null);
 
   useEffect(() => {
     if (!char) return;
     setLocalName(char.name);
     setLocalDesc(char.description);
-    setVoiceDesc(char.voice_assignment.instruct_default ?? "");
+    setVoiceDesc(char.voice_assignment.base_voice_description ?? "");
     setInstruct(char.voice_assignment.instruct_default ?? "");
     setRefTranscript(char.voice_assignment.ref_transcript ?? "");
     setPaletteEntries(char.voice_assignment.emotional_palette ?? []);
@@ -200,14 +201,14 @@ export const CharacterDesignerView: React.FC = () => {
     const entry: PaletteEntry = {
       emotion: key,
       label: newEmotionLabel.trim() || key.charAt(0).toUpperCase() + key.slice(1),
-      voice_description: newEmotionDesc.trim(),
+      direction: newEmotionDirection.trim(),
       ref_audio_path: null,
       ref_transcript: null,
       qa_status: "unreviewed",
     };
     const next = [...paletteEntries, entry];
     savePalette(next);
-    setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDesc("");
+    setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDirection("");
     setAddingEmotion(false);
     setExpandedEmotion(key);
     setPaletteGenError(null);
@@ -219,10 +220,16 @@ export const CharacterDesignerView: React.FC = () => {
   };
 
   const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
-    if (!char || !entry.voice_description.trim()) {
-      setPaletteGenError("Add a voice description for this emotion first.");
+    if (!char) return;
+    const baseDesc = (char.voice_assignment.base_voice_description ?? "").trim();
+    if (!baseDesc) {
+      setPaletteGenError("Set the character's base voice description in the Voice Design tab first.");
       return;
     }
+    // Combine base identity + emotional direction into one VoiceDesign instruct
+    const fullInstruct = entry.direction.trim()
+      ? `${baseDesc} ${entry.direction.trim()}`
+      : baseDesc;
     setPaletteGenError(null);
     const emotionSlug = paletteSceneSlug(char.id, entry.emotion);
     const seed = Math.floor(Math.random() * 9999);
@@ -238,7 +245,7 @@ export const CharacterDesignerView: React.FC = () => {
         rowIndex: PALETTE_ROW,
         params: {
           text: paletteTestLine || DEFAULT_TEST_LINE,
-          voice_description: entry.voice_description,
+          voice_description: fullInstruct,
           language: "en", seed,
           temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
           output_path: out,
@@ -272,9 +279,11 @@ export const CharacterDesignerView: React.FC = () => {
 
   const handleGenerateDesign = async () => {
     if (!char || generating || !voiceDesc.trim()) {
-      if (!voiceDesc.trim()) setGenError("Add a voice description first.");
+      if (!voiceDesc.trim()) setGenError("Add a base voice description first.");
       return;
     }
+    // Persist the description before generating so it's available for palette takes
+    saveVoice({ base_voice_description: voiceDesc });
     setGenerating(true); setSubmitting("design"); setGenError(null);
     try {
       const jobId = await submitTtsVoiceDesign({
@@ -362,6 +371,7 @@ export const CharacterDesignerView: React.FC = () => {
         instruct_default: "",
         ref_audio_path: null,
         ref_transcript: null,
+        base_voice_description: "",
         emotional_palette: [],
       },
     });
@@ -599,17 +609,28 @@ export const CharacterDesignerView: React.FC = () => {
           {tab === "design" && (
             <div>
               <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
-                Describe this character's voice in plain language. Qwen3-TTS synthesises a novel
-                speaker from the description — no preset selection needed. When you find a take you
-                like, save it as the character's reference and switch to Clone for production use.
+                Describe this character's core vocal identity — timbre, age, accent, pacing. This
+                is saved as the character's foundation and prepended to each emotional direction
+                when generating Emotional Palette takes.
               </p>
 
               <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>Voice description</label>
+                <label style={labelStyle}>
+                  Base voice description
+                  {paletteEntries.length > 0 && (
+                    <span style={{
+                      color: "var(--tts)", fontWeight: 400,
+                      textTransform: "none", letterSpacing: 0, marginLeft: 6,
+                    }}>
+                      — shared with palette
+                    </span>
+                  )}
+                </label>
                 <textarea
                   className="input"
                   value={voiceDesc}
                   onChange={(e) => setVoiceDesc(e.target.value)}
+                  onBlur={() => saveVoice({ base_voice_description: voiceDesc })}
                   rows={3}
                   style={{ width: "100%", resize: "vertical", fontSize: 12 }}
                   placeholder="e.g. Burnished alto, mid-40s American, slight vocal roughness. Controlled, forensic cadence. Understates emotion."
@@ -652,6 +673,7 @@ export const CharacterDesignerView: React.FC = () => {
                         saveVoice({
                           ref_audio_path: job.output_path,
                           ref_transcript: transcript,
+                          base_voice_description: voiceDesc,
                           model: "Clone",
                         });
                         setRefTranscript(transcript);
@@ -692,7 +714,7 @@ export const CharacterDesignerView: React.FC = () => {
                 </div>
                 <button
                   className="btn btn-primary"
-                  onClick={() => { setAddingEmotion(true); setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDesc(""); setPaletteGenError(null); }}
+                  onClick={() => { setAddingEmotion(true); setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDirection(""); setPaletteGenError(null); }}
                   style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
                 >
                   + Add Emotion
@@ -730,15 +752,18 @@ export const CharacterDesignerView: React.FC = () => {
                     </div>
                   </div>
                   <div>
-                    <label style={labelStyle}>Voice description for this emotion</label>
+                    <label style={labelStyle}>Emotional direction</label>
                     <textarea
                       className="input"
-                      value={newEmotionDesc}
-                      onChange={(e) => setNewEmotionDesc(e.target.value)}
+                      value={newEmotionDirection}
+                      onChange={(e) => setNewEmotionDirection(e.target.value)}
                       rows={2}
                       style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                      placeholder="e.g. Same burnished alto, but slower and more deliberate — each word chosen carefully."
+                      placeholder="e.g. Slower and more deliberate, each word chosen carefully. Controlled dread just beneath the surface."
                     />
+                    <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 4 }}>
+                      Appended to the base voice description when generating takes.
+                    </div>
                   </div>
                   <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
                     <button className="btn btn-sm" onClick={() => setAddingEmotion(false)}>Cancel</button>
@@ -821,20 +846,23 @@ export const CharacterDesignerView: React.FC = () => {
                       {isExpanded && (
                         <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--line-1)" }}>
                           <div style={{ marginBottom: 10 }}>
-                            <label style={labelStyle}>Voice description for this emotion</label>
+                            <label style={labelStyle}>Emotional direction</label>
                             <textarea
                               className="input"
-                              value={entry.voice_description}
+                              value={entry.direction}
                               onChange={(e) => {
                                 const next = paletteEntries.map((pe) =>
-                                  pe.emotion === entry.emotion ? { ...pe, voice_description: e.target.value } : pe
+                                  pe.emotion === entry.emotion ? { ...pe, direction: e.target.value } : pe
                                 );
                                 savePalette(next);
                               }}
                               rows={2}
                               style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                              placeholder="Describe how this emotion should colour the voice…"
+                              placeholder="e.g. Slower, more deliberate. Controlled dread just beneath the surface."
                             />
+                            <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 3 }}>
+                              Appended to the base voice description · leave blank to use base voice only
+                            </div>
                           </div>
 
                           {/* Reference status */}
@@ -862,10 +890,10 @@ export const CharacterDesignerView: React.FC = () => {
                             <button
                               className="btn btn-primary"
                               onClick={() => handleGeneratePaletteTake(entry)}
-                              disabled={runningEntry || !entry.voice_description.trim()}
+                              disabled={runningEntry || !voiceDesc.trim()}
                               style={{
                                 background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
-                                opacity: !entry.voice_description.trim() ? 0.4 : 1,
+                                opacity: !voiceDesc.trim() ? 0.4 : 1,
                               }}
                             >
                               {runningEntry ? "Generating…" : "Generate Take"}

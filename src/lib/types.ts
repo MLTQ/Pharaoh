@@ -10,8 +10,12 @@ export interface PaletteEntry {
   emotion: string;
   /** Human-readable display label */
   label: string;
-  /** Qwen3 VoiceDesign prompt used to generate the reference clip */
-  voice_description: string;
+  /**
+   * Short emotional direction applied on top of the character's base voice description.
+   * e.g. "Flat, controlled fear. Each word measured." — NOT a full voice description.
+   * Combined with VoiceAssignment.base_voice_description at generation time.
+   */
+  direction: string;
   /** Absolute path to the locked reference .wav (null = not yet generated/approved) */
   ref_audio_path: string | null;
   ref_transcript: string | null;
@@ -25,6 +29,12 @@ export interface VoiceAssignment {
   /** Legacy single-reference path (used by Clone tab). */
   ref_audio_path: string | null;
   ref_transcript: string | null;
+  /**
+   * Full Qwen3 VoiceDesign description that defines this character's vocal identity.
+   * Used as the foundation for all palette take generation — each palette entry's
+   * `direction` is appended to this when calling /generate/voice_design.
+   */
+  base_voice_description: string;
   /** Named emotional states for the Chatterbox Turbo palette workflow. */
   emotional_palette: PaletteEntry[];
 }

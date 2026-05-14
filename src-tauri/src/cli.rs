@@ -1208,6 +1208,7 @@ async fn script_import(
                 instruct_default: None,
                 ref_audio_path: None,
                 ref_transcript: None,
+                base_voice_description: String::new(),
                 emotional_palette: vec![],
             },
         });
@@ -1495,6 +1496,7 @@ async fn character_create(
             instruct_default: flag_opt(&flags, "instruct"),
             ref_audio_path: flag_opt(&flags, "ref_audio_path"),
             ref_transcript: flag_opt(&flags, "ref_transcript"),
+            base_voice_description: String::new(),
             emotional_palette: vec![],
         },
     };

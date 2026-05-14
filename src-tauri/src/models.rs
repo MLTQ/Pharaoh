@@ -8,8 +8,10 @@ pub struct PaletteEntry {
     pub emotion: String,
     /// Human-readable display label
     pub label: String,
-    /// Qwen3 VoiceDesign prompt used to generate the reference clip
-    pub voice_description: String,
+    /// Short emotional direction appended to base_voice_description at generation time.
+    /// e.g. "Flat, controlled fear. Each word measured." — NOT a full voice description.
+    #[serde(default)]
+    pub direction: String,
     /// Absolute path to locked reference .wav (None = not yet generated/approved)
     pub ref_audio_path: Option<String>,
     pub ref_transcript: Option<String>,
@@ -24,6 +26,10 @@ pub struct VoiceAssignment {
     pub instruct_default: Option<String>,
     pub ref_audio_path: Option<String>,
     pub ref_transcript: Option<String>,
+    /// Full Qwen3 VoiceDesign description defining this character's vocal identity.
+    /// Palette take generation prepends this to each entry's `direction`.
+    #[serde(default)]
+    pub base_voice_description: String,
     /// Named emotional states for the Chatterbox Turbo palette workflow.
     #[serde(default)]
     pub emotional_palette: Vec<PaletteEntry>,
