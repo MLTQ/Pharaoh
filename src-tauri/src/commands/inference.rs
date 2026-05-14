@@ -87,6 +87,7 @@ pub async fn check_server_health(app: AppHandle, model: String) -> Result<Server
             "sfx" => format!("{}/health", cfg.sfx_url),
             "music" => format!("{}/health", cfg.music_url),
             "post" => format!("{}/health", cfg.post_url),
+            "mcp" => format!("{}/health", cfg.mcp_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };
@@ -111,6 +112,7 @@ pub async fn update_server_config(
     sfx_url: Option<String>,
     music_url: Option<String>,
     post_url: Option<String>,
+    mcp_url: Option<String>,
 ) -> Result<()> {
     let state = app.state::<AppState>();
     let mut cfg = state
@@ -128,6 +130,9 @@ pub async fn update_server_config(
     }
     if let Some(u) = post_url {
         cfg.post_url = u;
+    }
+    if let Some(u) = mcp_url {
+        cfg.mcp_url = u;
     }
     Ok(())
 }

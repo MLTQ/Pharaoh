@@ -246,9 +246,11 @@ Model weights are loaded once — subsequent generations pay only inference cost
 
 | Server | Default port |
 |--------|-------------|
+| MCP    | 18000       |
 | TTS    | 18001       |
 | SFX    | 18002       |
 | Music  | 18003       |
+| Post   | 18004       |
 
 ### Common endpoints (all three servers)
 
@@ -268,6 +270,71 @@ GET  /jobs/{job_id}
 POST /unload
      → unloads model weights from VRAM
 ```
+
+### MCP server — port 18000
+
+AI agent control plane. Exposes the full Pharaoh pipeline to any MCP-capable
+client (Claude Desktop, Claude Code agents) without requiring the Tauri GUI.
+
+Lives at `servers/mcp/run.py`. Runs in one of two transport modes:
+- **stdio** — for Claude Desktop and direct agent integration (default)
+- **sse** — for network clients; spawned by the Rust backend alongside inference servers
+
+Does not load any ML models. Reads project/scene/script state directly from
+the filesystem and proxies generation requests to ports 18001–18004.
+
+**MCP resources** (read-only, no auth required):
+
+```
+pharaoh://projects                              list of all projects
+pharaoh://projects/{id}                         project.json
+pharaoh://projects/{id}/storyboard              storyboard.json
+pharaoh://projects/{id}/scenes/{slug}/script    script.csv as JSON array
+pharaoh://projects/{id}/scenes/{slug}/assets    assets + QA status + metadata
+pharaoh://projects/{id}/pipeline                per-scene per-stage completion matrix
+```
+
+**MCP tools:**
+
+```
+project_status      { project_id }                          → stage completion matrix
+read_script         { project_id, scene_slug }              → script rows as JSON
+update_script_row   { project_id, scene_slug, row_index, updates }
+generate_tts        { project_id, scene_slug, row_index, output_path, ... } → job_id
+generate_sfx        { project_id, scene_slug, row_index, output_path, ... } → job_id
+generate_music      { project_id, scene_slug, row_index, output_path,
+                      batch_size }                          → job_id | job_id[]
+job_status          { server, job_id }                      → status, progress, output_path
+wait_for_job        { server, job_id, timeout_seconds }     → blocks until done
+list_assets         { project_id, scene_slug, qa_status? }  → asset list
+qa_approve          { audio_path, notes? }
+qa_reject           { audio_path, notes }
+regenerate_asset    { audio_path, output_path? }            → job_id
+server_health       { server? }                             → health for all or one
+compose_scene       { project_id, scene_slug }
+render_final        { project_id, crossfade_ms? }
+```
+
+**Claude Desktop configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+{
+  "mcpServers": {
+    "pharaoh": {
+      "command": "python",
+      "args": [
+        "/path/to/Pharaoh/servers/mcp/run.py",
+        "--projects-dir", "/path/to/pharaoh-projects"
+      ]
+    }
+  }
+}
+```
+
+**GET /health** (SSE mode only) — returns `{ status, model_loaded, model_variant, vram_mb }`
+so the Rust model_manager can include it in the `AllServerHealth` poll.
+
+---
 
 ### TTS server — port 18001
 
