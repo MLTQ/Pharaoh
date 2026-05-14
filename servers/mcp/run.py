@@ -313,6 +313,7 @@ def generate_tts(
     output_path: str,
     speaker: str = "Vivian",
     instruct: str = "",
+    voice_description: str = "",
     seed: int = 0,
     temperature: float = 0.7,
     top_p: float = 0.9,
@@ -323,6 +324,13 @@ def generate_tts(
     Returns a job_id immediately. Poll job_status to wait for completion.
     The prompt is read from the row's 'prompt' field; instruct overrides the row's 'instruct' field if provided.
     output_path should be the absolute path where the .wav should be saved.
+
+    Voice modes:
+      - voice_description (preferred): pass a rich natural-language description of the desired voice
+        (e.g. "Deep, gravelly male voice, 50s, world-weary noir detective, slow deliberate pace").
+        Routes to /generate/voice_design — the model synthesises a matching voice from scratch.
+      - speaker + instruct: use a preset speaker name with optional style instruction.
+        Supported speakers: aiden, dylan, eric, ono_anna, ryan, serena, sohee, uncle_fu, vivian.
     """
     rows = _script_rows(project_id, scene_slug)
     if row_index < 0 or row_index >= len(rows):
@@ -330,17 +338,31 @@ def generate_tts(
     row = rows[row_index]
     if row.get("type", "").upper() != "DIALOGUE":
         return json.dumps({"error": "generate_tts only applies to DIALOGUE rows"})
-    effective_instruct = instruct or row.get("instruct", "")
-    result = _post("tts", "/generate/custom_voice", {
-        "text": row["prompt"],
-        "speaker": speaker,
-        "instruct": effective_instruct or None,
-        "seed": seed,
-        "temperature": temperature,
-        "top_p": top_p,
-        "max_new_tokens": max_new_tokens,
-        "output_path": output_path,
-    })
+
+    if voice_description:
+        # Voice Design mode: synthesise voice from natural-language description
+        result = _post("tts", "/generate/voice_design", {
+            "text": row["prompt"],
+            "voice_description": voice_description,
+            "seed": seed,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_new_tokens": max_new_tokens,
+            "output_path": output_path,
+        })
+    else:
+        # Base model mode: preset speaker + optional style instruction
+        effective_instruct = instruct or row.get("instruct", "")
+        result = _post("tts", "/generate/custom_voice", {
+            "text": row["prompt"],
+            "speaker": speaker,
+            "instruct": effective_instruct or None,
+            "seed": seed,
+            "temperature": temperature,
+            "top_p": top_p,
+            "max_new_tokens": max_new_tokens,
+            "output_path": output_path,
+        })
     return json.dumps(result)
 
 
@@ -565,11 +587,46 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
 
 
 @mcp.tool()
+def unload_model(server: str) -> str:
+    """
+    Unload the currently loaded model from an inference server to free RAM/VRAM.
+
+    IMPORTANT: Call this before loading a different heavy model to avoid OOM.
+    The inference servers do NOT share memory — each holds its model independently.
+    Typical footprints (RAM, no GPU):
+      tts  — ~8–12 GB (voice_design or custom_voice)
+      sfx  — ~4–6 GB (AudioLDM)
+      music — ~14–20 GB (ACE-Step 3.5B)
+      post  — ~2–4 GB (AudioSR)
+
+    Recommended workflow for CPU-only sessions:
+      1. Generate all TTS → unload_model("tts")
+      2. Generate all SFX (already light, can overlap)
+      3. unload_model("sfx") if RAM is tight
+      4. Generate music → unload_model("music")
+      5. Generate post-processing as needed
+
+    server: "tts" | "sfx" | "music" | "post"
+    """
+    if server not in SERVER_URLS:
+        return json.dumps({"error": f"unknown server: {server}. Valid: {list(SERVER_URLS.keys())}"})
+    try:
+        result = _post(server, "/unload", {})
+        return json.dumps({"ok": True, "server": server, **result})
+    except Exception as e:
+        return json.dumps({"ok": False, "server": server, "error": str(e)})
+
+
+@mcp.tool()
 def server_health(server: str = "") -> str:
     """
     Check health of inference servers.
     server: "tts" | "sfx" | "music" | "post" | "" (check all)
     Returns model_loaded, model_variant, and vram_mb for each.
+
+    RAM WARNING: On CPU-only systems, loading multiple heavy models simultaneously
+    will exhaust RAM. Use unload_model() between generation phases.
+    See unload_model() docstring for recommended sequencing.
     """
     targets = [server] if server else list(SERVER_URLS.keys())
     results = {}
