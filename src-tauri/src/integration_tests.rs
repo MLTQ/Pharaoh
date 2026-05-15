@@ -63,6 +63,7 @@ fn make_blank_row() -> ScriptRow {
         fade_out_ms: "50".into(),
         reverb_send: "0".into(),
         notes: String::new(),
+        gain_envelope: String::new(),
     }
 }
 

@@ -404,6 +404,7 @@ pub fn blocks_to_rows(
                 reverb_send: "0".to_string(),
                 emotion: String::new(),
                 notes: format!("id:{}", b.id),
+                gain_envelope: String::new(),
             }
         })
         .collect()

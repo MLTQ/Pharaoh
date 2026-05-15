@@ -425,4 +425,6 @@ pub struct ScriptRow {
     #[serde(default)]
     pub emotion: String,
     pub notes: String,
+    #[serde(default)]
+    pub gain_envelope: String,
 }

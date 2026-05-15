@@ -124,6 +124,7 @@ pub fn apply_script_row_fields(row: &mut ScriptRow, fields: &HashMap<String, Str
             "fade_in_ms" => row.fade_in_ms = val.clone(),
             "fade_out_ms" => row.fade_out_ms = val.clone(),
             "notes" => row.notes = val.clone(),
+            "gain_envelope" => row.gain_envelope = val.clone(),
             _ => {}
         }
     }

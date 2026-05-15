@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useMemo } from "react";
-import { Icon, Wave } from "../shared/atoms";
+import { Icon, Wave, PeaksWave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { FountainEditor } from "./FountainEditor";
@@ -7,6 +7,7 @@ import { TakesPopover } from "./TakesPopover";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
+import { usePeaksStore } from "../../store/peaksStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
 import {
   ASSET_DRAG_MIME,
@@ -18,11 +19,10 @@ import {
   type RoutableAssetKind,
 } from "../../lib/assetRouting";
 import { useRenderMetaStore } from "../../store/renderMetaStore";
-import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow, TrackType } from "../../lib/types";
+import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow, TrackType, EnvelopePoint } from "../../lib/types";
 
 type ScriptMode = "write" | "direct" | "mix";
 
-const PX_PER_SEC = 4;
 const TOTAL_SEC = 200;
 const SNAP_SEC = 0.5;
 
@@ -74,6 +74,7 @@ function blankScriptRow(sceneNo: string, asset: DraggedAsset, track: string, sta
     reverb_send: "0",
     emotion: "",
     notes: "",
+    gain_envelope: "",
   };
 }
 
@@ -97,6 +98,102 @@ function parseDraggedAsset(event: React.DragEvent): DraggedAsset | null {
   return getCurrentDraggedAsset();
 }
 
+// ── Gain Lane ────────────────────────────────────────────────────────────────
+
+const GAIN_LANE_H = 16;
+const DB_MIN = -36, DB_MAX = 6;
+
+function dbToFrac(db: number) { return 1 - (db - DB_MIN) / (DB_MAX - DB_MIN); }
+function fracToDb(frac: number) { return DB_MIN + (1 - frac) * (DB_MAX - DB_MIN); }
+
+interface GainLaneProps {
+  width: number;
+  gainDb: number;
+  points: EnvelopePoint[];
+  onChange: (points: EnvelopePoint[]) => void;
+}
+
+const GainLane: React.FC<GainLaneProps> = ({ width, gainDb, points, onChange }) => {
+  const sorted = [...points].sort((a, b) => a.t_frac - b.t_frac);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const draggingIdx = useRef<number | null>(null);
+
+  const baseY = dbToFrac(gainDb) * GAIN_LANE_H;
+
+  const buildPath = (pts: EnvelopePoint[]) => {
+    if (pts.length === 0) return `M0,${baseY} L${width},${baseY}`;
+    const all = [
+      { t_frac: 0, db: pts[0].db },
+      ...pts,
+      { t_frac: 1, db: pts[pts.length - 1].db },
+    ];
+    return all.map((p, i) => `${i === 0 ? "M" : "L"}${p.t_frac * width},${dbToFrac(p.db) * GAIN_LANE_H}`).join(" ");
+  };
+
+  const getSvgPos = (e: React.PointerEvent | React.MouseEvent) => {
+    if (!svgRef.current) return { t_frac: 0, db: 0 };
+    const rect = svgRef.current.getBoundingClientRect();
+    const t_frac = Math.max(0.01, Math.min(0.99, (e.clientX - rect.left) / rect.width));
+    const db = Math.round(fracToDb((e.clientY - rect.top) / GAIN_LANE_H) * 2) / 2;
+    return { t_frac, db: Math.max(DB_MIN, Math.min(DB_MAX, db)) };
+  };
+
+  return (
+    <svg
+      ref={svgRef}
+      width={width} height={GAIN_LANE_H}
+      style={{ display: "block", cursor: "crosshair", flexShrink: 0 }}
+      onPointerDown={(e) => {
+        e.stopPropagation();
+        const pos = getSvgPos(e);
+        const hitIdx = sorted.findIndex(p => Math.abs(p.t_frac * width - pos.t_frac * width) < 8);
+        if (hitIdx >= 0) {
+          draggingIdx.current = hitIdx;
+          (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
+        } else {
+          const newPts = [...sorted, { t_frac: pos.t_frac, db: pos.db }]
+            .sort((a, b) => a.t_frac - b.t_frac);
+          onChange(newPts);
+          draggingIdx.current = newPts.findIndex(p => Math.abs(p.t_frac - pos.t_frac) < 0.001);
+          (e.currentTarget as SVGSVGElement).setPointerCapture(e.pointerId);
+        }
+      }}
+      onPointerMove={(e) => {
+        if (draggingIdx.current === null) return;
+        const pos = getSvgPos(e);
+        const newPts = sorted.map((p, i) =>
+          i === draggingIdx.current ? { t_frac: pos.t_frac, db: pos.db } : p
+        ).sort((a, b) => a.t_frac - b.t_frac);
+        draggingIdx.current = newPts.findIndex(p => Math.abs(p.t_frac - pos.t_frac) < 0.001 && Math.abs(p.db - pos.db) < 0.1);
+        onChange(newPts);
+      }}
+      onPointerUp={(e) => {
+        draggingIdx.current = null;
+        (e.currentTarget as SVGSVGElement).releasePointerCapture(e.pointerId);
+      }}
+      onDoubleClick={(e) => {
+        e.stopPropagation();
+        const pos = getSvgPos(e);
+        const hitIdx = sorted.findIndex(p => Math.abs(p.t_frac * width - pos.t_frac * width) < 10);
+        if (hitIdx >= 0) onChange(sorted.filter((_, i) => i !== hitIdx));
+      }}
+    >
+      <rect width={width} height={GAIN_LANE_H} fill="rgba(0,0,0,0.25)" />
+      <path d={buildPath(sorted)} stroke="rgba(255,255,255,0.6)" strokeWidth="1.5" fill="none" strokeLinejoin="round" />
+      {sorted.map((p, i) => (
+        <circle
+          key={i}
+          cx={p.t_frac * width} cy={dbToFrac(p.db) * GAIN_LANE_H}
+          r={4} fill="white" stroke="rgba(0,0,0,0.4)" strokeWidth="1"
+          style={{ cursor: "ns-resize" }}
+        />
+      ))}
+      <line x1={0} y1={dbToFrac(0) * GAIN_LANE_H} x2={width} y2={dbToFrac(0) * GAIN_LANE_H}
+        stroke="rgba(255,255,255,0.15)" strokeWidth="0.5" strokeDasharray="3 3" />
+    </svg>
+  );
+};
+
 // ── Draggable clip ───────────────────────────────────────────────────────────
 
 interface DraggableClipProps {
@@ -106,14 +203,21 @@ interface DraggableClipProps {
   clipIdx: number;
   trackKind: string;
   isSelected: boolean;
+  pxPerSec: number;
+  audioPath?: string;
+  gainDb: number;
+  gainEnvelope: EnvelopePoint[];
   onSelect: () => void;
   onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
   onTrim: (trackIdx: number, clipIdx: number, newDurationSec: number) => void;
   onRequestTakes: (rowIndex: number, x: number, y: number) => void;
+  onGainChange: (points: EnvelopePoint[]) => void;
 }
 
 const DraggableClip: React.FC<DraggableClipProps> = ({
-  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, onSelect, onMove, onTrim, onRequestTakes,
+  clip, startSec, trackIdx, clipIdx, trackKind, isSelected, pxPerSec,
+  audioPath, gainDb, gainEnvelope,
+  onSelect, onMove, onTrim, onRequestTakes, onGainChange,
 }) => {
   const pointerStartX = useRef(0);
   const trimStartLen = useRef(0);
@@ -121,6 +225,23 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
   const [dragging, setDragging] = useState(false);
   const [trimDeltaPx, setTrimDeltaPx] = useState(0);
   const [trimming, setTrimming] = useState(false);
+
+  // Peaks / waveform
+  const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
+  const peaksPeek = usePeaksStore((s) => s.peek);
+  const peaksCache = usePeaksStore((s) => s.cache);
+  const [peaks, setPeaks] = useState<number[] | null>(null);
+
+  useEffect(() => {
+    if (!audioPath) return;
+    const cached = peaksPeek(audioPath, 120);
+    if (cached) { setPeaks(cached); return; }
+    fetchPeaks(audioPath, 120).then(setPeaks).catch(() => {});
+  }, [audioPath, peaksCache, fetchPeaks, peaksPeek]);
+
+  // Gain envelope local state
+  const [envelope, setEnvelope] = useState<EnvelopePoint[]>(gainEnvelope);
+  useEffect(() => { setEnvelope(gainEnvelope); }, [gainEnvelope]);
 
   const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     e.stopPropagation();
@@ -139,7 +260,7 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
   const handlePointerUp = () => {
     if (!dragging) return;
     setDragging(false);
-    const rawSec = startSec + dragOffsetPx / PX_PER_SEC;
+    const rawSec = startSec + dragOffsetPx / pxPerSec;
     const snapped = Math.max(0, Math.round(rawSec / SNAP_SEC) * SNAP_SEC);
     onMove(trackIdx, clipIdx, snapped);
     setDragOffsetPx(0);
@@ -170,15 +291,15 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
   const handleTrimUp = () => {
     if (!trimming) return;
     setTrimming(false);
-    const rawLen = trimStartLen.current + trimDeltaPx / PX_PER_SEC;
+    const rawLen = trimStartLen.current + trimDeltaPx / pxPerSec;
     // Floor at 0.1s so the user can't trim a clip out of existence
     const newLen = Math.max(0.1, Math.round(rawLen / SNAP_SEC) * SNAP_SEC);
     onTrim(trackIdx, clipIdx, newLen);
     setTrimDeltaPx(0);
   };
 
-  const effectiveLeft = (startSec * PX_PER_SEC) + dragOffsetPx;
-  const effectiveWidth = (clip.len + (trimming ? trimDeltaPx / PX_PER_SEC : 0)) * PX_PER_SEC;
+  const effectiveLeft = (startSec * pxPerSec) + dragOffsetPx;
+  const effectiveWidth = (clip.len + (trimming ? trimDeltaPx / pxPerSec : 0)) * pxPerSec;
 
   return (
     <div
@@ -190,6 +311,8 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
         opacity: dragging || trimming ? 0.85 : 1,
         zIndex: dragging || trimming ? 10 : undefined,
         userSelect: "none",
+        display: "flex",
+        flexDirection: "column",
       }}
       onPointerDown={handlePointerDown}
       onPointerMove={handlePointerMove}
@@ -205,13 +328,25 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
       title="Drag body to move · drag right edge to trim · right-click for takes"
     >
       <div className="clip-label">{clip.label}</div>
-      <div className="clip-wave">
-        <Wave
-          width={effectiveWidth}
-          height={28}
-          seed={trackIdx * 7 + clipIdx * 3 + 1}
-          count={Math.max(20, Math.floor((clip.len + (trimming ? trimDeltaPx / PX_PER_SEC : 0)) * 1.6))}
-        />
+      <GainLane
+        width={Math.max(1, effectiveWidth)}
+        gainDb={gainDb}
+        points={envelope}
+        onChange={(pts) => {
+          setEnvelope(pts);
+          onGainChange(pts);
+        }}
+      />
+      <div className="clip-wave" style={{ flex: 1 }}>
+        {peaks
+          ? <PeaksWave peaks={peaks} width={Math.max(1, effectiveWidth)} height={28} color="currentColor" opacity={0.7} />
+          : <Wave
+              width={Math.max(1, effectiveWidth)}
+              height={28}
+              seed={trackIdx * 7 + clipIdx * 3 + 1}
+              count={Math.max(20, Math.floor((clip.len + (trimming ? trimDeltaPx / pxPerSec : 0)) * 1.6))}
+            />
+        }
       </div>
       {/* Right-edge trim handle. Sits over the rightmost 6px of the clip;
           its own pointer events don't bubble to the body's drag handler. */}
@@ -252,6 +387,9 @@ interface CompositionViewProps {
 export const CompositionView: React.FC<CompositionViewProps> = ({
   scene, scenes, tracks, onSwitchScene, onOpenPyramid, onUpdateScene,
 }) => {
+  const [pxPerSec, setPxPerSec] = useState(4);
+  const MIN_PX = 1, MAX_PX = 24;
+
   const [selected, setSelected]   = useState<string | null>(null);
   const [dropTarget, setDropTarget] = useState<number | null>(null);
   const [scriptRows, setScriptRows] = useState<ScriptRow[]>([]);
@@ -391,7 +529,18 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         const startSec = Number(row.start_ms) / 1000;
         const durSec   = row.duration_ms ? Number(row.duration_ms) / 1000 : 5;
         const label    = row.character || row.prompt.slice(0, 30) || row.file.split("/").pop() || "clip";
-        map.get(row.track)!.clips.push({ start: startSec, len: durSec, label, take: 1, row_index: rowIndex });
+        const gainDb = parseFloat(row.gain_db) || 0;
+        const gainEnvelope: EnvelopePoint[] = (() => {
+          try { return row.gain_envelope ? JSON.parse(row.gain_envelope) : []; }
+          catch { return []; }
+        })();
+        map.get(row.track)!.clips.push({
+          start: startSec, len: durSec, label, take: 1,
+          row_index: rowIndex,
+          audioPath: row.file || undefined,
+          gainDb,
+          gainEnvelope,
+        });
       }
     });
     return Array.from(map.values());
@@ -465,7 +614,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
     const rect = tracksRowsRef.current?.getBoundingClientRect() ?? event.currentTarget.getBoundingClientRect();
     const localX = event.clientX - rect.left;
-    const rawSec = Math.max(0, localX / PX_PER_SEC);
+    const rawSec = Math.max(0, localX / pxPerSec);
     const snapped = Math.round(rawSec / SNAP_SEC) * SNAP_SEC;
     placeDraggedAsset(asset, snapped, targetTrack).catch((error) => {
       console.error("[CompositionView] asset drop failed", error);
@@ -490,7 +639,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
       const localX = detail.clientX - rect.left;
       const localY = detail.clientY - rect.top;
-      const startSec = Math.max(0, Math.round((localX / PX_PER_SEC) / SNAP_SEC) * SNAP_SEC);
+      const startSec = Math.max(0, Math.round((localX / pxPerSec) / SNAP_SEC) * SNAP_SEC);
       const trackIndex = Math.floor(localY / 76);
       const targetTrack = trackIndex >= 0 && trackIndex < activeTracks.length ? activeTracks[trackIndex] : undefined;
 
@@ -501,7 +650,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
     window.addEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
     return () => window.removeEventListener(ASSET_POINTER_DROP_EVENT, handlePointerAssetDrop);
-  }, [activeTracks, activeSceneSlug, realProjectId, scriptRows]);
+  }, [activeTracks, activeSceneSlug, realProjectId, scriptRows, pxPerSec]);
 
   const [clipStarts, setClipStarts] = useState<number[][]>([]);
   useEffect(() => {
@@ -546,6 +695,13 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         }).catch(console.error);
       }
     }
+  };
+
+  const handleGainEnvelopeChange = (trackIdx: number, clipIdx: number, points: EnvelopePoint[]) => {
+    const rowIndex = activeTracks[trackIdx]?.clips[clipIdx]?.row_index;
+    if (rowIndex == null) return;
+    const json = points.length > 0 ? JSON.stringify(points) : "";
+    handleUpdateRow(rowIndex, { gain_envelope: json });
   };
 
   // ── Render ───────────────────────────────────────────────────────────────
@@ -609,7 +765,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const secFromRulerEvent = (e: { clientX: number }): number => {
     if (!rulerRef.current) return 0;
     const rect = rulerRef.current.getBoundingClientRect();
-    return Math.max(0, Math.min(TOTAL_SEC, (e.clientX - rect.left) / PX_PER_SEC));
+    return Math.max(0, Math.min(TOTAL_SEC, (e.clientX - rect.left) / pxPerSec));
   };
 
   const handleRulerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
@@ -641,24 +797,49 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     e.currentTarget.releasePointerCapture(e.pointerId);
   };
 
-  // Spacebar: play/pause the active scene render from the parked position
+  // Spacebar + transport keyboard shortcuts
   useEffect(() => {
     const handleKey = (e: KeyboardEvent) => {
-      // Don't steal space from text inputs, textareas, contenteditable
+      // Don't steal keys from text inputs, textareas, contenteditable
       const target = e.target as HTMLElement;
       if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
-      if (e.code !== "Space") return;
-      e.preventDefault();
 
-      if (playing) {
-        // Pause — stop and park at current position
-        const pos = parkedSecRef.current;
-        stopAudio();
-        setParkedSec(pos);
-        parkedSecRef.current = pos;
-      } else if (activeRenderPath) {
-        // Play from parked position
-        playAudio(activeRenderPath, parkedSecRef.current).catch(console.error);
+      if (e.code === "Space") {
+        e.preventDefault();
+        if (playing) {
+          const pos = parkedSecRef.current;
+          stopAudio();
+          setParkedSec(pos);
+          parkedSecRef.current = pos;
+        } else if (activeRenderPath) {
+          playAudio(activeRenderPath, parkedSecRef.current).catch(console.error);
+        }
+      }
+
+      if (e.code === "Home") {
+        e.preventDefault();
+        setParkedSec(0); parkedSecRef.current = 0;
+        if (playing) playAudio(playing, 0).catch(console.error);
+      }
+
+      if (e.code === "End") {
+        e.preventDefault();
+        const end = TOTAL_SEC;
+        setParkedSec(end); parkedSecRef.current = end;
+      }
+
+      if (e.code === "ArrowLeft") {
+        e.preventDefault();
+        const next = Math.max(0, parkedSecRef.current - 5);
+        setParkedSec(next); parkedSecRef.current = next;
+        if (playing) playAudio(playing, next).catch(console.error);
+      }
+
+      if (e.code === "ArrowRight") {
+        e.preventDefault();
+        const next = Math.min(TOTAL_SEC, parkedSecRef.current + 5);
+        setParkedSec(next); parkedSecRef.current = next;
+        if (playing) playAudio(playing, next).catch(console.error);
       }
     };
     window.addEventListener("keydown", handleKey);
@@ -675,8 +856,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     if (titleDraft !== scene.title) onUpdateScene(scene.no, { title: titleDraft });
   };
 
-  const ruler = Array.from({ length: Math.floor(TOTAL_SEC / 20) + 1 }, (_, i) => {
-    const s = i * 20;
+  // Adaptive ruler ticks based on zoom level
+  const rulerInterval = pxPerSec >= 12 ? 5 : pxPerSec >= 6 ? 10 : pxPerSec >= 3 ? 20 : 60; // seconds per tick
+  const ruler = Array.from({ length: Math.floor(TOTAL_SEC / rulerInterval) + 1 }, (_, i) => {
+    const s = i * rulerInterval;
     const m = Math.floor(s / 60);
     const ss = (s % 60).toString().padStart(2, "0");
     return <div key={s} className="ruler-tick">{m}:{ss}</div>;
@@ -905,13 +1088,37 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
         {/* Timeline (visible in direct + mix; hidden in write mode) */}
         {mode !== "write" && (
-        <div className="timeline" style={{ flex: 1, overflow: "auto" }}>
+        <div
+          className="timeline"
+          style={{ flex: 1, overflow: "auto" }}
+          onWheel={(e) => {
+            if (!e.ctrlKey && !e.metaKey) return;
+            e.preventDefault();
+            setPxPerSec(p => Math.max(MIN_PX, Math.min(MAX_PX, e.deltaY < 0 ? p * 1.2 : p / 1.2)));
+          }}
+        >
           <div className="tracks-head">
             <div className="tracks-time">
-              TRACKS · {activeTracks.length}
-              {realProjectId && scriptRows.length > 0 && (
-                <span style={{ marginLeft: 6, fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--st-rendered)", textTransform: "uppercase", letterSpacing: "0.06em" }}>live</span>
-              )}
+              <span>
+                TRACKS · {activeTracks.length}
+                {realProjectId && scriptRows.length > 0 && (
+                  <span style={{ marginLeft: 6, fontFamily: "var(--font-mono)", fontSize: 8, color: "var(--st-rendered)", textTransform: "uppercase", letterSpacing: "0.06em" }}>live</span>
+                )}
+              </span>
+              <span style={{ display: "inline-flex", gap: 2, marginLeft: 8 }}>
+                <button
+                  className="btn btn-sm"
+                  title="Zoom out (Ctrl+scroll)"
+                  onClick={() => setPxPerSec(p => Math.max(MIN_PX, Math.min(MAX_PX, p / 1.4)))}
+                  style={{ padding: "1px 5px", minWidth: 0, fontFamily: "var(--font-mono)", fontSize: 11 }}
+                >−</button>
+                <button
+                  className="btn btn-sm"
+                  title="Zoom in (Ctrl+scroll)"
+                  onClick={() => setPxPerSec(p => Math.max(MIN_PX, Math.min(MAX_PX, p * 1.4)))}
+                  style={{ padding: "1px 5px", minWidth: 0, fontFamily: "var(--font-mono)", fontSize: 11 }}
+                >+</button>
+              </span>
             </div>
             {activeTracks.map((t) => (
               <div key={t.id} className={`track-label ${t.kind}`}>
@@ -928,7 +1135,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
             <div
               ref={rulerRef}
               className="timeline-ruler"
-              style={{ width: TOTAL_SEC * PX_PER_SEC, cursor: "col-resize", userSelect: "none" }}
+              style={{ width: TOTAL_SEC * pxPerSec, cursor: "col-resize", userSelect: "none" }}
               onPointerDown={handleRulerPointerDown}
               onPointerMove={handleRulerPointerMove}
               onPointerUp={handleRulerPointerUp}
@@ -937,7 +1144,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
               ref={tracksRowsRef}
               className="tracks-rows"
               style={{
-                width: TOTAL_SEC * PX_PER_SEC,
+                width: TOTAL_SEC * pxPerSec,
                 boxShadow: dropTarget === -1 ? "inset 0 0 0 1px var(--fg-0)" : undefined,
               }}
               onDragOver={(e) => {
@@ -990,7 +1197,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                     // Compute drop position in seconds relative to this track row's left edge
                     const rect = e.currentTarget.getBoundingClientRect();
                     const xInTrack = e.clientX - rect.left;
-                    const rawSec = Math.max(0, xInTrack / PX_PER_SEC);
+                    const rawSec = Math.max(0, xInTrack / pxPerSec);
                     const snapped = Math.round(rawSec / SNAP_SEC) * SNAP_SEC;
                     // Build the patch: always set start_ms; only swap track when
                     // the kinds match (don't put a music clip on a dialogue lane)
@@ -1019,16 +1226,21 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                       clipIdx={ci}
                       trackKind={t.kind}
                       isSelected={selected === `${ti}-${ci}`}
+                      pxPerSec={pxPerSec}
+                      audioPath={c.audioPath}
+                      gainDb={c.gainDb}
+                      gainEnvelope={c.gainEnvelope}
                       onSelect={() => setSelected(`${ti}-${ci}`)}
                       onMove={handleClipMove}
                       onTrim={handleClipTrim}
                       onRequestTakes={(rowIndex, x, y) => setTakesPopover({ rowIndex, x, y })}
+                      onGainChange={(pts) => handleGainEnvelopeChange(ti, ci, pts)}
                     />
                   ))}
                 </div>
               ))}
-              <div className="playhead" style={{ left: playheadSec * PX_PER_SEC }} />
-              <div className="agent-marker" style={{ left: 96 * PX_PER_SEC }} title="Agent suggestion: insert breath" />
+              <div className="playhead" style={{ left: playheadSec * pxPerSec }} />
+              <div className="agent-marker" style={{ left: 96 * pxPerSec }} title="Agent suggestion: insert breath" />
             </div>
           </div>
         </div>

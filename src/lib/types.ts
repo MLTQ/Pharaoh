@@ -149,6 +149,7 @@ export interface ScriptRow {
   /** Palette emotion key for Chatterbox routing (e.g. "neutral", "tense"). Empty = use default. */
   emotion: string;
   notes: string;
+  gain_envelope: string;  // JSON-encoded EnvelopePoint[], empty string = no envelope
 }
 
 // ── Asset sidecar ───────────────────────────────────────────────────────────
@@ -282,12 +283,21 @@ export interface AgentLogEntry {
 
 // ── Mock data types (matching Pharoh mockup) ─────────────────────────────────
 
+/** A single point on a clip's gain envelope. t_frac is 0..1 (fraction of clip duration). */
+export interface EnvelopePoint {
+  t_frac: number;  // 0..1
+  db: number;      // gain in dBFS, typically -40..+6
+}
+
 export interface MockTrackClip {
   start: number;
   len: number;
   label: string;
   take: number;
-  row_index?: number; // script CSV row; set when derived from real project
+  row_index?: number;   // script CSV row; set when derived from real project
+  audioPath?: string;   // absolute path to audio file for waveform peaks
+  gainDb: number;               // parsed from row.gain_db, default 0
+  gainEnvelope: EnvelopePoint[]; // parsed from row.gain_envelope, default []
 }
 
 export interface MockTrack {

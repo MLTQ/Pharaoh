@@ -221,8 +221,9 @@ export function blockToRow(
     fade_in_ms:  existing?.fade_in_ms ?? "50",
     fade_out_ms: existing?.fade_out_ms ?? "50",
     reverb_send: existing?.reverb_send ?? "0",
-    emotion:     existing?.emotion ?? "",
-    notes:       existing?.notes ?? "",
+    emotion:        existing?.emotion        ?? "",
+    notes:          existing?.notes          ?? "",
+    gain_envelope:  existing?.gain_envelope  ?? "",
   };
 }
 
