@@ -963,6 +963,8 @@ def compose_scene(project_id: str, scene_slug: str) -> str:
     cli_candidates = [
         repo_root / "target" / "release" / "pharaoh",
         repo_root / "target" / "debug" / "pharaoh",
+        repo_root / "src-tauri" / "target" / "release" / "pharaoh",
+        repo_root / "src-tauri" / "target" / "debug" / "pharaoh",
     ]
     cli = next((c for c in cli_candidates if c.exists()), None)
     if cli is None:
@@ -972,7 +974,7 @@ def compose_scene(project_id: str, scene_slug: str) -> str:
         })
 
     result = subprocess.run(
-        [str(cli), "compose", "render", "--project", project_id, "--scene", scene_slug],
+        [str(cli), "compose", "render", "scene", project_id, scene_slug],
         capture_output=True,
         text=True,
     )
@@ -994,6 +996,8 @@ def render_final(project_id: str, crossfade_ms: int = 500) -> str:
     cli_candidates = [
         repo_root / "target" / "release" / "pharaoh",
         repo_root / "target" / "debug" / "pharaoh",
+        repo_root / "src-tauri" / "target" / "release" / "pharaoh",
+        repo_root / "src-tauri" / "target" / "debug" / "pharaoh",
     ]
     cli = next((c for c in cli_candidates if c.exists()), None)
     if cli is None:

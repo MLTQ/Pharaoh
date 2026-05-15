@@ -140,9 +140,34 @@ pub fn update_script_row_fields(
         .ok_or_else(|| Error::Other(format!("row {} out of range", row_index)))?;
 
     apply_script_row_fields(row, &fields);
+
+    // Auto-populate duration_ms from the WAV file whenever a file is assigned
+    // and the caller didn't explicitly supply duration_ms. This means agents,
+    // the MCP, and the UI never have to manually fill in duration — it's always
+    // derived from ground truth.
+    if fields.contains_key("file") && !fields.contains_key("duration_ms") {
+        let file_path = row.file.trim().to_string();
+        if !file_path.is_empty() {
+            if let Ok(ms) = wav_duration_ms(&file_path) {
+                row.duration_ms = ms.to_string();
+            }
+        }
+    }
+
     let updated = row.clone();
     write_script_rows(path, &rows)?;
     Ok(updated)
+}
+
+/// Read a WAV file's duration in milliseconds without decoding samples —
+/// computed from the header fields (sample_rate × total_frames).
+fn wav_duration_ms(path: &str) -> Result<u64> {
+    let reader = hound::WavReader::open(path)
+        .map_err(|e| Error::Other(format!("cannot open WAV for duration: {}", e)))?;
+    let spec = reader.spec();
+    let total_frames = reader.duration() as u64; // frames (samples ÷ channels)
+    let ms = total_frames * 1000 / spec.sample_rate as u64;
+    Ok(ms)
 }
 
 pub fn bind_generated_asset(
@@ -168,7 +193,9 @@ pub fn bind_generated_asset(
     }
 
     row.file = output_path.to_string();
-    if let Some(ms) = duration_ms {
+    // Prefer the caller-supplied duration; fall back to reading from the WAV.
+    let resolved_ms = duration_ms.or_else(|| wav_duration_ms(output_path).ok());
+    if let Some(ms) = resolved_ms {
         row.duration_ms = ms.to_string();
     }
 
