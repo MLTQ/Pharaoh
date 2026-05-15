@@ -79,6 +79,7 @@ export interface AppConfig {
   projects_dir: string;
   models_dir: string;
   woosh_dir: string;
+  single_model_mode: boolean;
 }
 
 export interface AllServerHealth {

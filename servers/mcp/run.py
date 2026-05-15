@@ -167,6 +167,45 @@ def _scene_pipeline_status(project_id: str, scene: dict) -> dict:
     }
 
 
+# ── App config helper ─────────────────────────────────────────────────────────
+
+def _cfg() -> dict:
+    """Read the persisted Pharaoh AppConfig from disk. Returns {} if not found."""
+    import platform
+    system = platform.system()
+    if system == "Darwin":
+        cfg_path = Path.home() / "Library" / "Application Support" / "ai.aureum.pharaoh" / "config.json"
+    elif system == "Windows":
+        cfg_path = Path(os.environ.get("APPDATA", Path.home())) / "ai.aureum.pharaoh" / "config.json"
+    else:
+        cfg_path = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config")) / "ai.aureum.pharaoh" / "config.json"
+    if not cfg_path.exists():
+        return {}
+    try:
+        return json.loads(cfg_path.read_text())
+    except Exception:
+        return {}
+
+
+# ── Single model mode ─────────────────────────────────────────────────────────
+
+_HEAVY_SERVERS = {"tts", "music", "chatterbox"}
+
+
+def _auto_unload_others(active: str) -> None:
+    """If single_model_mode is enabled, unload all heavy servers except `active`."""
+    cfg = _cfg()
+    if not cfg.get("single_model_mode", False):
+        return
+    for server in _HEAVY_SERVERS:
+        if server == active:
+            continue
+        try:
+            _post(server, "/unload", {})
+        except Exception:
+            pass  # server may not be running
+
+
 # ── Inference proxy helpers ───────────────────────────────────────────────────
 
 def _post(server: str, path: str, body: dict) -> dict:
@@ -343,6 +382,9 @@ def generate_tts(
     if row.get("type", "").upper() != "DIALOGUE":
         return json.dumps({"error": "generate_tts only applies to DIALOGUE rows"})
 
+    # ── Single model mode: unload other heavy servers before generation ──────────
+    _auto_unload_others("tts")
+
     # ── Chatterbox routing (auto, based on character voice_assignment) ──────────
     char_id = row.get("character", "")
     if char_id:
@@ -460,6 +502,8 @@ def generate_music(
     if row.get("type", "").upper() != "MUSIC":
         return json.dumps({"error": "generate_music only applies to MUSIC rows"})
 
+    _auto_unload_others("music")
+
     if batch_size <= 1:
         result = _post("music", "/generate/text2music", {
             "caption": row["prompt"],
@@ -524,6 +568,8 @@ def generate_chatterbox(
     row = rows[row_index]
     if row.get("type", "").upper() != "DIALOGUE":
         return json.dumps({"error": "generate_chatterbox only applies to DIALOGUE rows"})
+
+    _auto_unload_others("chatterbox")
 
     resolved_ref = ref_audio_path
     if not resolved_ref:
@@ -618,6 +664,7 @@ def generate_palette_take(
     palette_dir.mkdir(parents=True, exist_ok=True)
 
     out_path = str(palette_dir / f"{emotion}_{seed}.wav")
+    _auto_unload_others("tts")
     result = _post("tts", "/generate/voice_design", {
         "text": test_line,
         "voice_description": full_instruct,

@@ -161,6 +161,10 @@ fn default_mcp_url() -> String {
     "http://127.0.0.1:18000".to_string()
 }
 
+fn default_single_model_mode() -> bool {
+    false
+}
+
 // ── Persistent app config ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -185,6 +189,9 @@ pub struct AppConfig {
     /// Path to the cloned Woosh repo (https://github.com/SonyResearch/Woosh)
     #[serde(default)]
     pub woosh_dir: String,
+    /// When true, auto-unload other heavy models before starting any generation job.
+    #[serde(default = "default_single_model_mode")]
+    pub single_model_mode: bool,
 }
 
 impl AppConfig {
@@ -207,6 +214,7 @@ impl AppConfig {
                 .join("Woosh")
                 .to_string_lossy()
                 .into_owned(),
+            single_model_mode: false,
         }
     }
 }

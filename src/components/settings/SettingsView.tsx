@@ -674,6 +674,7 @@ export const SettingsView: React.FC = () => {
   const [chatterboxHealth, setChatterboxHealth] = useState<"unknown" | "online" | "offline">("unknown");
 
   const [wooshDir, setWooshDir] = useState("");
+  const [singleModelMode, setSingleModelMode] = useState(false);
 
   // Load persisted config on mount
   useEffect(() => {
@@ -683,6 +684,7 @@ export const SettingsView: React.FC = () => {
         chatterbox: cfg.chatterbox_url ?? "http://127.0.0.1:18005",
       });
       setWooshDir(cfg.woosh_dir ?? "");
+      setSingleModelMode(cfg.single_model_mode ?? false);
     }).catch(() => {});
   }, []);
 
@@ -704,6 +706,12 @@ export const SettingsView: React.FC = () => {
     } catch {
       setChatterboxHealth("offline");
     }
+  };
+
+  const handleSingleModelModeToggle = async (enabled: boolean) => {
+    setSingleModelMode(enabled);
+    const cfg = await invoke<AppConfig>("get_app_config");
+    await invoke("save_app_config", { config: { ...cfg, single_model_mode: enabled } });
   };
 
   const handleBrowseWoosh = async () => {
@@ -732,6 +740,39 @@ export const SettingsView: React.FC = () => {
           <h1 style={{ fontSize: 22, fontWeight: 600, margin: 0, lineHeight: 1.2 }}>Settings</h1>
           <div style={{ fontSize: 12, color: "var(--fg-3)", marginTop: 6 }}>
             Inference server URLs and model downloads. Use the <strong>Models</strong> tab to load and unload models.
+          </div>
+        </div>
+
+        {/* ── Memory settings ───────────────────────────────────────────── */}
+        <div style={{ marginBottom: 24 }}>
+          <div className="eyebrow" style={{ marginBottom: 12 }}>Memory</div>
+          <div style={{
+            border: "1px solid var(--line-1)",
+            background: "var(--bg-1)",
+            borderRadius: 3,
+            padding: "12px 16px",
+            display: "flex",
+            alignItems: "center",
+            gap: 14,
+          }}>
+            <input
+              id="single-model-mode"
+              type="checkbox"
+              checked={singleModelMode}
+              onChange={(e) => handleSingleModelModeToggle(e.target.checked)}
+              style={{ cursor: "pointer", flexShrink: 0 }}
+            />
+            <div style={{ display: "flex", flexDirection: "column", gap: 2 }}>
+              <label
+                htmlFor="single-model-mode"
+                style={{ fontSize: 12, fontWeight: 600, cursor: "pointer" }}
+              >
+                Single model mode
+              </label>
+              <span style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.5 }}>
+                Auto-unload other models before each generation to limit RAM usage.
+              </span>
+            </div>
           </div>
         </div>
 
