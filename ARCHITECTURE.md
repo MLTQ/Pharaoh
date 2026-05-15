@@ -13,10 +13,19 @@ Pharaoh is a unified desktop application for producing AI-generated audio dramas
 The name reflects the central metaphor: the user or AI agent commands a pyramid
 to be built — the audio drama is the monument.
 
-The app integrates three open-source generative models:
-- **Qwen3-TTS** — voice synthesis (clone, design, preset)
+The app integrates four open-source generative models:
+- **Chatterbox Turbo** (Resemble AI 0.5B) — primary dialogue model; 0-shot voice cloning from a reference WAV, inline paralinguistic tags (`[sigh]`, `[chuckle]`, etc.)
+- **Qwen3-TTS** — palette reference synthesis (VoiceDesign) and legacy voice modes (CustomVoice, Clone)
 - **Woosh (Sony AI)** — sound effects (text-to-audio, video-to-audio)
 - **ACE-Step 1.5** — music (text2music, cover, repaint, lego, extract)
+
+**Character voice workflow (current):**
+1. Author 1–5 named *emotional states* per character (e.g. `neutral`, `sardonic`, `dread`) in the Character Designer.
+2. Generate Qwen3 VoiceDesign reference takes for each state — audition and **approve** the best one as the palette reference.
+3. In the script, set the `emotion` column on each DIALOGUE row to select the matching palette state.
+4. Chatterbox Turbo 0-shot clones the approved reference take for every production line, preserving voice identity across all takes while emotional colouring varies per beat.
+
+This keeps voice identity stable across all takes (Chatterbox always clones the same reference) while letting performance vary per emotional beat.
 
 These are organized around a "pyramidal story structure" that mirrors the natural
 hierarchy of dramatic production:
@@ -143,11 +152,30 @@ via headless CLI, sharing the same underlying data model and operations.
       "name": "Mira",
       "description": "string",
       "voice_assignment": {
-        "model": "CustomVoice | VoiceDesign | Clone | FineTuned",
-        "speaker": "Vivian",
+        "model": "Chatterbox | CustomVoice | VoiceDesign | Clone | FineTuned",
+        "speaker": null,
         "instruct_default": "tired, edge of tears",
         "ref_audio_path": null,
-        "ref_transcript": null
+        "ref_transcript": null,
+        "base_voice_description": "A female voice, late 30s, British-Nigerian...",
+        "emotional_palette": [
+          {
+            "emotion": "neutral",
+            "label": "Neutral",
+            "direction": "Controlled, professional. Holding something back.",
+            "ref_audio_path": "/path/to/characters/CHAR_MIRA/palette/neutral_7.wav",
+            "ref_transcript": null,
+            "qa_status": "approved"
+          },
+          {
+            "emotion": "dread",
+            "label": "Dread",
+            "direction": "The control is cracking. Almost private.",
+            "ref_audio_path": null,
+            "ref_transcript": null,
+            "qa_status": "unreviewed"
+          }
+        ]
       }
     }
   ],
@@ -186,16 +214,18 @@ via headless CLI, sharing the same underlying data model and operations.
 One row per audio event. This is the core working document for each scene.
 
 ```
-scene,track,type,character,prompt,file,start_ms,duration_ms,loop,pan,gain_db,instruct,fade_in_ms,fade_out_ms,reverb_send,notes
+scene,track,type,character,prompt,file,start_ms,duration_ms,loop,pan,gain_db,instruct,fade_in_ms,fade_out_ms,reverb_send,emotion,notes
 ```
 
 **Field notes:**
 - `type`: `DIALOGUE | SFX | BED | MUSIC | DIRECTION`
 - `file`: empty string = unresolved; populated = resolved asset path
 - `start_ms`: empty = unresolved (pre-backfill); integer = placed on timeline
+- `duration_ms`: auto-populated from WAV header when `file` is assigned; never set manually
 - `loop`: `true` for beds and continuous ambience tracks
 - `pan`: -100 (full left) to 100 (full right)
 - `reverb_send`: 0.0–1.0 wet send amount
+- `emotion`: palette emotion key (e.g. `neutral`, `sardonic`); selects which reference take Chatterbox clones; empty = first palette entry
 - `DIRECTION` rows carry no audio — composition notes only, used by agent
 
 **Example (mixed resolved/unresolved):**
@@ -244,13 +274,14 @@ Model weights are loaded once — subsequent generations pay only inference cost
 
 ### Ports (configurable in settings.json)
 
-| Server | Default port |
-|--------|-------------|
-| MCP    | 18000       |
-| TTS    | 18001       |
-| SFX    | 18002       |
-| Music  | 18003       |
-| Post   | 18004       |
+| Server      | Default port |
+|-------------|-------------|
+| MCP         | 18000       |
+| TTS         | 18001       |
+| SFX         | 18002       |
+| Music       | 18003       |
+| Post        | 18004       |
+| Chatterbox  | 18005       |
 
 ### Common endpoints (all three servers)
 
@@ -297,22 +328,71 @@ pharaoh://projects/{id}/pipeline                per-scene per-stage completion m
 **MCP tools:**
 
 ```
-project_status      { project_id }                          → stage completion matrix
-read_script         { project_id, scene_slug }              → script rows as JSON
-update_script_row   { project_id, scene_slug, row_index, updates }
-generate_tts        { project_id, scene_slug, row_index, output_path, ... } → job_id
-generate_sfx        { project_id, scene_slug, row_index, output_path, ... } → job_id
-generate_music      { project_id, scene_slug, row_index, output_path,
-                      batch_size }                          → job_id | job_id[]
-job_status          { server, job_id }                      → status, progress, output_path
-wait_for_job        { server, job_id, timeout_seconds }     → blocks until done
-list_assets         { project_id, scene_slug, qa_status? }  → asset list
-qa_approve          { audio_path, notes? }
-qa_reject           { audio_path, notes }
-regenerate_asset    { audio_path, output_path? }            → job_id
-server_health       { server? }                             → health for all or one
-compose_scene       { project_id, scene_slug }
-render_final        { project_id, crossfade_ms? }
+── Project & script ──────────────────────────────────────────────────────────
+project_status        { project_id }                        → stage completion matrix
+read_script           { project_id, scene_slug }            → script rows as JSON
+update_script_row     { project_id, scene_slug, row_index, updates }
+
+── Generation ────────────────────────────────────────────────────────────────
+generate_tts          { project_id, scene_slug, row_index, output_path, ... }
+                      Auto-routes to Chatterbox when character model=="Chatterbox"
+                      and row has a non-empty emotion field. No extra params needed.
+                      Falls back to Qwen3 VoiceDesign/Clone/CustomVoice otherwise.
+                      → job_id
+
+generate_chatterbox   { project_id, scene_slug, row_index, output_path,
+                        ref_audio_path?, emotion?, exaggeration?, cfg_weight?, seed? }
+                      Direct Chatterbox Turbo call. ref_audio_path auto-resolves
+                      from emotional palette if omitted.
+                      → job_id
+
+generate_sfx          { project_id, scene_slug, row_index, output_path, ... } → job_id
+generate_music        { project_id, scene_slug, row_index, output_path,
+                        batch_size }                        → job_id | job_id[]
+
+── Emotional palette (character voice identity) ──────────────────────────────
+generate_palette_take { project_id, character_id, emotion, direction,
+                        test_line, seed? }
+                      Generate a Qwen3 VoiceDesign reference take for one palette
+                      slot. Combines base_voice_description + direction automatically.
+                      Saves to characters/{id}/palette/{emotion}_{seed}.wav.
+                      → { job_id, output_path }
+
+approve_palette_take  { project_id, character_id, emotion, audio_path }
+                      Lock a palette take as the reference for this emotion.
+                      Sets voice_assignment.model = "Chatterbox" if not already set.
+
+list_character_palette { project_id, character_id }
+                      → all palette entries with qa_status and ref_audio_path
+
+── Jobs & QA ─────────────────────────────────────────────────────────────────
+job_status            { server, job_id }                    → status, progress, output_path
+wait_for_job          { server, job_id, timeout_seconds }   → blocks until done
+list_assets           { project_id, scene_slug, qa_status? } → asset list
+qa_approve            { audio_path, notes? }
+qa_reject             { audio_path, notes }
+regenerate_asset      { audio_path, output_path? }          → job_id
+unload_model          { server }
+
+── Composition ───────────────────────────────────────────────────────────────
+server_health         { server? }                           → health for all or one
+compose_scene         { project_id, scene_slug }            → render.wav path
+render_final          { project_id, crossfade_ms? }         → final.wav path
+```
+
+**Typical agent workflow for a new character:**
+```python
+# 1. Design the base voice
+generate_palette_take(project_id, "CHAR_MIRA", "neutral",
+    direction="Warm but controlled. Professional mask over suppressed fear.",
+    test_line="I knew what they'd find before they opened the door.")
+
+# 2. Audition takes (different seeds), approve the best one
+approve_palette_take(project_id, "CHAR_MIRA", "neutral", "/path/neutral_7.wav")
+
+# 3. Generate production lines — routing is automatic
+generate_tts(project_id, "s01_the_office", row_index=3, output_path="mira_01.wav")
+# → Chatterbox clones neutral_7.wav; no explicit ref_audio_path needed
 ```
 
 **Claude Desktop configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
@@ -384,6 +464,38 @@ GET  /languages
 - FlashAttention 2 unavailable on Windows without significant setup; fall back to SDPA
 - Can enter infinite generation loops (known upstream issue) — set `max_new_tokens` conservatively, expose seed control
 - Output sample rate: 24kHz — normalize to 48kHz before composition
+
+### Chatterbox server — port 18005
+
+Wraps Chatterbox Turbo (Resemble AI, 0.5B). Primary dialogue synthesis engine.
+Lives at `inference/chatterbox_server.py`. Isolated venv: `inference/.venv-chatterbox`.
+
+```
+POST /generate/clone
+     body: { text, ref_audio_path, ref_transcript?, exaggeration?, cfg_weight?,
+             temperature?, seed?, output_path, job_id? }
+
+POST /load / POST /unload
+GET  /health
+GET  /jobs/{job_id}
+```
+
+**Key parameters:**
+- `text`: dialogue text, may include inline paralinguistic tags: `[sigh]`, `[chuckle]`, `[laugh]`, `[gasp]`, etc.
+- `ref_audio_path`: the approved palette `.wav` — sets the vocal identity to clone
+- `exaggeration`: 0–1; how strongly to colour the performance toward the reference take's style (default 0.5)
+- `cfg_weight`: classifier-free guidance strength (default 0.5)
+- `ref_transcript`: optional; Chatterbox Turbo doesn't require it
+
+**Important:** `ref_audio_path` must be a **clean, isolated voice sample** (no music, SFX, or reverb). Use Qwen3 VoiceDesign palette takes for this, not scene audio. The palette workflow exists specifically to produce clean reference material.
+
+**Sidecar:** written to `{output}.meta.json` with `model="chatterbox-turbo"`, `parent=ref_audio_path`. The `parent` field is the lineage link back to the palette take used.
+
+**Known gotchas:**
+- Venv is isolated from TTS venv (different torch pin). Never install into the same env.
+- Cloning quality degrades sharply on references shorter than 3 seconds or longer than 15 seconds.
+- On first load, downloads ~1GB of weights from HuggingFace. Subsequent starts are instant.
+- VRAM: ~3GB at 0.5B.
 
 ### SFX server — port 18002
 
@@ -769,11 +881,12 @@ appropriate code and leaves the project in a resumable state.
 All composition and rendering operates at 48kHz / 24-bit.
 
 ### VRAM budget guidance (approximate)
-| Model | VRAM (0.6B) | VRAM (1.7B) | VRAM (XL/4B) |
-|-------|-------------|-------------|--------------|
-| Qwen3-TTS | ~4GB | ~6GB | — |
-| Woosh | ~2GB (DFlow) | ~4GB (Flow) | — |
-| ACE-Step | ~4GB | ~8GB | ~12–20GB |
+| Model            | VRAM (small)    | VRAM (large)  |
+|------------------|-----------------|---------------|
+| Chatterbox Turbo | ~3GB (0.5B)     | —             |
+| Qwen3-TTS        | ~4GB (0.6B)     | ~6GB (1.7B)   |
+| Woosh            | ~2GB (DFlow)    | ~4GB (Flow)   |
+| ACE-Step         | ~4GB (base)     | ~12–20GB (XL) |
 
 The model manager should default to loading only one model at a time on
 consumer hardware (<= 16GB VRAM). Users with 24GB+ can configure concurrent loading.
