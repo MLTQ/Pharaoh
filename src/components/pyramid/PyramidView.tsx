@@ -3,7 +3,7 @@ import { Icon, StatusRing } from "../shared/atoms";
 import type { MockProject, MockCastMember, MockScene } from "../../lib/types";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
-import { createScene, readScript } from "../../lib/tauriCommands";
+import { createScene, readScript, readRenderMeta } from "../../lib/tauriCommands";
 import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
 
 interface PyramidViewProps {
@@ -24,9 +24,11 @@ interface NewSceneForm {
 export const PyramidView: React.FC<PyramidViewProps> = ({
   project, scenes, cast, activeSceneNo, onOpenScene, onOpenBible,
 }) => {
-  const { realProjectId, addScene } = useProjectStore();
+  const { realProjectId, addScene, projectsDir } = useProjectStore();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
+  const [manualScale, setManualScale] = useState<number | null>(null);
+  const [episodeDurationSec, setEpisodeDurationSec] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
   const [formError, setFormError] = useState<string | null>(null);
@@ -73,6 +75,15 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
+
+  // Load episode duration from output/final.wav.meta.json when available.
+  useEffect(() => {
+    if (!realProjectId || !projectsDir) return;
+    const metaPath = `${projectsDir}/${realProjectId}/output/final.wav`;
+    readRenderMeta(metaPath)
+      .then((m) => { if (m) setEpisodeDurationSec(m.duration_seconds); })
+      .catch(() => {});
+  }, [realProjectId, projectsDir, scenes.map((s) => s.status).join("|")]);
 
   const W = 1280, H = 760;
   const APEX_X = 640, APEX_Y = 60;
@@ -227,7 +238,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
         <div style={{
           width: W, height: H, position: "absolute",
           top: "50%", left: "50%",
-          transform: `translate(-50%, -50%) scale(${scale})`,
+          transform: `translate(-50%, -50%) scale(${manualScale ?? scale})`,
           transformOrigin: "center center",
         }}>
           {/* SVG silhouette + structure lines */}
@@ -286,7 +297,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               <div className="apex-title">{project.title}</div>
               <div className="apex-logline">"{project.logline}"</div>
               <div className="apex-meta">
-                <div className="row"><span className="k">Runtime</span><span className="v">{project.runtime}</span></div>
+                <div className="row"><span className="k">Runtime</span><span className="v">{episodeDurationSec != null ? `${Math.floor(episodeDurationSec / 60)}m ${Math.round(episodeDurationSec % 60)}s` : project.runtime}</span></div>
                 <div className="row"><span className="k">Genre</span><span className="v">{project.genre}</span></div>
                 <div className="row"><span className="k">Creator</span><span className="v">{project.creator}</span></div>
               </div>
@@ -478,14 +489,22 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
       {/* Coord display */}
       <div className="pyramid-coord">
-        <span>X 0.000</span><span>Y 0.000</span><span>ZOOM 1.00</span><span>SCALE 1:48</span>
+        <span>X 0.000</span><span>Y 0.000</span>
+        <span>ZOOM {((manualScale ?? scale) * 100).toFixed(0)}%</span>
+        <span>SCALE 1:48</span>
       </div>
 
       {/* Zoom controls */}
       <div className="pyramid-zoom">
-        <button title="Zoom in"><Icon name="plus" style={{ width: 14, height: 14 }} /></button>
-        <button title="Zoom out"><Icon name="minus" style={{ width: 14, height: 14 }} /></button>
-        <button title="Fit"><Icon name="fit" style={{ width: 14, height: 14 }} /></button>
+        <button title="Zoom in" onClick={() => setManualScale((s) => Math.min((s ?? scale) * 1.25, 3))}>
+          <Icon name="plus" style={{ width: 14, height: 14 }} />
+        </button>
+        <button title="Zoom out" onClick={() => setManualScale((s) => Math.max((s ?? scale) * 0.8, 0.2))}>
+          <Icon name="minus" style={{ width: 14, height: 14 }} />
+        </button>
+        <button title="Fit to window" onClick={() => setManualScale(null)}>
+          <Icon name="fit" style={{ width: 14, height: 14 }} />
+        </button>
       </div>
     </div>
   );

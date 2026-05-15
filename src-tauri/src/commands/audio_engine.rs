@@ -366,6 +366,123 @@ pub async fn render_scene(
     render_scene_with_projects_dir(&projects_dir, &project_id, &scene_slug, target_lufs).await
 }
 
+/// Update a scene's `status` field inside `storyboard.json`.
+/// Best-effort — silently ignores any I/O or parse errors so a status write
+/// failure never aborts a successful render.
+fn update_storyboard_scene_status(
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+    new_status: &str,
+) {
+    let storyboard_path = crate::app_support::project_dir(projects_dir, project_id)
+        .join("storyboard.json");
+    let bytes = match std::fs::read(&storyboard_path) {
+        Ok(b) => b,
+        Err(_) => return,
+    };
+    let mut v: serde_json::Value = match serde_json::from_slice(&bytes) {
+        Ok(v) => v,
+        Err(_) => return,
+    };
+    if let Some(scenes) = v.get_mut("scenes").and_then(|s| s.as_array_mut()) {
+        for scene in scenes.iter_mut() {
+            if scene.get("slug").and_then(|s| s.as_str()) == Some(scene_slug) {
+                if let Some(obj) = scene.as_object_mut() {
+                    obj.insert("status".to_string(), serde_json::json!(new_status));
+                }
+            }
+        }
+    }
+    let _ = std::fs::write(
+        &storyboard_path,
+        serde_json::to_string_pretty(&v).unwrap_or_default(),
+    );
+}
+
+/// Build an ffmpeg `volume` filter for a clip.
+///
+/// `gain_envelope_json` holds a JSON array of `{t_frac, db}` breakpoints (stored
+/// in the `gain_envelope` CSV column).  If the array is empty or unparseable the
+/// function falls back to a flat `volume={linear}` using only `gain_db`.
+///
+/// When an envelope is present the function emits a piecewise-linear amplitude
+/// expression with `eval=frame`.  The filter must be placed **before** `adelay`
+/// in the per-clip chain so that ffmpeg's `t` variable starts at 0 for the first
+/// sample of the clip (thanks to the preceding `asetpts=PTS-STARTPTS`).
+fn build_volume_filter(gain_db: f32, gain_envelope_json: &str, duration_sec: Option<f32>) -> String {
+    let flat_vol = db_to_linear(gain_db);
+    let flat = format!("volume={:.4}", flat_vol);
+
+    // Parse breakpoints from JSON.  Accept graceful failure.
+    let raw: Vec<serde_json::Value> = if gain_envelope_json.trim().is_empty() {
+        vec![]
+    } else {
+        serde_json::from_str(gain_envelope_json).unwrap_or_default()
+    };
+
+    let mut pts: Vec<(f32, f32)> = raw
+        .iter()
+        .filter_map(|v| {
+            let t = v.get("t_frac")?.as_f64()? as f32;
+            let db = v.get("db")?.as_f64()? as f32;
+            Some((t.clamp(0.0, 1.0), db))
+        })
+        .collect();
+
+    pts.sort_by(|a, b| a.0.partial_cmp(&b.0).unwrap_or(std::cmp::Ordering::Equal));
+    // Drop breakpoints that are too close together.
+    pts.dedup_by(|a, b| (a.0 - b.0).abs() < 1e-4);
+
+    let dur = match duration_sec {
+        Some(d) if d > 0.0 && !pts.is_empty() => d,
+        _ => return flat,
+    };
+
+    if pts.is_empty() {
+        return flat;
+    }
+
+    // Convert to (time_sec, linear_amplitude) pairs.
+    // Envelope db values are *additive* on top of the base gain_db.
+    let points: Vec<(f32, f32)> = pts
+        .iter()
+        .map(|(t_frac, db)| (t_frac * dur, db_to_linear(gain_db + db)))
+        .collect();
+
+    if points.len() == 1 {
+        return format!("volume={:.4}", points[0].1);
+    }
+
+    // Build the piecewise expression right-to-left.
+    // Rightmost region: flat hold at the last amplitude.
+    let mut expr = format!("{:.6}", points.last().unwrap().1);
+
+    for i in (0..points.len() - 1).rev() {
+        let (t0, v0) = points[i];
+        let (t1, v1) = points[i + 1];
+        let span = t1 - t0;
+        // Linear interpolation in the amplitude domain for this segment.
+        let seg = if span < 1e-6 || (v1 - v0).abs() < 1e-6 {
+            format!("{:.6}", v0)
+        } else {
+            format!("{:.6}+{:.6}*(t-{:.6})/{:.6}", v0, v1 - v0, t0, span)
+        };
+        // if(lt(t, T1), seg_expr, right_expr)
+        expr = format!("if(lt(t,{:.6}),{},{})", t1, seg, expr);
+    }
+
+    // Flat hold before the first breakpoint (when it is not at t=0).
+    if points[0].0 > 1e-4 {
+        expr = format!(
+            "if(lt(t,{:.6}),{:.6},{})",
+            points[0].0, points[0].1, expr
+        );
+    }
+
+    format!("volume='{}':eval=frame", expr)
+}
+
 pub async fn render_scene_with_projects_dir(
     projects_dir: &Path,
     project_id: &str,
@@ -414,7 +531,6 @@ pub async fn render_scene_with_projects_dir(
     for (i, row) in placed.iter().enumerate() {
         let start_ms: u64 = row.start_ms.parse().unwrap_or(0);
         let gain_db: f32 = row.gain_db.parse().unwrap_or(0.0);
-        let vol = db_to_linear(gain_db);
         let pan: f32 = row.pan.parse::<f32>().unwrap_or(0.0).clamp(-1.0, 1.0);
 
         let mut filters: Vec<String> = Vec::new();
@@ -454,11 +570,14 @@ pub async fn render_scene_with_projects_dir(
             }
         }
 
+        // Apply track gain (envelope-aware).  Must come before adelay so that
+        // ffmpeg's `t` variable is clip-relative (0 = first sample of this clip)
+        // after the preceding asetpts=PTS-STARTPTS.
+        let duration_sec = duration_ms_opt.map(|d| d as f32 / 1000.0);
+        filters.push(build_volume_filter(gain_db, &row.gain_envelope, duration_sec));
+
         // Delay clip to its timeline position
         filters.push(format!("adelay={}|{}", start_ms, start_ms));
-
-        // Apply track gain
-        filters.push(format!("volume={:.4}", vol));
 
         // Stereoize so the pan filter has two channels regardless of source
         filters.push("aformat=channel_layouts=stereo".to_string());
@@ -642,6 +761,9 @@ pub async fn render_scene_with_projects_dir(
         let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
     }
 
+    // Mark the scene as composed in storyboard.json so the pyramid view updates.
+    update_storyboard_scene_status(projects_dir, project_id, scene_slug, "composed");
+
     Ok(output_path.to_string_lossy().to_string())
 }
 
@@ -815,6 +937,11 @@ pub async fn render_episode_with_projects_dir(
             "crossfade_ms": crossfade_ms,
         });
         let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
+    }
+
+    // Mark every scene that was rendered as "rendered" in storyboard.json.
+    for slug in &scene_slugs {
+        update_storyboard_scene_status(projects_dir, project_id, slug, "rendered");
     }
 
     Ok(output_path.to_string_lossy().to_string())
