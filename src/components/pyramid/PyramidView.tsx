@@ -76,7 +76,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
   const W = 1280, H = 760;
   const APEX_X = 640, APEX_Y = 60;
-  const APEX_W = 360;
+  const APEX_W = 340;
   const BASE_Y = 420;
   const PLATE_W = 184, PLATE_H = 188;
 

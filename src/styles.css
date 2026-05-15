@@ -193,24 +193,24 @@ input:focus, textarea:focus, select:focus { outline: none; }
 .pyramid-titlebar .eyebrow { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg-3); }
 .pyramid-titlebar .ttl { font-size: 17px; font-weight: 600; color: var(--fg-0); }
 
-.apex { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 360px; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius); cursor: pointer; transition: all 0.2s; box-shadow: 0 12px 32px -16px rgba(0,0,0,0.6); z-index: 3; }
+.apex { position: absolute; left: 50%; top: 70px; transform: translateX(-50%); width: 340px; max-height: 330px; overflow: hidden; background: var(--bg-2); border: 1px solid var(--line-2); border-radius: var(--radius); cursor: pointer; transition: all 0.2s; box-shadow: 0 12px 32px -16px rgba(0,0,0,0.6); z-index: 3; }
 .apex:hover { border-color: var(--fg-3); }
 .apex.active { border-color: var(--fg-0); box-shadow: 0 0 0 1px var(--fg-0), 0 12px 32px -16px rgba(0,0,0,0.6); }
-.apex-head { padding: 8px 12px; border-bottom: 1px solid var(--line-1); display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-3); }
-.apex-body { padding: 14px 16px; }
-.apex-title { font-size: 21px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; color: var(--fg-0); }
-.apex-logline { font-size: 12px; line-height: 1.55; color: var(--fg-1); margin-bottom: 12px; font-style: italic; }
-.apex-meta { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; font-family: var(--font-mono); font-size: 10px; }
-.apex-meta .row { display: flex; flex-direction: column; gap: 2px; }
+.apex-head { padding: 6px 12px; border-bottom: 1px solid var(--line-1); display: flex; align-items: center; justify-content: space-between; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--fg-3); }
+.apex-body { padding: 10px 14px 10px; }
+.apex-title { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; margin-bottom: 4px; color: var(--fg-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.apex-logline { font-size: 11px; line-height: 1.5; color: var(--fg-1); margin-bottom: 10px; font-style: italic; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.apex-meta { display: grid; grid-template-columns: 80px 1fr 80px; gap: 8px; font-family: var(--font-mono); font-size: 10px; }
+.apex-meta .row { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .apex-meta .k { color: var(--fg-3); letter-spacing: 0.1em; text-transform: uppercase; }
-.apex-meta .v { color: var(--fg-0); }
-.apex-cast { padding: 10px 16px; border-top: 1px solid var(--line-1); background: var(--bg-1); display: flex; flex-direction: column; gap: 6px; }
-.apex-cast-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-3); margin-bottom: 4px; }
-.cast-row { display: grid; grid-template-columns: 14px 1fr auto auto; gap: 10px; align-items: center; font-size: 11px; }
-.cast-row .av { width: 14px; height: 14px; border-radius: 50%; border: 1px solid var(--line-2); }
-.cast-row .name { color: var(--fg-0); }
-.cast-row .voice { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); }
-.cast-row .scenes { font-family: var(--font-mono); font-size: 10px; color: var(--fg-4); }
+.apex-meta .v { color: var(--fg-0); display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.apex-cast { padding: 8px 14px; border-top: 1px solid var(--line-1); background: var(--bg-1); display: flex; flex-direction: column; gap: 4px; }
+.apex-cast-title { font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.2em; text-transform: uppercase; color: var(--fg-3); margin-bottom: 2px; }
+.cast-row { display: grid; grid-template-columns: 12px 1fr auto auto; gap: 8px; align-items: center; font-size: 10px; }
+.cast-row .av { width: 12px; height: 12px; border-radius: 50%; border: 1px solid var(--line-2); }
+.cast-row .name { color: var(--fg-0); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cast-row .voice { font-family: var(--font-mono); font-size: 9px; color: var(--fg-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.cast-row .scenes { font-family: var(--font-mono); font-size: 9px; color: var(--fg-4); flex-shrink: 0; }
 
 .tier-rule { position: absolute; left: 28px; right: 28px; height: 1px; background: var(--line-1); pointer-events: none; }
 .tier-label { position: absolute; left: 32px; font-family: var(--font-mono); font-size: 9px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--fg-4); pointer-events: none; background: var(--bg-1); padding: 0 8px; transform: translateY(-50%); }
