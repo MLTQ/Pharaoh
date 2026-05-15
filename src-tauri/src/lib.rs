@@ -72,6 +72,7 @@ pub fn run() {
             commands::sidecar::read_sidecar,
             commands::sidecar::list_generated_audio_assets,
             commands::sidecar::get_takes,
+            commands::sidecar::list_palette_takes,
             commands::sidecar::update_sidecar_qa,
             // Audio utilities
             commands::audio::get_waveform_peaks,
