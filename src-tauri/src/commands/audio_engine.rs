@@ -532,7 +532,7 @@ pub async fn render_scene_with_projects_dir(
         let post_duck_labels: Vec<String> = if do_ducking {
             for (j, &idx) in duck_target_idxs.iter().enumerate() {
                 filter_parts.push(format!(
-                    "[a{}][vb{}]sidechaincompress=threshold=0.05:ratio=8:attack=80:release=300:makeup=1[d{}]",
+                    "[a{}][vb{}]sidechaincompress=threshold=0.015:ratio=12:attack=8:release=600:makeup=1[d{}]",
                     idx, j, idx
                 ));
             }
