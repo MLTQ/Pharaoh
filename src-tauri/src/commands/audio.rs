@@ -28,6 +28,41 @@ pub fn get_waveform_peaks(path: String, num_peaks: usize) -> Result<Vec<f32>> {
     Ok(peaks)
 }
 
+/// Extract `num_peaks` amplitude peaks for a sub-range of a WAV file.
+///
+/// `start_ms` / `end_ms` are clamped to [0, duration]. Useful for high-zoom
+/// waveform display where you need more detail than the full-file peaks cache
+/// provides. Results are cached to `<wav_path>.wpeaks.<s>-<e>-<n>.json`.
+///
+/// Cost profile:
+///   cold (uncached): seeks to start_sample, reads only the window — fast even
+///     for large files because hound seeks by skipping chunks, not re-reading.
+///   warm (cached): sub-millisecond JSON read, same as get_waveform_peaks.
+#[tauri::command]
+pub fn get_window_peaks(
+    path: String,
+    start_ms: f64,
+    end_ms: f64,
+    num_peaks: usize,
+) -> Result<Vec<f32>> {
+    if num_peaks == 0 {
+        return Ok(vec![]);
+    }
+    // Round to nearest 10ms for cache key stability during smooth panning.
+    let start_key = ((start_ms / 10.0).round() as i64).max(0);
+    let end_key = ((end_ms / 10.0).round() as i64).max(0);
+    let cache_path = PathBuf::from(format!(
+        "{}.wpeaks.{}-{}-{}.json",
+        path, start_key, end_key, num_peaks
+    ));
+    if let Some(cached) = read_cached_peaks(&cache_path, &path) {
+        return Ok(cached);
+    }
+    let peaks = compute_window_peaks(&path, start_ms, end_ms, num_peaks)?;
+    let _ = write_cached_peaks(&cache_path, &peaks);
+    Ok(peaks)
+}
+
 fn peaks_cache_path(audio_path: &str, num_peaks: usize) -> PathBuf {
     PathBuf::from(format!("{}.peaks.{}.json", audio_path, num_peaks))
 }
@@ -77,6 +112,83 @@ fn compute_waveform_peaks(path: &str, num_peaks: usize) -> Result<Vec<f32>> {
         }
         hound::SampleFormat::Float => {
             for (i, sample) in reader.samples::<f32>().filter_map(|s| s.ok()).enumerate() {
+                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                peaks[peak_index] = peaks[peak_index].max(sample.abs());
+            }
+        }
+    }
+    for peak in &mut peaks {
+        *peak = peak.min(1.0);
+    }
+    Ok(peaks)
+}
+
+/// Stream only the samples between `start_ms` and `end_ms` to get `num_peaks`
+/// peaks at full resolution for that window.
+fn compute_window_peaks(
+    path: &str,
+    start_ms: f64,
+    end_ms: f64,
+    num_peaks: usize,
+) -> Result<Vec<f32>> {
+    let mut reader = hound::WavReader::open(path)
+        .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
+    let spec = reader.spec();
+    let sample_rate = spec.sample_rate as f64;
+    let channels = spec.channels as usize;
+    let total_samples = reader.duration() as usize; // frames (not samples per channel)
+    if total_samples == 0 {
+        return Ok(vec![0.0; num_peaks]);
+    }
+
+    let duration_ms = total_samples as f64 / sample_rate * 1000.0;
+    let start_ms = start_ms.clamp(0.0, duration_ms);
+    let end_ms = end_ms.clamp(start_ms, duration_ms);
+    let window_frames = ((end_ms - start_ms) / 1000.0 * sample_rate) as usize;
+    if window_frames == 0 {
+        return Ok(vec![0.0; num_peaks]);
+    }
+
+    let start_frame = (start_ms / 1000.0 * sample_rate) as u32;
+    // seek() positions to a sample frame (all channels)
+    reader
+        .seek(start_frame)
+        .map_err(|e| Error::Other(format!("waveform seek failed: {}", e)))?;
+
+    let max_val = match spec.bits_per_sample {
+        8  => i32::from(i8::MAX) as f32,
+        16 => i32::from(i16::MAX) as f32,
+        24 => (1i32 << 23) as f32,
+        32 => i32::MAX as f32,
+        _  => i16::MAX as f32,
+    };
+
+    let frames_per_peak = (window_frames / num_peaks).max(1);
+    // Each "frame" is channels samples; read frames_per_peak × channels per bucket.
+    let samples_per_peak = frames_per_peak * channels;
+    let total_window_samples = window_frames * channels;
+
+    let mut peaks = vec![0.0_f32; num_peaks];
+    match spec.sample_format {
+        hound::SampleFormat::Int => {
+            for (i, sample) in reader
+                .samples::<i32>()
+                .filter_map(|s| s.ok())
+                .take(total_window_samples)
+                .enumerate()
+            {
+                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                peaks[peak_index] =
+                    peaks[peak_index].max((sample as f32 / max_val).abs());
+            }
+        }
+        hound::SampleFormat::Float => {
+            for (i, sample) in reader
+                .samples::<f32>()
+                .filter_map(|s| s.ok())
+                .take(total_window_samples)
+                .enumerate()
+            {
                 let peak_index = (i / samples_per_peak).min(num_peaks - 1);
                 peaks[peak_index] = peaks[peak_index].max(sample.abs());
             }

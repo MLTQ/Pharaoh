@@ -5,6 +5,7 @@ import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import {
   getWaveformPeaks,
+  getWindowPeaks,
   importAudioAsset,
   listGeneratedAudioAssets,
   processClipAsset,
@@ -82,7 +83,12 @@ function curveName(amount: number, reverse = false): string {
   return "tri";
 }
 
+// Above this zoom level we fetch high-res window peaks from the backend instead
+// of slicing the full-file peaks, so the display stays sharp at high zoom.
+const WINDOW_PEAKS_ZOOM_THRESHOLD = 4;
+
 interface CropWaveformProps {
+  audioPath: string | null;
   peaks: number[] | null;
   durationMs: number | null;
   startMs: number;
@@ -108,6 +114,7 @@ interface CropWaveformProps {
 }
 
 const CropWaveform: React.FC<CropWaveformProps> = ({
+  audioPath,
   peaks,
   durationMs,
   startMs,
@@ -148,12 +155,52 @@ const CropWaveform: React.FC<CropWaveformProps> = ({
   const fadeInVisible = active && fadeInEndMs >= visibleStartMs && fadeInEndMs <= visibleEndMs;
   const fadeOutVisible = active && fadeOutStartMs >= visibleStartMs && fadeOutStartMs <= visibleEndMs;
   const waveformHeight = 74;
+
+  // ── Window peaks (high-zoom) ──────────────────────────────────────────────
+  // At low zoom we slice the full-file peaks in JS — cheap & instant.
+  // At high zoom (>= WINDOW_PEAKS_ZOOM_THRESHOLD) we ask the backend for
+  // peaks scoped to exactly [visibleStartMs, visibleEndMs] so each pixel maps
+  // to a distinct audio frame regardless of how deep the zoom is.
+  const [windowPeaks, setWindowPeaks] = useState<number[] | null>(null);
+  const windowPeaksKey = `${audioPath}:${Math.round(visibleStartMs)}:${Math.round(visibleEndMs)}`;
+  const windowPeaksKeyRef = useRef<string>("");
+
+  useEffect(() => {
+    if (!audioPath || !active || zoom < WINDOW_PEAKS_ZOOM_THRESHOLD) {
+      setWindowPeaks(null);
+      return;
+    }
+    const key = windowPeaksKey;
+    if (key === windowPeaksKeyRef.current) return; // already fetched / in flight
+    windowPeaksKeyRef.current = key;
+    // Fetch 2 400 peaks for the window (≈ 3.3× the 720 display bars, giving
+    // the downsampler plenty to work with at any zoom level up to ~100×).
+    getWindowPeaks(audioPath, visibleStartMs, visibleEndMs, 2400)
+      .then((next) => {
+        // Guard: only apply if the viewport hasn't moved since we fired
+        if (windowPeaksKeyRef.current === key) setWindowPeaks(next);
+      })
+      .catch(() => {});
+  }, [audioPath, active, zoom, windowPeaksKey]);
+
+  // Reset window peaks when zoom drops back below threshold or asset changes
+  useEffect(() => {
+    if (zoom < WINDOW_PEAKS_ZOOM_THRESHOLD) setWindowPeaks(null);
+  }, [zoom]);
+
   const visiblePeaks = useMemo(() => {
-    if (!peaks || !active) return peaks;
+    if (!active) return null;
+    // High-zoom path: use freshly-fetched window peaks (already scoped to the
+    // visible range, so just normalize to display width).
+    if (zoom >= WINDOW_PEAKS_ZOOM_THRESHOLD && windowPeaks) {
+      return normalizePeaksForDisplay(windowPeaks, 720);
+    }
+    // Low-zoom path: slice the full-file peaks array in JS.
+    if (!peaks) return null;
     const startIndex = Math.floor((visibleStartMs / duration) * peaks.length);
     const endIndex = Math.max(startIndex + 1, Math.ceil((visibleEndMs / duration) * peaks.length));
     return normalizePeaksForDisplay(peaks.slice(startIndex, endIndex), 720);
-  }, [peaks, active, visibleStartMs, visibleEndMs, duration]);
+  }, [peaks, windowPeaks, active, zoom, visibleStartMs, visibleEndMs, duration]);
   const fadeInMidPct = (startPct + fadeInEndPct) / 2;
   const fadeOutMidPct = (fadeOutStartPct + endPct) / 2;
   const fadeInCurveYPct = clamp(52 - fadeInCurve * 28, 20, 82);
@@ -949,6 +996,7 @@ export const ClipStudioView: React.FC = () => {
 
             <div style={{ minWidth: 0, flex: 1, display: "flex", flexDirection: "column", gap: 6 }}>
               <CropWaveform
+                audioPath={selected.audio_path}
                 peaks={peaks[selected.audio_path] ?? null}
                 durationMs={selectedDuration}
                 startMs={startMs}

@@ -247,6 +247,16 @@ export const updateSidecarQa = (args: {
 export const getWaveformPeaks = (path: string, numPeaks: number): Promise<number[]> =>
   invoke("get_waveform_peaks", { path, numPeaks });
 
+/** High-resolution peaks for a sub-range [startMs, endMs] of an audio file.
+ *  Used by the zoomed waveform view to stay sharp at high zoom levels. */
+export const getWindowPeaks = (
+  path: string,
+  startMs: number,
+  endMs: number,
+  numPeaks: number,
+): Promise<number[]> =>
+  invoke("get_window_peaks", { path, startMs, endMs, numPeaks });
+
 export const getDurationMs = (path: string): Promise<number> =>
   invoke("get_duration_ms", { path });
 

@@ -75,6 +75,7 @@ pub fn run() {
             commands::sidecar::update_sidecar_qa,
             // Audio utilities
             commands::audio::get_waveform_peaks,
+            commands::audio::get_window_peaks,
             commands::audio::get_duration_ms,
             commands::audio::find_zero_crossings,
             commands::audio_enhance::upscale_audio_asset,
