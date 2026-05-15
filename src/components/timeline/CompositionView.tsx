@@ -578,10 +578,92 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     readRenderMeta(renderPath).then((m) => { if (m) setMeta(activeSceneSlug, m); }).catch(() => {});
   }, [realProjectId, activeSceneSlug, projectsDir, setMeta]);
 
-  // ── Misc ─────────────────────────────────────────────────────────────────
+  // ── Playhead scrub & spacebar ─────────────────────────────────────────────
 
   const { playing, position, play: playAudio, stop: stopAudio } = useAudioStore();
-  const playheadSec = playing ? position : 72;
+
+  // parkedSec: where the playhead sits when nothing is playing.
+  // It updates live from position while playing, and gets locked in place on stop.
+  const [parkedSec, setParkedSec] = useState(0);
+  const parkedSecRef = useRef(0);           // readable in event callbacks without stale closure
+  const isScrubbing = useRef(false);
+
+  // Keep parked position in sync with playback position
+  useEffect(() => {
+    if (playing) {
+      parkedSecRef.current = position;
+      setParkedSec(position);
+    }
+  }, [playing, position]);
+
+  const playheadSec = playing ? position : parkedSec;
+
+  // The active scene's render path (may not exist yet if never rendered)
+  const activeRenderPath = realProjectId && activeSceneSlug && projectsDir
+    ? `${projectsDir}/${realProjectId}/scenes/${activeSceneSlug}/render.wav`
+    : null;
+
+  // Ruler ref for scrub hit testing
+  const rulerRef = useRef<HTMLDivElement | null>(null);
+
+  const secFromRulerEvent = (e: { clientX: number }): number => {
+    if (!rulerRef.current) return 0;
+    const rect = rulerRef.current.getBoundingClientRect();
+    return Math.max(0, Math.min(TOTAL_SEC, (e.clientX - rect.left) / PX_PER_SEC));
+  };
+
+  const handleRulerPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.button !== 0) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
+    isScrubbing.current = true;
+    const sec = secFromRulerEvent(e);
+    parkedSecRef.current = sec;
+    setParkedSec(sec);
+    // If currently playing, seek immediately
+    if (playing) {
+      playAudio(playing, sec).catch(() => {});
+    }
+  };
+
+  const handleRulerPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbing.current) return;
+    const sec = secFromRulerEvent(e);
+    parkedSecRef.current = sec;
+    setParkedSec(sec);
+    if (playing) {
+      playAudio(playing, sec).catch(() => {});
+    }
+  };
+
+  const handleRulerPointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (!isScrubbing.current) return;
+    isScrubbing.current = false;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  };
+
+  // Spacebar: play/pause the active scene render from the parked position
+  useEffect(() => {
+    const handleKey = (e: KeyboardEvent) => {
+      // Don't steal space from text inputs, textareas, contenteditable
+      const target = e.target as HTMLElement;
+      if (target.tagName === "INPUT" || target.tagName === "TEXTAREA" || target.isContentEditable) return;
+      if (e.code !== "Space") return;
+      e.preventDefault();
+
+      if (playing) {
+        // Pause — stop and park at current position
+        const pos = parkedSecRef.current;
+        stopAudio();
+        setParkedSec(pos);
+        parkedSecRef.current = pos;
+      } else if (activeRenderPath) {
+        // Play from parked position
+        playAudio(activeRenderPath, parkedSecRef.current).catch(console.error);
+      }
+    };
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  }, [playing, activeRenderPath, playAudio, stopAudio]);
 
   useEffect(() => {
     setTitleDraft(scene.title);
@@ -612,7 +694,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     if (!path) return;
 
     if (playing === path) {
+      const pos = parkedSecRef.current;
       stopAudio();
+      setParkedSec(pos);
+      parkedSecRef.current = pos;
       return;
     }
 
@@ -625,7 +710,9 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         if (meta) setMeta(slug, meta);
       } catch (_) { /* best-effort metadata */ }
       setSceneRenderState((prev) => ({ ...prev, [slug]: "idle" }));
-      await playAudio(outputPath);
+      // Start from the parked position if this is the active scene, else from 0
+      const offset = (slug === activeSceneSlug) ? parkedSecRef.current : 0;
+      await playAudio(outputPath, offset);
     } catch (error) {
       console.error("[CompositionView] scene playback failed", error);
       setSceneRenderState((prev) => ({ ...prev, [slug]: "error" }));
@@ -838,7 +925,14 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
             ))}
           </div>
           <div className="tracks-body">
-            <div className="timeline-ruler" style={{ width: TOTAL_SEC * PX_PER_SEC }}>{ruler}</div>
+            <div
+              ref={rulerRef}
+              className="timeline-ruler"
+              style={{ width: TOTAL_SEC * PX_PER_SEC, cursor: "col-resize", userSelect: "none" }}
+              onPointerDown={handleRulerPointerDown}
+              onPointerMove={handleRulerPointerMove}
+              onPointerUp={handleRulerPointerUp}
+            >{ruler}</div>
             <div
               ref={tracksRowsRef}
               className="tracks-rows"
