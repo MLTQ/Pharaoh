@@ -55,7 +55,7 @@ def main() -> None:
     os.chdir(applio_dir)
 
     try:
-        from core import run_extract_script, run_preprocess_script, run_train_script  # type: ignore
+        from core import run_extract_script, run_preprocess_script, run_prerequisites_script, run_train_script  # type: ignore
     except ImportError as exc:
         print(f"Cannot import Applio core: {exc}", file=sys.stderr)
         print(f"  applio_dir={applio_dir}", file=sys.stderr)
@@ -72,6 +72,15 @@ def main() -> None:
     else:
         extract_gpu = "-"          # force CPU extraction on macOS / MPS
         print("[applio] No CUDA detected — using CPU for feature extraction (MPS handled in training).", flush=True)
+
+    # ── Step 0: Prerequisites (rmvpe.pt, pretrained G/D, contentvec) ─────────
+    # Downloads are skipped if the files already exist — idempotent.
+    print("[applio] Step 0 — downloading prerequisites (rmvpe.pt, pretrained G/D) if missing …", flush=True)
+    run_prerequisites_script(
+        pretraineds_hifigan=True,   # pretrained generator/discriminator for VITS init
+        models=True,                # rmvpe.pt + fcpe.pt for pitch extraction
+        exe=False,                  # skip Windows executables
+    )
 
     # ── Step 1: Preprocess ────────────────────────────────────────────────────
     print(f"[applio] Step 1/3 — preprocessing {dataset_path} …", flush=True)
