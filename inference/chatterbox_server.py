@@ -197,7 +197,17 @@ async def _run_clone(job_id: str, params: CloneParams) -> None:
             return wav
 
         jobs.update(job_id, progress=0.20)
-        wav_tensor = await loop.run_in_executor(None, _generate)
+        try:
+            # Hard timeout: 90s covers any reasonable line at 24kHz on MPS/CPU.
+            # Runaway generation (e.g. from over-long input text) is cancelled
+            # and the job is marked failed rather than blocking the queue forever.
+            wav_tensor = await asyncio.wait_for(
+                loop.run_in_executor(None, _generate),
+                timeout=90,
+            )
+        except asyncio.TimeoutError:
+            jobs.update(job_id, status="failed", error="Generation timed out after 90s — input text may be too long")
+            return
         jobs.update(job_id, progress=0.90)
 
         # wav_tensor is a torch.Tensor [1, N] at _model.sr sample rate
