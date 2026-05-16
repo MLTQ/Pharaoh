@@ -18,14 +18,16 @@ Chatterbox (paralinguistic tags, zero-shot expression) but consistently sounds
 like a specific character rather than a reference clip.
 
 Dependencies:
-  pip install rvc-python soundfile librosa  (inference/.venv-rvc)
+  inference/.venv-rvc    — rvc-python, soundfile, librosa (Python 3.9; conversion)
+  inference/.venv-applio — Applio + torch (Python 3.11; training)
 
-Training caveat:
-  rvc-python exposes inference well but training support varies by version.
-  If rvc_python.train is unavailable, _do_train() raises NotImplementedError
-  with instructions for using the full Applio/RVC repository instead.
-  Voice CONVERSION (POST /convert) always works and is the primary use-case
-  during production — training is a one-time pre-production step.
+Training:
+  POST /train calls applio_train_worker.py in .venv-applio, which drives
+  Applio's preprocess → feature-extract → VITS-train pipeline automatically.
+  Set up with: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh
+
+  Voice CONVERSION (POST /convert) uses rvc-python directly and works
+  independently of Applio — training is a one-time pre-production step.
 """
 import asyncio
 import datetime
@@ -184,92 +186,143 @@ class ConvertParams(BaseModel):
 
 def _do_train(params: TrainParams) -> None:
     """
-    Multi-step RVC training pipeline.
+    Multi-step RVC training pipeline via Applio.
 
-    NOTE: Full RVC training (feature extraction + VITS fine-tuning) requires
-    a significant portion of the RVC/Applio codebase that rvc-python does not
-    always expose as a clean Python API. If rvc_python.train is unavailable,
-    this function raises NotImplementedError with instructions for using the
-    full Applio repository.
+    Calls applio_train_worker.py in the .venv-applio Python environment.
+    Applio handles HuBERT feature extraction, preprocessing, and VITS training.
 
-    Steps when the API is available:
-      1. Resample all corpus WAVs to target sample_rate using librosa.
-      2. Run HuBERT feature extraction (bundled in rvc-python).
-      3. Train the VITS model with rvc_python.train().
-      4. Export .pth and .index files to the specified output paths.
+    Requires: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh (one-time).
+
+    Flow:
+      1. Validate corpus WAV files.
+      2. Copy corpus to Applio's dataset directory for this model.
+      3. Call applio_train_worker.py via subprocess (Applio venv Python).
+      4. Move output .pth and .index to the requested output_model_path / output_index_path.
     """
+    import json
+    import shutil
+    import subprocess
+    import tempfile
+
     import soundfile as sf  # type: ignore
 
-    try:
-        import librosa  # type: ignore
-    except ImportError:
-        raise ImportError("librosa is required for training. pip install librosa")
+    # ── Locate Applio ─────────────────────────────────────────────────────────
+    script_dir = Path(__file__).parent
+    applio_dir  = Path(os.environ.get("PHARAOH_APPLIO_DIR",  str(script_dir / ".applio")))
+    applio_venv = Path(os.environ.get("PHARAOH_APPLIO_VENV", str(script_dir / ".venv-applio")))
+    applio_python = applio_venv / "bin" / "python3"
+    worker_script = script_dir / "applio_train_worker.py"
 
-    # ── Step 1: Validate and optionally resample corpus files ────────────────
+    if not applio_dir.is_dir() or not applio_python.is_file():
+        missing = []
+        if not applio_dir.is_dir():
+            missing.append(f"Applio repo not found at {applio_dir}")
+        if not applio_python.is_file():
+            missing.append(f"Applio venv not found at {applio_venv}")
+        raise NotImplementedError(
+            "Applio is not installed. Run once to set up:\n"
+            "  PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh\n\n"
+            + "\n".join(missing) + "\n\n"
+            f"RVC conversion (POST /convert) works without Applio."
+        )
+
+    if not worker_script.is_file():
+        raise FileNotFoundError(f"applio_train_worker.py not found at {worker_script}")
+
+    # ── Validate corpus files ──────────────────────────────────────────────────
     valid_paths = []
     for p in params.corpus_paths:
         if not Path(p).is_file():
             log.warning(f"Corpus file not found, skipping: {p}")
             continue
-        data, sr = sf.read(p)
-        if sr != params.sample_rate:
-            # Resample in-memory; write a temp file adjacent to source
-            log.info(f"Resampling {p} from {sr}→{params.sample_rate}")
-            import numpy as np  # type: ignore
-            if data.ndim > 1:
-                data = data.mean(axis=1)  # collapse to mono
-            data_resampled = librosa.resample(data.astype(float), orig_sr=sr, target_sr=params.sample_rate)
-            tmp_path = str(p) + f"._tmp_{params.sample_rate}.wav"
-            sf.write(tmp_path, data_resampled, params.sample_rate)
-            valid_paths.append(tmp_path)
-        else:
-            valid_paths.append(p)
+        valid_paths.append(p)
 
     if not valid_paths:
         raise ValueError("No valid WAV files in corpus_paths")
 
-    # ── Step 2: Attempt to call rvc_python training API ──────────────────────
+    log.info(f"Training corpus: {len(valid_paths)} files")
+
+    # ── Copy corpus to Applio dataset dir ────────────────────────────────────
+    # Applio expects all training audio in one flat directory under
+    # assets/datasets/{model_name}/ (relative to the Applio repo root).
+    model_name  = params.character_name.replace(" ", "_")
+    dataset_dir = applio_dir / "assets" / "datasets" / model_name
+    dataset_dir.mkdir(parents=True, exist_ok=True)
+
+    for p in valid_paths:
+        dst = dataset_dir / Path(p).name
+        if not dst.exists():
+            shutil.copy2(p, dst)
+
+    log.info(f"Corpus staged at: {dataset_dir}  ({len(valid_paths)} files)")
+
+    # ── Write params JSON and invoke worker ───────────────────────────────────
+    worker_params = {
+        "applio_dir":   str(applio_dir),
+        "dataset_path": str(dataset_dir),
+        "model_name":   model_name,
+        "sample_rate":  params.sample_rate,
+        "epochs":       params.epochs,
+        "batch_size":   params.batch_size,
+        "f0_method":    "rmvpe",
+        "gpu":          "0",
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(worker_params, f)
+        params_file = f.name
+
     try:
-        # rvc-python training API surface varies by version.
-        # Try the most common entry points in order of preference.
-        # NOTE: fairseq (a dep of rvc-python training) has a known dataclass
-        # incompatibility with Python 3.10+. If it triggers, we raise a clear
-        # NotImplementedError directing the user to Applio instead.
-        try:
-            from rvc_python import train as rvc_train  # type: ignore
-        except Exception as import_err:
-            if "mutable default" in str(import_err) or "default_factory" in str(import_err) or "fairseq" in str(import_err).lower():
-                raise NotImplementedError(
-                    f"rvc-python training is incompatible with Python {__import__('sys').version.split()[0]} "
-                    f"due to a fairseq dataclass bug. Use Applio for one-time model training:\n"
-                    f"  1. Install Applio: https://github.com/IAHispano/Applio\n"
-                    f"  2. Add corpus from: {params.corpus_paths[0] if params.corpus_paths else 'rvc_corpus/'}\n"
-                    f"  3. Train → export {params.character_name}.pth + .index\n"
-                    f"  4. Place them in: {Path(params.output_model_path).parent}\n"
-                    f"RVC conversion (POST /convert) is unaffected and works normally."
-                ) from import_err
-            raise
-        rvc_train(
-            audio_paths=valid_paths,
-            model_name=params.character_name,
-            save_path=params.output_model_path,
-            index_path=params.output_index_path,
-            sample_rate=params.sample_rate,
-            epochs=params.epochs,
-            batch_size=params.batch_size,
+        log.info(f"Launching Applio training worker …")
+        result = subprocess.run(
+            [str(applio_python), str(worker_script), params_file],
+            capture_output=False,   # let logs stream to rvc_server stdout
+            text=True,
+            cwd=str(applio_dir),
+            timeout=7200,           # 2-hour hard cap
         )
-        log.info(f"RVC training complete: {params.output_model_path}")
-    except (ImportError, AttributeError) as exc:
-        raise NotImplementedError(
-            f"rvc-python does not expose a training API in this installation ({exc}). "
-            f"To train an RVC model, use the full Applio repository:\n"
-            f"  git clone https://github.com/IAHispano/Applio\n"
-            f"  cd Applio && python run.py\n"
-            f"Then copy the resulting .pth and .index files to:\n"
-            f"  model:  {params.output_model_path}\n"
-            f"  index:  {params.output_index_path}\n"
-            f"Once those files exist, POST /convert will work normally."
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"Applio training worker exited with code {result.returncode}. "
+                f"Check rvc_server stdout for details."
+            )
+    finally:
+        Path(params_file).unlink(missing_ok=True)
+
+    # ── Locate and move output files ──────────────────────────────────────────
+    logs_dir = applio_dir / "logs" / model_name
+    pth_files = sorted(
+        logs_dir.glob("*.pth"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    index_files = sorted(
+        logs_dir.glob("added_*.index"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    ) or sorted(
+        logs_dir.glob("*.index"),
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+
+    if not pth_files:
+        raise RuntimeError(
+            f"Training completed but no .pth found in {logs_dir}. "
+            f"Check Applio logs for errors."
         )
+
+    # Copy (not move) so Applio's own logs dir stays intact for re-training.
+    out_pth = Path(params.output_model_path)
+    out_pth.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy2(pth_files[0], out_pth)
+    log.info(f"Model saved: {out_pth}")
+
+    if index_files and params.output_index_path:
+        out_idx = Path(params.output_index_path)
+        out_idx.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(index_files[0], out_idx)
+        log.info(f"Index saved: {out_idx}")
 
 
 def _do_convert(params: ConvertParams) -> None:
@@ -412,13 +465,14 @@ async def health() -> dict:
 @app.post("/train")
 async def train(p: TrainParams) -> dict:
     """
-    Submit an RVC training job.
+    Submit an RVC training job (runs via Applio in .venv-applio).
 
-    Training is compute-heavy (10–20 min on GPU for 100 epochs).
+    Training is compute-heavy: ~10–30 min on Apple Silicon MPS, ~5–10 min on
+    a CUDA GPU, for 100 epochs on a typical corpus.
     Returns a job_id immediately; poll GET /jobs/{job_id} for progress.
 
-    If rvc-python does not expose a training API in this installation, the job
-    will fail with a NotImplementedError describing the Applio fallback path.
+    Requires: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh (one-time setup).
+    If Applio is not installed the job will fail immediately with setup instructions.
     """
     if not p.corpus_paths:
         raise HTTPException(status_code=400, detail="corpus_paths must not be empty")

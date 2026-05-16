@@ -2,10 +2,12 @@
 # One-shot setup for Pharaoh's inference servers.
 #
 # Creates isolated uv venvs alongside this script:
-#   inference/.venv-tts   → qwen-tts (transformers 4.57.3)
-#   inference/.venv-music → ace-step (transformers 4.50.0)
-#   inference/.venv-audioldm → optional upstream AudioLDM runner
-#   inference/.venv-audiosr → optional AudioSR upscaler
+#   inference/.venv-tts        → qwen-tts (transformers 4.57.3)
+#   inference/.venv-music      → ace-step (transformers 4.50.0)
+#   inference/.venv-audioldm   → optional upstream AudioLDM runner
+#   inference/.venv-audiosr    → optional AudioSR upscaler
+#   inference/.venv-rvc        → rvc-python for voice conversion (Python 3.9)
+#   inference/.venv-applio     → Applio for RVC model training (Python 3.11)
 #
 # SFX continues to use the existing ~/Code/Woosh/.venv (which Woosh manages).
 # AudioLDM long-soundscape support is optional and isolated from Woosh because
@@ -28,6 +30,9 @@ RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
+APPLIO_VENV="${SCRIPT_DIR}/.venv-applio"
+APPLIO_DIR="${PHARAOH_APPLIO_DIR:-${SCRIPT_DIR}/.applio}"
+INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -188,6 +193,52 @@ else
     hint "Optional neural upscaling: PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh"
 fi
 
+# ── Optional Applio (RVC model training) ────────────────────────────────────
+step "Applio env (.venv-applio, for RVC model training)"
+if [ "${INSTALL_APPLIO}" = "1" ]; then
+    # Clone Applio (shallow) if not already present.
+    if [ ! -d "${APPLIO_DIR}" ]; then
+        if ! command -v git >/dev/null 2>&1; then
+            fail "git is required to clone Applio."
+            hint "Install with: xcode-select --install  (macOS) or brew install git"
+            exit 1
+        fi
+        echo "  Cloning Applio (shallow) …"
+        git clone --depth 1 https://github.com/IAHispano/Applio "${APPLIO_DIR}"
+        ok "Cloned Applio → ${APPLIO_DIR}"
+    else
+        ok "Reusing Applio at ${APPLIO_DIR}"
+        # Pull latest if we have a full checkout (shallow clones silently skip).
+        git -C "${APPLIO_DIR}" pull --ff-only --quiet 2>/dev/null || true
+    fi
+
+    # Applio needs Python 3.11 — it has patched the fairseq compat issues that
+    # affect rvc-python, so we don't need the Python 3.9 constraint here.
+    if [ ! -d "${APPLIO_VENV}" ]; then
+        uv venv --python 3.11 "${APPLIO_VENV}"
+        ok "Created ${APPLIO_VENV}"
+    else
+        ok "Reusing ${APPLIO_VENV}"
+    fi
+
+    # Install Applio's requirements.
+    # requirements.txt is the canonical dep file; requirements-no-gpu.txt is
+    # provided by some Applio versions for CPU-only installs.
+    APPLIO_REQS="${APPLIO_DIR}/requirements.txt"
+    if [ ! -f "${APPLIO_REQS}" ]; then
+        fail "Applio requirements.txt not found at ${APPLIO_REQS}"
+        hint "The clone may be incomplete. Remove ${APPLIO_DIR} and re-run."
+        exit 1
+    fi
+    uv pip install --python "${APPLIO_VENV}/bin/python" -r "${APPLIO_REQS}"
+    ok "Applio deps synced"
+
+    hint "Applio GUI:   ${APPLIO_VENV}/bin/python ${APPLIO_DIR}/app.py"
+    hint "Applio CLI:   POST /train on the RVC server will use Applio automatically."
+else
+    hint "Optional RVC training: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh"
+fi
+
 # ── Done ─────────────────────────────────────────────────────────────────────
 step "Done"
 ok "Run available servers with:  ./inference/start_servers.sh"
@@ -198,7 +249,8 @@ echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
-echo "  Chatterbox → model weights download from HuggingFace on first /load call
-  RVC        → HuBERT weights download on first /convert call; .pth/.index from training"
+echo "  Chatterbox → model weights download from HuggingFace on first /load call"
+echo "  RVC        → HuBERT weights download on first /convert call; .pth/.index from Applio training"
+echo "  Applio     → pretrained G/D + HuBERT download on first training run (auto, ~1 GB)"
 echo ""
 echo "See the Models page in the app for the exact model download commands."
