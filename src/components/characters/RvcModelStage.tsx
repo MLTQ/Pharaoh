@@ -41,12 +41,13 @@ interface RvcModelInfo {
   corpus_duration_ms: number;
 }
 
-interface TrainJobStatus {
-  progress: number;   // 0..100
-  eta_seconds: number | null;
-  done: boolean;
+/** Shape returned by GET /jobs/{id} on the RVC server (via get_rvc_job Tauri cmd). */
+interface RvcJobResponse {
+  status: "pending" | "running" | "complete" | "failed";
+  progress: number;         // 0..1
+  output_path: string | null;
   error: string | null;
-  model: RvcModelInfo | null;
+  message: string | null;   // current stage description, e.g. "Training… 42/100 steps"
 }
 
 interface RvcParams {
@@ -75,13 +76,6 @@ function formatDuration(ms: number): string {
   const m = Math.floor(totalSec / 60);
   const s = totalSec % 60;
   return s === 0 ? `${m}m` : `${m}m ${s}s`;
-}
-
-function formatEta(seconds: number | null): string {
-  if (seconds === null || seconds < 0) return "calculating…";
-  if (seconds < 60) return `${seconds}s remaining`;
-  const m = Math.floor(seconds / 60);
-  return `~${m}m remaining`;
 }
 
 function basename(path: string): string {
@@ -242,8 +236,8 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
 }) => {
   const [modelInfo, setModelInfo]           = useState<RvcModelInfo | null>(null);
   const [isTraining, setIsTraining]         = useState(false);
-  const [trainProgress, setTrainProgress]   = useState<number>(0);
-  const [trainEta, setTrainEta]             = useState<number | null>(null);
+  const [trainProgress, setTrainProgress]   = useState<number>(0);   // 0..1
+  const [trainMessage, setTrainMessage]     = useState<string | null>(null);
   const [error, setError]                   = useState<string | null>(null);
   const [confirmRetrain, setConfirmRetrain] = useState(false);
   const [activeJobId, setActiveJobId]       = useState<string | null>(null);
@@ -282,22 +276,24 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
     const poll = async () => {
       while (!pollCancelRef.current) {
         try {
-          const status = await invoke<TrainJobStatus>("get_rvc_train_status", {
+          const resp = await invoke<RvcJobResponse>("get_rvc_job", {
             jobId: activeJobId,
           });
 
           if (pollCancelRef.current) break;
 
-          setTrainProgress(status.progress);
-          setTrainEta(status.eta_seconds);
+          setTrainProgress(resp.progress);           // 0..1 from server
+          if (resp.message) setTrainMessage(resp.message);
 
-          if (status.done) {
+          if (resp.status === "complete" || resp.status === "failed") {
             setIsTraining(false);
             setActiveJobId(null);
-            if (status.error) {
-              setError(status.error);
+            setTrainMessage(null);
+            if (resp.error || resp.status === "failed") {
+              setError(resp.error ?? "Training failed.");
             } else {
-              setModelInfo(status.model);
+              // Refresh model info from disk
+              fetchModelInfo();
               onModelTrained();
             }
             break;
@@ -307,6 +303,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
             setError(e instanceof Error ? e.message : "Lost contact with training job.");
             setIsTraining(false);
             setActiveJobId(null);
+            setTrainMessage(null);
           }
           break;
         }
@@ -326,12 +323,14 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
     setError(null);
     setIsTraining(true);
     setTrainProgress(0);
-    setTrainEta(null);
+    setTrainMessage(null);
 
     try {
-      const jobId = await invoke<string>("train_rvc_model", {
+      const jobId = await invoke<string>("submit_rvc_train", {
         projectId,
         characterId: character.id,
+        characterName: character.name.toLowerCase().replace(/\s+/g, "_"),
+        epochs: 100,
       });
       setActiveJobId(jobId);
     } catch (e: unknown) {
@@ -427,12 +426,24 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
                 Training {character.name}…
               </span>
               <span style={{ fontSize: 10, color: "var(--fg-4)", fontFamily: "var(--font-mono)" }}>
-                {formatEta(trainEta)}
+                {(trainProgress * 100).toFixed(0)}%
               </span>
             </div>
-            <ProgressBar value={trainProgress / 100} color={STAGE_COLOR} height={7} />
+            <ProgressBar value={trainProgress} color={STAGE_COLOR} height={7} />
+            {trainMessage && (
+              <div style={{
+                marginTop: 7,
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: STAGE_COLOR,
+                opacity: 0.85,
+                letterSpacing: "0.02em",
+              }}>
+                {trainMessage}
+              </div>
+            )}
             <p style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 8, lineHeight: 1.5 }}>
-              Training typically takes 10–20 minutes on GPU. You can close this panel —
+              Training takes 20–40 min on Apple Silicon. You can close this panel —
               training continues in the background.
             </p>
           </div>

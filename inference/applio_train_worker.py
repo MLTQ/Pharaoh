@@ -75,7 +75,7 @@ def main() -> None:
 
     # ── Step 0: Prerequisites (rmvpe.pt, pretrained G/D, contentvec) ─────────
     # Downloads are skipped if the files already exist — idempotent.
-    print("[applio] Step 0 — downloading prerequisites (rmvpe.pt, pretrained G/D) if missing …", flush=True)
+    print("PROGRESS:0.03:Checking prerequisites (rmvpe.pt, pretrained G/D)…", flush=True)
     run_prerequisites_script(
         pretraineds_hifigan=True,   # pretrained generator/discriminator for VITS init
         models=True,                # rmvpe.pt + fcpe.pt for pitch extraction
@@ -83,7 +83,7 @@ def main() -> None:
     )
 
     # ── Step 1: Preprocess ────────────────────────────────────────────────────
-    print(f"[applio] Step 1/3 — preprocessing {dataset_path} …", flush=True)
+    print("PROGRESS:0.10:Preprocessing corpus audio…", flush=True)
     run_preprocess_script(
         model_name=model_name,
         dataset_path=dataset_path,
@@ -96,9 +96,10 @@ def main() -> None:
         chunk_len=3.0,
         overlap_len=0.3,
     )
+    print("PROGRESS:0.22:Preprocessing complete", flush=True)
 
     # ── Step 2: Feature extraction ────────────────────────────────────────────
-    print(f"[applio] Step 2/3 — extracting features (f0={f0_method}, extract_gpu={extract_gpu}) …", flush=True)
+    print(f"PROGRESS:0.25:Extracting pitch + embeddings (CPU)…", flush=True)
     run_extract_script(
         model_name=model_name,
         f0_method=f0_method,
@@ -107,9 +108,10 @@ def main() -> None:
         sample_rate=sample_rate,
         embedder_model="contentvec",
     )
+    print("PROGRESS:0.45:Features extracted — starting VITS training", flush=True)
 
     # ── Step 3: Training ──────────────────────────────────────────────────────
-    print(f"[applio] Step 3/3 — training {epochs} epochs, batch={batch_size} …", flush=True)
+    print(f"PROGRESS:0.47:Training {epochs} epochs (batch={batch_size})…", flush=True)
     run_train_script(
         model_name=model_name,
         save_every_epoch=max(10, epochs // 10),
@@ -124,6 +126,7 @@ def main() -> None:
         pretrained=True,
         cleanup=False,
     )
+    print("PROGRESS:0.95:Building FAISS index…", flush=True)
 
     # ── Locate outputs ────────────────────────────────────────────────────────
     logs_dir = Path(applio_dir) / "logs" / model_name

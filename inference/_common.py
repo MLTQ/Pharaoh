@@ -24,6 +24,7 @@ class JobStore:
             "progress": 0.0,
             "output_path": None,
             "error": None,
+            "message": None,
             "created_at": time.time(),
         }
         self._jobs[job_id] = job
@@ -44,4 +45,5 @@ class JobStore:
             "progress": j["progress"],
             "output_path": j["output_path"],
             "error": j["error"],
+            "message": j.get("message"),
         }

@@ -184,7 +184,7 @@ class ConvertParams(BaseModel):
 
 # ── Blocking worker functions (run in executor) ───────────────────────────────
 
-def _do_train(params: TrainParams) -> None:
+def _do_train(params: TrainParams, job_id: str = "") -> None:
     """
     Multi-step RVC training pipeline via Applio.
 
@@ -272,18 +272,65 @@ def _do_train(params: TrainParams) -> None:
         json.dump(worker_params, f)
         params_file = f.name
 
+    def _progress(prog: float, msg: str) -> None:
+        """Update job store from the executor thread (GIL-safe for CPython dicts)."""
+        if job_id:
+            jobs.update(job_id, progress=prog, message=msg)
+
+    import re
+    _EPOCH_RE = re.compile(r"(\d+)/(\d+)\s*\[")
+
     try:
-        log.info(f"Launching Applio training worker …")
-        result = subprocess.run(
+        log.info("Launching Applio training worker …")
+        _progress(0.02, "Starting Applio…")
+
+        proc = subprocess.Popen(
             [str(applio_python), str(worker_script), params_file],
-            capture_output=False,   # let logs stream to rvc_server stdout
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
             text=True,
+            bufsize=1,              # line-buffered
             cwd=str(applio_dir),
-            timeout=7200,           # 2-hour hard cap
         )
-        if result.returncode != 0:
+
+        in_training = False
+        total_epochs = params.epochs
+
+        for raw in iter(proc.stdout.readline, ""):
+            line = raw.rstrip()
+            if not line:
+                continue
+
+            # Mirror to server stdout so logs stay readable
+            print(line, flush=True)
+
+            # ── Structured progress from worker ──────────────────────────────
+            if line.startswith("PROGRESS:"):
+                parts = line.split(":", 2)
+                if len(parts) == 3:
+                    try:
+                        _progress(float(parts[1]), parts[2])
+                    except ValueError:
+                        pass
+                if "Training" in line:
+                    in_training = True
+                continue
+
+            # ── Epoch/step progress during VITS training ──────────────────────
+            if in_training:
+                m = _EPOCH_RE.search(line)
+                if m:
+                    cur, tot = int(m.group(1)), int(m.group(2))
+                    if tot > 0 and cur <= tot:
+                        frac = cur / tot
+                        prog = 0.47 + frac * 0.47
+                        _progress(prog, f"Training… {cur}/{tot} steps")
+
+        proc.stdout.close()
+        ret = proc.wait(timeout=60)
+        if ret != 0:
             raise RuntimeError(
-                f"Applio training worker exited with code {result.returncode}. "
+                f"Applio training worker exited with code {ret}. "
                 f"Check rvc_server stdout for details."
             )
     finally:
@@ -363,7 +410,8 @@ async def _run_train(job_id: str, params: TrainParams) -> None:
         Path(params.output_index_path).parent.mkdir(parents=True, exist_ok=True)
 
         jobs.update(job_id, progress=0.10)
-        await loop.run_in_executor(None, _do_train, params)
+        import functools
+        await loop.run_in_executor(None, functools.partial(_do_train, params, job_id))
 
         # Verify outputs exist
         if not Path(params.output_model_path).exists():
