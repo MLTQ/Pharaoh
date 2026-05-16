@@ -144,9 +144,10 @@ if [ "${INSTALL_RVC}" = "1" ]; then
         ok "Reusing ${RVC_VENV}"
     fi
     # Use venv pip directly (not uv pip) to avoid pkg_resources issues.
-    # numpy must be <2.0 — faiss-cpu's SWIG bindings break with numpy 2.x.
-    "${RVC_VENV}/bin/python3" -m pip install -q --upgrade pip setuptools
-    "${RVC_VENV}/bin/python3" -m pip install -q "numpy<2.0"
+    # Pin pip to <24.1: rvc-python depends on omegaconf==2.0.6 whose metadata
+    # uses the invalid `.*` version suffix. pip>=24.1 rejects it outright;
+    # pip<24.1 (21.x–23.x) installs it with a warning.
+    "${RVC_VENV}/bin/python3" -m pip install -q "pip<24.1" setuptools
     "${RVC_VENV}/bin/python3" -m pip install -q -r "${SCRIPT_DIR}/requirements-rvc.txt"
     ok "RVC deps synced"
     # rvc-python bundles HuBERT weights; they download on first use.
