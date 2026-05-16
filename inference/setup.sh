@@ -121,17 +121,32 @@ fi
 # ── Optional RVC voice conversion ────────────────────────────────────────────
 step "RVC env (.venv-rvc)"
 if [ "${INSTALL_RVC}" = "1" ]; then
+    # IMPORTANT: rvc-python's transitive deps (fairseq, hydra) have a
+    # dataclass mutable-default incompatibility with Python 3.10+. The venv
+    # MUST be Python 3.9. uv can install 3.9 automatically via `uv python install 3.9`.
+    RVC_PYTHON_BIN="$(uv python find 3.9 2>/dev/null || true)"
+    if [ -z "${RVC_PYTHON_BIN}" ]; then
+        echo "  Installing Python 3.9 via uv..."
+        uv python install 3.9
+        RVC_PYTHON_BIN="$(uv python find 3.9)"
+    fi
     if [ ! -d "${RVC_VENV}" ]; then
-        uv venv --python 3.11 "${RVC_VENV}"
-        ok "Created ${RVC_VENV}"
+        # Use vanilla venv (not uv venv) to ensure pkg_resources is available —
+        # uv venv omits pkg_resources from setuptools, which pyworld requires.
+        "${RVC_PYTHON_BIN}" -m venv "${RVC_VENV}"
+        ok "Created ${RVC_VENV} (Python 3.9)"
     else
         ok "Reusing ${RVC_VENV}"
     fi
-    uv pip install --python "${RVC_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-rvc.txt"
+    # Use venv pip directly (not uv pip) to avoid pkg_resources issues.
+    # numpy must be <2.0 — faiss-cpu's SWIG bindings break with numpy 2.x.
+    "${RVC_VENV}/bin/python3" -m pip install -q --upgrade pip setuptools
+    "${RVC_VENV}/bin/python3" -m pip install -q "numpy<2.0"
+    "${RVC_VENV}/bin/python3" -m pip install -q -r "${SCRIPT_DIR}/requirements-rvc.txt"
     ok "RVC deps synced"
     # rvc-python bundles HuBERT weights; they download on first use.
     # Training beyond rvc-python's API surface requires the full Applio repo.
-    hint "RVC inference (convert) is ready. For training, see:"
+    hint "RVC inference (convert) is ready. For full model training, see:"
     hint "  https://github.com/IAHispano/Applio"
 else
     hint "Optional RVC voice conversion: PHARAOH_INSTALL_RVC=1 ./inference/setup.sh"

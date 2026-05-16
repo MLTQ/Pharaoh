@@ -232,7 +232,23 @@ def _do_train(params: TrainParams) -> None:
     try:
         # rvc-python training API surface varies by version.
         # Try the most common entry points in order of preference.
-        from rvc_python import train as rvc_train  # type: ignore
+        # NOTE: fairseq (a dep of rvc-python training) has a known dataclass
+        # incompatibility with Python 3.10+. If it triggers, we raise a clear
+        # NotImplementedError directing the user to Applio instead.
+        try:
+            from rvc_python import train as rvc_train  # type: ignore
+        except Exception as import_err:
+            if "mutable default" in str(import_err) or "default_factory" in str(import_err) or "fairseq" in str(import_err).lower():
+                raise NotImplementedError(
+                    f"rvc-python training is incompatible with Python {__import__('sys').version.split()[0]} "
+                    f"due to a fairseq dataclass bug. Use Applio for one-time model training:\n"
+                    f"  1. Install Applio: https://github.com/IAHispano/Applio\n"
+                    f"  2. Add corpus from: {params.corpus_paths[0] if params.corpus_paths else 'rvc_corpus/'}\n"
+                    f"  3. Train → export {params.character_name}.pth + .index\n"
+                    f"  4. Place them in: {Path(params.output_model_path).parent}\n"
+                    f"RVC conversion (POST /convert) is unaffected and works normally."
+                ) from import_err
+            raise
         rvc_train(
             audio_paths=valid_paths,
             model_name=params.character_name,
