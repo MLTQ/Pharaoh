@@ -63,6 +63,16 @@ def main() -> None:
 
     cpu_cores = min(os.cpu_count() or 2, 8)
 
+    # Applio's extract.py only understands "cuda:N" or "-" (CPU).
+    # It has NO MPS support. train.py does handle MPS natively, so we only
+    # override the extraction gpu to "-" when CUDA is unavailable.
+    import torch
+    if torch.cuda.is_available():
+        extract_gpu = gpu          # "0", "0-1", etc.
+    else:
+        extract_gpu = "-"          # force CPU extraction on macOS / MPS
+        print("[applio] No CUDA detected — using CPU for feature extraction (MPS handled in training).", flush=True)
+
     # ── Step 1: Preprocess ────────────────────────────────────────────────────
     print(f"[applio] Step 1/3 — preprocessing {dataset_path} …", flush=True)
     run_preprocess_script(
@@ -79,12 +89,12 @@ def main() -> None:
     )
 
     # ── Step 2: Feature extraction ────────────────────────────────────────────
-    print(f"[applio] Step 2/3 — extracting features (f0={f0_method}) …", flush=True)
+    print(f"[applio] Step 2/3 — extracting features (f0={f0_method}, extract_gpu={extract_gpu}) …", flush=True)
     run_extract_script(
         model_name=model_name,
         f0_method=f0_method,
         cpu_cores=cpu_cores,
-        gpu=0,
+        gpu=extract_gpu,   # "-" on Mac/CPU, "0" on CUDA
         sample_rate=sample_rate,
         embedder_model="contentvec",
     )
