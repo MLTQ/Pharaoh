@@ -28,6 +28,7 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
         scfg.music_url = config.music_url.clone();
         scfg.post_url = config.post_url.clone();
         scfg.chatterbox_url = config.chatterbox_url.clone();
+        scfg.rvc_url = config.rvc_url.clone();
     }
 
     // Ensure projects_dir exists when changed
@@ -62,7 +63,7 @@ pub async fn save_app_config(app: AppHandle, config: AppConfig) -> Result<()> {
 #[tauri::command]
 pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
     let state = app.state::<AppState>();
-    let (tts_url, sfx_url, music_url, post_url, chatterbox_url, mcp_url) = {
+    let (tts_url, sfx_url, music_url, post_url, chatterbox_url, mcp_url, rvc_url) = {
         let cfg = state
             .server_config
             .read()
@@ -74,6 +75,7 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
             cfg.post_url.clone(),
             cfg.chatterbox_url.clone(),
             cfg.mcp_url.clone(),
+            cfg.rvc_url.clone(),
         )
     };
     let http = state.http.clone();
@@ -89,13 +91,14 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
             .ok()
     }
 
-    let (tts, sfx, music, post, chatterbox, mcp) = tokio::join!(
+    let (tts, sfx, music, post, chatterbox, mcp, rvc) = tokio::join!(
         try_health(http.clone(), tts_url),
         try_health(http.clone(), sfx_url),
         try_health(http.clone(), music_url),
         try_health(http.clone(), post_url),
         try_health(http.clone(), chatterbox_url),
         try_health(http.clone(), mcp_url),
+        try_health(http.clone(), rvc_url),
     );
 
     Ok(AllServerHealth {
@@ -105,5 +108,6 @@ pub async fn get_server_health_all(app: AppHandle) -> Result<AllServerHealth> {
         post,
         chatterbox,
         mcp,
+        rvc,
     })
 }

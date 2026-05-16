@@ -1210,6 +1210,12 @@ async fn script_import(
                 ref_transcript: None,
                 base_voice_description: String::new(),
                 emotional_palette: vec![],
+                rvc_model_path: None,
+                rvc_index_path: None,
+                rvc_pitch_shift: 0,
+                rvc_index_rate: 0.5,
+                rvc_protect: 0.33,
+                rvc_enabled: false,
             },
         });
     }
@@ -1498,6 +1504,12 @@ async fn character_create(
             ref_transcript: flag_opt(&flags, "ref_transcript"),
             base_voice_description: String::new(),
             emotional_palette: vec![],
+            rvc_model_path: None,
+            rvc_index_path: None,
+            rvc_pitch_shift: 0,
+            rvc_index_rate: 0.5,
+            rvc_protect: 0.33,
+            rvc_enabled: false,
         },
     };
     project.characters.push(character.clone());

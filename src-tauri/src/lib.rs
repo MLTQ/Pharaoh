@@ -101,6 +101,12 @@ pub fn run() {
             commands::recording::list_audio_inputs,
             commands::recording::start_recording,
             commands::recording::stop_recording,
+            // RVC voice conversion
+            commands::rvc::list_rvc_models,
+            commands::rvc::submit_rvc_convert,
+            commands::rvc::submit_rvc_train,
+            commands::rvc::get_rvc_job,
+            commands::rvc::get_corpus_status,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -3,6 +3,9 @@ import { PeaksWave, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import { RecordTakePanel } from "./RecordTakePanel";
+import { CharacterPipeline } from "./CharacterPipeline";
+import { CorpusBuilder } from "./CorpusBuilder";
+import { RvcModelStage } from "./RvcModelStage";
 import { useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import {
@@ -13,7 +16,7 @@ import {
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
-import type { Character, GeneratedAudioAsset, PaletteEntry } from "../../lib/types";
+import type { Character, GeneratedAudioAsset, PaletteEntry, VoicePipelineStage } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -59,7 +62,22 @@ async function pickAudioFile(): Promise<string | null> {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-type DesignTab = "design" | "palette" | "clone";
+// "corpus" and "model" map to pipeline stages 3 and 4
+type DesignTab = "design" | "palette" | "clone" | "corpus" | "model";
+
+function tabToStage(t: DesignTab): VoicePipelineStage {
+  if (t === "palette") return 2;
+  if (t === "corpus")  return 3;
+  if (t === "model")   return 4;
+  return 1;  // "design" | "clone"
+}
+
+function stageToTab(s: VoicePipelineStage): DesignTab {
+  if (s === 2) return "palette";
+  if (s === 3) return "corpus";
+  if (s === 4) return "model";
+  return "design";
+}
 
 export const CharacterDesignerView: React.FC = () => {
   const {
@@ -614,30 +632,59 @@ export const CharacterDesignerView: React.FC = () => {
           />
         </div>
 
-        {/* Tab bar */}
-        <div style={{
-          display: "flex", borderBottom: "1px solid var(--line-1)",
-          background: "var(--bg-1)", flexShrink: 0,
-        }}>
-          {(["design", "palette", "clone"] as DesignTab[]).map((t) => {
-            const label = t === "design" ? "Voice Design" : t === "palette" ? "Emotional Palette" : "Clone";
-            const active = tab === t;
-            return (
-              <button key={t} onClick={() => setTab(t)} style={{
-                padding: "8px 18px",
-                fontFamily: "var(--font-mono)", fontSize: 10,
-                letterSpacing: "0.08em", textTransform: "uppercase",
-                color: active ? "var(--tts)" : "var(--fg-4)",
-                borderBottom: active ? "2px solid var(--tts)" : "2px solid transparent",
-                marginBottom: -1,
-                background: "transparent", border: "none", cursor: "pointer",
-                borderLeft: "none", borderRight: "none", borderTop: "none",
-              }}>
-                {label}
-              </button>
-            );
-          })}
-        </div>
+        {/* Pipeline stage header — replaces flat tab bar */}
+        {(() => {
+          const approvedPalette = paletteEntries.filter((e) => e.qa_status === "approved");
+          const stage1Done = (char.voice_assignment.base_voice_description ?? "").trim().length > 0;
+          const stage2Done = approvedPalette.length >= 2;
+          const corpusCount = char.voice_assignment.rvc?.corpus_count ?? 0;
+          const corpusDurationMs = char.voice_assignment.rvc?.corpus_duration_ms ?? 0;
+          const corpusTarget = 50;
+          const modelTrained = (char.voice_assignment.rvc?.model_path ?? null) !== null;
+          const rvcEnabled = char.voice_assignment.rvc?.enabled ?? false;
+          return (
+            <CharacterPipeline
+              stage1Done={stage1Done}
+              stage2Done={stage2Done}
+              corpusCount={corpusCount}
+              corpusTarget={corpusTarget}
+              corpusDurationMs={corpusDurationMs}
+              modelTrained={modelTrained}
+              rvcEnabled={rvcEnabled}
+              activeStage={tabToStage(tab)}
+              onSelectStage={(s) => setTab(stageToTab(s))}
+            />
+          );
+        })()}
+
+        {/* Stage 1 sub-tabs: Voice Design | Clone (legacy) */}
+        {(tab === "design" || tab === "clone") && (
+          <div style={{
+            display: "flex", gap: 0,
+            borderBottom: "1px solid var(--line-1)",
+            background: "var(--bg-1)", flexShrink: 0,
+            paddingLeft: 20,
+          }}>
+            {(["design", "clone"] as DesignTab[]).map((t) => {
+              const label = t === "design" ? "Voice Design" : "Clone (legacy)";
+              const active = tab === t;
+              return (
+                <button key={t} onClick={() => setTab(t)} style={{
+                  padding: "6px 14px",
+                  fontFamily: "var(--font-mono)", fontSize: 9.5,
+                  letterSpacing: "0.07em", textTransform: "uppercase",
+                  color: active ? "var(--tts)" : "var(--fg-4)",
+                  borderBottom: active ? "2px solid var(--tts)" : "2px solid transparent",
+                  marginBottom: -1,
+                  background: "transparent", border: "none", cursor: "pointer",
+                  borderLeft: "none", borderRight: "none", borderTop: "none",
+                }}>
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+        )}
 
         {/* Tab body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
@@ -1204,6 +1251,36 @@ export const CharacterDesignerView: React.FC = () => {
                 </TakeList>
               )}
             </div>
+          )}
+
+          {/* ── CORPUS BUILDER (Stage 3) ──────────────────────────────────── */}
+          {tab === "corpus" && (
+            <CorpusBuilder
+              projectId={realProjectId ?? "demo"}
+              character={char}
+              projectsDir={projectsDir ?? ""}
+              corpusCount={char.voice_assignment.rvc?.corpus_count ?? 0}
+              corpusDurationMs={char.voice_assignment.rvc?.corpus_duration_ms ?? 0}
+              corpusTarget={50}
+              onCorpusUpdated={() => {
+                // Re-read character from disk (project store handles this via get_project)
+                // For now, a no-op — CorpusBuilder polls internally and updates its own UI.
+                // A full refresh would call loadProject() here.
+              }}
+            />
+          )}
+
+          {/* ── RVC MODEL (Stage 4) ───────────────────────────────────────── */}
+          {tab === "model" && (
+            <RvcModelStage
+              projectId={realProjectId ?? "demo"}
+              character={char}
+              projectsDir={projectsDir ?? ""}
+              corpusReady={(char.voice_assignment.rvc?.corpus_duration_ms ?? 0) >= 5 * 60 * 1000}
+              onModelTrained={() => {
+                // A full model refresh would re-read character; no-op until store exposes refresh.
+              }}
+            />
           )}
         </div>
       </div>

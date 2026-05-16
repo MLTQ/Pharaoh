@@ -385,6 +385,91 @@ export const startRecording = (args: {
 export const stopRecording = (): Promise<RecordingResult> =>
   invoke("stop_recording");
 
+// ── RVC voice conversion ─────────────────────────────────────────────────────
+
+/** A trained RVC model file found in characters/{id}/rvc/. */
+export interface RvcModelInfo {
+  name: string;
+  pth_path: string;
+  index_path: string | null;
+  size_bytes: number;
+}
+
+/** Parameters for a single RVC conversion job. */
+export interface RvcConvertParams {
+  input_path: string;
+  output_path: string;
+  model_path: string;
+  index_path: string | null;
+  /** Semitones of pitch shift. Default 0. */
+  pitch_shift: number;
+  /** Pitch extraction method. "rmvpe" is highest quality. */
+  f0_method: string;
+  /** 0–1: retrieval index strength. Lower preserves paralinguistic tags. */
+  index_rate: number;
+  /** 0–7: median filter radius on pitch curve. Default 3. */
+  filter_radius: number;
+  /** 0–1: blend of input/output RMS. Default 0.25. */
+  rms_mix_rate: number;
+  /** 0–0.5: protection for voiceless consonants. Default 0.33. */
+  protect: number;
+}
+
+/** Corpus build status returned by get_corpus_status. */
+export interface CorpusStatus {
+  file_count: number;
+  total_duration_ms: number;
+  corpus_dir: string;
+  /** True when total_duration_ms >= 5 minutes (300_000 ms). */
+  ready_for_training: boolean;
+}
+
+/** List trained RVC .pth models for a character. */
+export const listRvcModels = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<RvcModelInfo[]> =>
+  invoke("list_rvc_models", { projectId: args.projectId, characterId: args.characterId });
+
+/**
+ * Submit a convert job to the RVC server.
+ * Returns job_id immediately. Poll getRvcJob() until status === "complete".
+ */
+export const submitRvcConvert = (params: RvcConvertParams): Promise<string> =>
+  invoke("submit_rvc_convert", { params });
+
+/**
+ * Submit a training job to the RVC server.
+ * Scans characters/{characterId}/rvc_corpus/ for WAV files automatically.
+ * Returns job_id. Training takes 10–20 min on GPU.
+ */
+export const submitRvcTrain = (args: {
+  projectId: string;
+  characterId: string;
+  characterName: string;
+  epochs?: number;
+}): Promise<string> =>
+  invoke("submit_rvc_train", {
+    projectId: args.projectId,
+    characterId: args.characterId,
+    characterName: args.characterName,
+    epochs: args.epochs ?? null,
+  });
+
+/** Poll a job on the RVC server. Returns raw status JSON. */
+export const getRvcJob = (jobId: string): Promise<{ status: string; progress: number; output_path: string | null; error: string | null }> =>
+  invoke("get_rvc_job", { jobId });
+
+/**
+ * Count WAV files in characters/{characterId}/rvc_corpus/ and sum duration.
+ * Reads duration from sidecar .meta.json files.
+ */
+export const getCorpusStatus = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<CorpusStatus> =>
+  invoke("get_corpus_status", { projectId: args.projectId, characterId: args.characterId });
+
 // ── Setup integrity ─────────────────────────────────────────────────────────
 
 export interface ToolStatus {

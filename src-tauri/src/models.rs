@@ -33,6 +33,25 @@ pub struct VoiceAssignment {
     /// Named emotional states for the Chatterbox Turbo palette workflow.
     #[serde(default)]
     pub emotional_palette: Vec<PaletteEntry>,
+    /// Absolute path to the trained RVC `.pth` weights file for this character.
+    #[serde(default)]
+    pub rvc_model_path: Option<String>,
+    /// Absolute path to the RVC `.index` FAISS file for this character.
+    #[serde(default)]
+    pub rvc_index_path: Option<String>,
+    /// Pitch shift applied by RVC at production time, in semitones. Default: `0`.
+    #[serde(default)]
+    pub rvc_pitch_shift: i32,
+    /// Index influence strength used during RVC conversion (0–1). Default: `0.5`.
+    #[serde(default = "default_rvc_index_rate")]
+    pub rvc_index_rate: f32,
+    /// Consonant protection strength for RVC (0–0.5). Default: `0.33`.
+    #[serde(default = "default_rvc_protect")]
+    pub rvc_protect: f32,
+    /// When `true`, production dialogue lines are passed through RVC after
+    /// Chatterbox generation.
+    #[serde(default)]
+    pub rvc_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +153,8 @@ pub struct ServerConfig {
     pub post_url: String,
     pub chatterbox_url: String,
     pub mcp_url: String,
+    /// Base URL of the RVC voice-conversion server (default port 18006).
+    pub rvc_url: String,
 }
 
 impl Default for ServerConfig {
@@ -145,6 +166,7 @@ impl Default for ServerConfig {
             post_url: "http://127.0.0.1:18004".to_string(),
             chatterbox_url: "http://127.0.0.1:18005".to_string(),
             mcp_url: "http://127.0.0.1:18000".to_string(),
+            rvc_url: "http://127.0.0.1:18006".to_string(),
         }
     }
 }
@@ -159,6 +181,18 @@ fn default_chatterbox_url() -> String {
 
 fn default_mcp_url() -> String {
     "http://127.0.0.1:18000".to_string()
+}
+
+fn default_rvc_url() -> String {
+    "http://127.0.0.1:18006".to_string()
+}
+
+fn default_rvc_index_rate() -> f32 {
+    0.5
+}
+
+fn default_rvc_protect() -> f32 {
+    0.33
 }
 
 fn default_single_model_mode() -> bool {
@@ -178,6 +212,9 @@ pub struct AppConfig {
     pub chatterbox_url: String,
     #[serde(default = "default_mcp_url")]
     pub mcp_url: String,
+    /// Base URL of the RVC voice-conversion server (default port 18006).
+    #[serde(default = "default_rvc_url")]
+    pub rvc_url: String,
     /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
     pub tts_public: bool,
     pub sfx_public: bool,
@@ -203,6 +240,7 @@ impl AppConfig {
             post_url: default_post_url(),
             chatterbox_url: default_chatterbox_url(),
             mcp_url: default_mcp_url(),
+            rvc_url: default_rvc_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
@@ -227,6 +265,8 @@ pub struct AllServerHealth {
     pub post: Option<ServerHealth>,
     pub chatterbox: Option<ServerHealth>,
     pub mcp: Option<ServerHealth>,
+    /// Health of the RVC voice-conversion server.
+    pub rvc: Option<ServerHealth>,
 }
 
 pub struct AppState {
@@ -245,6 +285,7 @@ impl AppState {
             post_url: app_config.post_url.clone(),
             chatterbox_url: app_config.chatterbox_url.clone(),
             mcp_url: app_config.mcp_url.clone(),
+            rvc_url: app_config.rvc_url.clone(),
         };
         Self {
             http: reqwest::Client::new(),

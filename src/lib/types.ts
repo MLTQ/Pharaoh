@@ -22,6 +22,60 @@ export interface PaletteEntry {
   qa_status: "unreviewed" | "approved";
 }
 
+/**
+ * RVC (Retrieval-based Voice Conversion) model configuration for a character.
+ *
+ * Stage 4 of the character voice pipeline. After the emotional palette corpus
+ * is generated (Stage 3), an RVC model is trained on that Chatterbox output
+ * to lock voice consistency across all production lines.
+ *
+ * Pipeline: Chatterbox (clone + tags) → AudioSR → RVC → final WAV
+ */
+export interface RvcConfig {
+  /**
+   * Absolute path to the trained .pth model file.
+   * Null = model not yet trained (Stage 4 incomplete).
+   */
+  model_path: string | null;
+  /**
+   * Absolute path to the FAISS .index file (built alongside the model).
+   * Optional but strongly recommended — improves fidelity to training voice.
+   */
+  index_path: string | null;
+  /**
+   * Pitch shift applied at inference time, in semitones.
+   * Useful for aging a character voice without re-recording.
+   * Range: -12 to +12. Default: 0.
+   */
+  pitch_shift: number;
+  /**
+   * Retrieval index strength (0–1).
+   * Lower values preserve paralinguistic events ([sigh], [chuckle]) better;
+   * higher values enforce stronger voice identity from training data.
+   * Default: 0.5 — balanced for Chatterbox-sourced corpora.
+   */
+  index_rate: number;
+  /**
+   * Voiceless consonant protection (0–0.5).
+   * Prevents RVC from converting unvoiced sounds (t, s, k, f) which would
+   * cause lisping artefacts. Default: 0.33.
+   */
+  protect: number;
+  /**
+   * Whether to run the RVC pass on every production line.
+   * When false, lines use Chatterbox output directly (no consistency pass).
+   * Flip to false when debugging or when the model needs retraining.
+   */
+  enabled: boolean;
+  /**
+   * Number of WAV files in the rvc_corpus/ directory at last count.
+   * Used by the UI to show corpus build progress without a filesystem scan.
+   */
+  corpus_count: number;
+  /** Total duration of corpus audio in milliseconds (from sidecar files). */
+  corpus_duration_ms: number;
+}
+
 export interface VoiceAssignment {
   model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned" | "Chatterbox";
   speaker: string | null;
@@ -37,6 +91,45 @@ export interface VoiceAssignment {
   base_voice_description: string;
   /** Named emotional states for the Chatterbox Turbo palette workflow. */
   emotional_palette: PaletteEntry[];
+  /**
+   * Stage 4 voice pipeline: RVC model trained on the Chatterbox corpus.
+   * Undefined/null when RVC has not been configured for this character.
+   * Present (even with model_path null) once the user opens Stage 4.
+   */
+  rvc?: RvcConfig | null;
+}
+
+// ── Voice pipeline stage types ───────────────────────────────────────────────
+
+/**
+ * The four progressive stages of the character voice pipeline.
+ *
+ * Each stage unlocks the next. Stages can be completed in order only:
+ *   Voice (1) → Palette (2) → Corpus (3) → Model (4)
+ *
+ * Characters without a trained model still work — they use Chatterbox-only
+ * generation. The pipeline is aspirational, not a gate.
+ */
+export type VoicePipelineStage = 1 | 2 | 3 | 4;
+
+/** Per-character pipeline completion status, derived from VoiceAssignment. */
+export interface VoicePipelineStatus {
+  /** Stage 1: base_voice_description written + ≥1 approved design take. */
+  stage1Done: boolean;
+  /** Stage 2: ≥2 emotional palette entries with approved references. */
+  stage2Done: boolean;
+  /** Number of WAV files in rvc_corpus/. */
+  corpusCount: number;
+  /** Target corpus size (default 50). */
+  corpusTarget: number;
+  /** Total corpus audio duration in ms. */
+  corpusDurationMs: number;
+  /** Stage 3 complete: corpus has ≥5 min of audio (300_000 ms). */
+  stage3Done: boolean;
+  /** Stage 4 complete: RVC model .pth file exists on disk. */
+  stage4Done: boolean;
+  /** Whether the RVC pass is enabled for production generation. */
+  rvcEnabled: boolean;
 }
 
 export interface Character {
@@ -72,6 +165,7 @@ export interface AppConfig {
   music_url: string;
   post_url: string;
   chatterbox_url: string;
+  rvc_url: string;
   tts_public: boolean;
   sfx_public: boolean;
   music_public: boolean;
@@ -88,6 +182,7 @@ export interface AllServerHealth {
   music: ServerHealth | null;
   post: ServerHealth | null;
   chatterbox: ServerHealth | null;
+  rvc: ServerHealth | null;
 }
 
 export interface ServerHealth {

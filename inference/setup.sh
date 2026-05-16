@@ -24,6 +24,8 @@ AUDIOSR_VENV="${SCRIPT_DIR}/.venv-audiosr"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
 INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
 INSTALL_AUDIOSR="${PHARAOH_INSTALL_AUDIOSR:-0}"
+RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
+INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
 
@@ -116,6 +118,25 @@ else
     hint "Optional 0-shot voice cloning + paralinguistic tags: PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh"
 fi
 
+# ── Optional RVC voice conversion ────────────────────────────────────────────
+step "RVC env (.venv-rvc)"
+if [ "${INSTALL_RVC}" = "1" ]; then
+    if [ ! -d "${RVC_VENV}" ]; then
+        uv venv --python 3.11 "${RVC_VENV}"
+        ok "Created ${RVC_VENV}"
+    else
+        ok "Reusing ${RVC_VENV}"
+    fi
+    uv pip install --python "${RVC_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-rvc.txt"
+    ok "RVC deps synced"
+    # rvc-python bundles HuBERT weights; they download on first use.
+    # Training beyond rvc-python's API surface requires the full Applio repo.
+    hint "RVC inference (convert) is ready. For training, see:"
+    hint "  https://github.com/IAHispano/Applio"
+else
+    hint "Optional RVC voice conversion: PHARAOH_INSTALL_RVC=1 ./inference/setup.sh"
+fi
+
 # ── Optional SFX+ (AudioLDM) ─────────────────────────────────────────────────
 step "SFX+ env (AudioLDM)"
 if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
@@ -162,6 +183,7 @@ echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
-echo "  Chatterbox → model weights download from HuggingFace on first /load call"
+echo "  Chatterbox → model weights download from HuggingFace on first /load call
+  RVC        → HuBERT weights download on first /convert call; .pth/.index from training"
 echo ""
 echo "See the Models page in the app for the exact model download commands."

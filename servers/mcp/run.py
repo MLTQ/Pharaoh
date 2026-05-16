@@ -41,6 +41,7 @@ parser.add_argument("--sfx-url", default="http://127.0.0.1:18002")
 parser.add_argument("--music-url", default="http://127.0.0.1:18003")
 parser.add_argument("--post-url", default="http://127.0.0.1:18004")
 parser.add_argument("--chatterbox-url", default="http://127.0.0.1:18005")
+parser.add_argument("--rvc-url", default="http://127.0.0.1:18006")
 parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"])
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=18000)
@@ -53,6 +54,7 @@ SERVER_URLS = {
     "music": args.music_url,
     "post": args.post_url,
     "chatterbox": args.chatterbox_url,
+    "rvc": args.rvc_url,
 }
 
 mcp = FastMCP("pharaoh")
@@ -189,7 +191,7 @@ def _cfg() -> dict:
 
 # ── Single model mode ─────────────────────────────────────────────────────────
 
-_HEAVY_SERVERS = {"tts", "music", "chatterbox"}
+_HEAVY_SERVERS = {"tts", "music", "chatterbox", "rvc"}
 
 
 def _auto_unload_others(active: str) -> None:
@@ -1041,6 +1043,271 @@ def _add_health_route(app_instance: FastMCP) -> None:
         sse_app.routes.insert(0, Route("/health", health))
     except Exception as exc:
         log.warning("Could not attach /health route: %s", exc)
+
+
+# ── RVC voice pipeline tools ─────────────────────────────────────────────────
+
+@mcp.tool()
+def corpus_status(project_id: str, character_id: str) -> str:
+    """
+    Return corpus build status for a character's RVC training data.
+
+    Shows the count of WAV files in characters/{character_id}/rvc_corpus/,
+    their total duration, and whether the corpus meets the 5-minute minimum
+    recommended for good RVC training results.
+
+    Run this before build_corpus to see current state, and after to verify
+    the corpus is ready for train_rvc_model.
+    """
+    proj = _project_json(project_id)
+    char_dir = _project_dir(project_id) / "characters" / character_id
+    corpus_dir = char_dir / "rvc_corpus"
+
+    files = list(corpus_dir.glob("*.wav")) if corpus_dir.exists() else []
+    total_ms = 0
+    for wav in files:
+        meta_path = wav.parent / (wav.name + ".meta.json")
+        if meta_path.exists():
+            try:
+                meta = json.loads(meta_path.read_text())
+                total_ms += meta.get("duration_actual_ms") or meta.get("duration_ms") or 0
+            except Exception:
+                pass
+
+    ready = total_ms >= 5 * 60 * 1000  # 5 minutes
+    return json.dumps({
+        "character_id": character_id,
+        "corpus_dir": str(corpus_dir),
+        "file_count": len(files),
+        "total_duration_ms": total_ms,
+        "total_duration_min": round(total_ms / 60000, 1),
+        "ready_for_training": ready,
+        "recommendation": (
+            "Ready for training." if ready
+            else f"Need {round((5*60000 - total_ms)/60000, 1)} more minutes of audio. Run build_corpus."
+        ),
+    }, indent=2)
+
+
+@mcp.tool()
+def build_corpus(
+    project_id: str,
+    character_id: str,
+    target_count: int = 50,
+) -> str:
+    """
+    Generate a Chatterbox corpus for RVC training (Stage 3 of voice pipeline).
+
+    Generates `target_count` takes of the character's palette test line across
+    all approved emotional states. Each take uses a different paralinguistic
+    tag combination ([sigh], [chuckle], [laugh], [gasp], [clears throat], [hmm])
+    so the resulting corpus covers the character's expressive range.
+
+    Output: characters/{character_id}/rvc_corpus/{emotion}_{i}.wav
+    Uses the character's approved palette reference WAVs as Chatterbox clone sources.
+
+    PREREQUISITES: Stage 2 must be complete — at least 2 approved palette entries.
+    This is a long-running operation. Returns a list of job_ids.
+    Poll job_status(job_id) on each to track progress (~8 min total on GPU).
+
+    Args:
+        target_count: Total WAVs to generate across all emotions (default 50).
+    """
+    proj = _project_json(project_id)
+    char = next(
+        (c for c in proj.get("characters", []) if c["id"] == character_id),
+        None,
+    )
+    if char is None:
+        return json.dumps({"error": f"character {character_id} not found in project.json"})
+
+    palette = char.get("voice_assignment", {}).get("emotional_palette", [])
+    approved = [e for e in palette if e.get("qa_status") == "approved" and e.get("ref_audio_path")]
+    if not approved:
+        return json.dumps({"error": "No approved palette entries found. Complete Stage 2 first."})
+
+    # Paralinguistic tag variants: the same line is generated clean and with each
+    # tag in prefix + suffix position to maximise prosodic variety in the corpus.
+    tag_variants = [
+        "",                   # clean (no tag) — baseline voice
+        "[sigh] ",            # prefix sigh
+        "[chuckle] ",
+        "[laugh] ",
+        "[gasp] ",
+        "[clears throat] ",
+        "[hmm] ",
+        " [sigh]",            # suffix sigh (different prosodic shape)
+        " [chuckle]",
+        " [laugh]",
+    ]
+
+    test_line = char.get("voice_assignment", {}).get("instruct_default") or "And then she said — nothing at all."
+    char_dir = _project_dir(project_id) / "characters" / character_id
+    corpus_dir = char_dir / "rvc_corpus"
+    corpus_dir.mkdir(parents=True, exist_ok=True)
+
+    per_emotion = max(1, target_count // len(approved))
+    job_ids = []
+
+    for entry in approved:
+        emotion = entry["emotion"]
+        ref_path = entry["ref_audio_path"]
+        n = 0
+        tag_cycle = tag_variants * ((per_emotion // len(tag_variants)) + 1)
+
+        for i in range(per_emotion):
+            tag = tag_cycle[i % len(tag_variants)]
+            text = f"{tag}{test_line}" if tag.startswith("[") else f"{test_line}{tag}" if tag else test_line
+            out_path = str(corpus_dir / f"{emotion}_{i:03d}.wav")
+
+            try:
+                resp = _post("chatterbox", "/generate/clone", {
+                    "text": text.strip(),
+                    "ref_audio_path": ref_path,
+                    "exaggeration": 0.45,
+                    "cfg_weight": 0.5,
+                    "temperature": 0.8,
+                    "seed": i,
+                    "output_path": out_path,
+                })
+                job_ids.append(resp.get("job_id", "unknown"))
+            except Exception as exc:
+                return json.dumps({"error": str(exc), "partial_job_ids": job_ids})
+
+    return json.dumps({
+        "status": "queued",
+        "total_takes": len(job_ids),
+        "job_ids": job_ids,
+        "corpus_dir": str(corpus_dir),
+        "note": "Poll job_status(job_id) for each. Takes ~8 min total. Then run train_rvc_model.",
+    }, indent=2)
+
+
+@mcp.tool()
+def train_rvc_model(project_id: str, character_id: str, epochs: int = 100) -> str:
+    """
+    Train an RVC voice model from the character's Chatterbox corpus (Stage 4).
+
+    Scans characters/{character_id}/rvc_corpus/ for WAV files and submits a
+    training job to the RVC server (port 18006). Training typically takes
+    10–20 minutes on GPU.
+
+    Output files:
+      characters/{character_id}/rvc/{character_name}.pth    ← voice model
+      characters/{character_id}/rvc/{character_name}.index  ← FAISS index
+
+    PREREQUISITES: corpus_status() must show ready_for_training == true
+    (at least 5 minutes / ~20+ WAV files in rvc_corpus/).
+
+    Returns a job_id. Poll job_status(job_id) until status == "complete".
+    """
+    proj = _project_json(project_id)
+    char = next(
+        (c for c in proj.get("characters", []) if c["id"] == character_id),
+        None,
+    )
+    if char is None:
+        return json.dumps({"error": f"character {character_id} not found"})
+
+    char_name = char.get("name", "voice").replace(" ", "_").lower()
+    char_dir = _project_dir(project_id) / "characters" / character_id
+    corpus_dir = char_dir / "rvc_corpus"
+    rvc_dir = char_dir / "rvc"
+    rvc_dir.mkdir(parents=True, exist_ok=True)
+
+    corpus_wavs = sorted(corpus_dir.glob("*.wav")) if corpus_dir.exists() else []
+    if not corpus_wavs:
+        return json.dumps({"error": "rvc_corpus/ is empty. Run build_corpus first."})
+
+    try:
+        resp = _post("rvc", "/train", {
+            "corpus_paths": [str(p) for p in corpus_wavs],
+            "output_model_path": str(rvc_dir / f"{char_name}.pth"),
+            "output_index_path": str(rvc_dir / f"{char_name}.index"),
+            "character_name": char_name,
+            "sample_rate": 48000,
+            "epochs": epochs,
+        })
+        return json.dumps({
+            "job_id": resp.get("job_id"),
+            "status": "training_started",
+            "corpus_files": len(corpus_wavs),
+            "output_dir": str(rvc_dir),
+            "note": "Training takes 10–20 min on GPU. Poll job_status(job_id).",
+        }, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
+
+
+@mcp.tool()
+def rvc_convert(
+    project_id: str,
+    character_id: str,
+    input_path: str,
+    output_path: str,
+    pitch_shift: int = 0,
+    index_rate: float = 0.5,
+) -> str:
+    """
+    Convert a single audio file using the character's trained RVC model.
+
+    Use this to:
+    - Test the pipeline on a sample line before committing to full production
+    - Manually apply the RVC pass to a specific Chatterbox take
+    - A/B compare Chatterbox-only vs Chatterbox+RVC output
+
+    The character must have a trained RVC model (Stage 4 complete).
+    generate_tts() applies this automatically when rvc_enabled is true.
+
+    Args:
+        input_path:   Absolute path to Chatterbox output WAV.
+        output_path:  Where to write the RVC-converted WAV.
+        pitch_shift:  Semitones (default 0). Use negative to lower pitch.
+        index_rate:   0–1. Lower preserves [sigh][chuckle] tags; higher = more consistent.
+    """
+    proj = _project_json(project_id)
+    char = next(
+        (c for c in proj.get("characters", []) if c["id"] == character_id),
+        None,
+    )
+    if char is None:
+        return json.dumps({"error": f"character {character_id} not found"})
+
+    va = char.get("voice_assignment", {})
+    model_path = va.get("rvc_model_path")
+    index_path = va.get("rvc_index_path", "")
+
+    if not model_path or not Path(model_path).exists():
+        char_name = char.get("name", "voice").replace(" ", "_").lower()
+        char_dir = _project_dir(project_id) / "characters" / character_id
+        # Try the conventional location
+        fallback = char_dir / "rvc" / f"{char_name}.pth"
+        if fallback.exists():
+            model_path = str(fallback)
+        else:
+            return json.dumps({
+                "error": "No trained RVC model found. Run train_rvc_model first.",
+                "looked_for": [str(fallback)],
+            })
+
+    Path(output_path).parent.mkdir(parents=True, exist_ok=True)
+
+    try:
+        resp = _post("rvc", "/convert", {
+            "input_path": input_path,
+            "output_path": output_path,
+            "model_path": model_path,
+            "index_path": index_path,
+            "pitch_shift": pitch_shift,
+            "f0_method": "rmvpe",
+            "index_rate": index_rate,
+            "filter_radius": 3,
+            "rms_mix_rate": 0.25,
+            "protect": va.get("rvc_protect", 0.33),
+        })
+        return json.dumps(resp, indent=2)
+    except Exception as exc:
+        return json.dumps({"error": str(exc)})
 
 
 # ── Entry point ───────────────────────────────────────────────────────────────
