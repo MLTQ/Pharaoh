@@ -70,16 +70,21 @@ def main() -> None:
         dataset_path=dataset_path,
         sample_rate=sample_rate,
         cpu_cores=cpu_cores,
+        cut_preprocess="Automatic",
+        process_effects=False,
+        noise_reduction=False,
+        clean_strength=0.7,
+        chunk_len=3.0,
+        overlap_len=0.3,
     )
 
     # ── Step 2: Feature extraction ────────────────────────────────────────────
     print(f"[applio] Step 2/3 — extracting features (f0={f0_method}) …", flush=True)
     run_extract_script(
         model_name=model_name,
-        rvc_version="v2",
         f0_method=f0_method,
-        hop_length=128,
         cpu_cores=cpu_cores,
+        gpu=0,
         sample_rate=sample_rate,
         embedder_model="contentvec",
     )
@@ -88,19 +93,17 @@ def main() -> None:
     print(f"[applio] Step 3/3 — training {epochs} epochs, batch={batch_size} …", flush=True)
     run_train_script(
         model_name=model_name,
-        rvc_version="v2",
         save_every_epoch=max(10, epochs // 10),
         save_only_latest=True,
-        save_each_model=False,
+        save_every_weights=False,
         total_epoch=epochs,
         sample_rate=sample_rate,
         batch_size=batch_size,
-        gpu=gpu,
-        pitch_guidance=True,
+        gpu=0,
         overtraining_detector=False,
         overtraining_threshold=50,
         pretrained=True,
-        custom_pretrained=False,
+        cleanup=False,
     )
 
     # ── Locate outputs ────────────────────────────────────────────────────────
