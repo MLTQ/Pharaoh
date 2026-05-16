@@ -1141,23 +1141,39 @@ def build_corpus(
         " [laugh]",
     ]
 
-    test_line = char.get("voice_assignment", {}).get("instruct_default") or "And then she said — nothing at all."
+    # Use a fixed corpus test line — NOT instruct_default (which is a voice description,
+    # not a line of speech). Rotate through varied lines so the corpus has prosodic diversity.
+    _CORPUS_TEST_LINES = [
+        "And then she said — nothing at all.",
+        "The signal was gone before I could trace it.",
+        "I knew what it meant. I just didn't want to say it out loud.",
+        "Something is wrong with the archive.",
+        "You were never supposed to find this.",
+        "Three days. That's all we had.",
+        "It doesn't matter anymore. None of it does.",
+        "She looked at me like I was already gone.",
+        "I've seen that look before. It never ends well.",
+        "The door was open. It shouldn't have been.",
+    ]
     char_dir = _project_dir(project_id) / "characters" / character_id
     corpus_dir = char_dir / "rvc_corpus"
     corpus_dir.mkdir(parents=True, exist_ok=True)
 
     per_emotion = max(1, target_count // len(approved))
     job_ids = []
+    global_take = 0  # used to rotate test lines across all takes
 
     for entry in approved:
         emotion = entry["emotion"]
         ref_path = entry["ref_audio_path"]
-        n = 0
         tag_cycle = tag_variants * ((per_emotion // len(tag_variants)) + 1)
 
         for i in range(per_emotion):
             tag = tag_cycle[i % len(tag_variants)]
-            text = f"{tag}{test_line}" if tag.startswith("[") else f"{test_line}{tag}" if tag else test_line
+            # Rotate through varied test lines for prosodic diversity
+            base_line = _CORPUS_TEST_LINES[global_take % len(_CORPUS_TEST_LINES)]
+            text = f"{tag}{base_line}" if tag.startswith("[") else f"{base_line}{tag}" if tag else base_line
+            global_take += 1
             out_path = str(corpus_dir / f"{emotion}_{i:03d}.wav")
 
             try:
