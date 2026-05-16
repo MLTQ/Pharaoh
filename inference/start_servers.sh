@@ -11,9 +11,10 @@
 #                optional AudioLDM runner: inference/.venv-audioldm/bin/python3
 #   Post       : inference/.venv-audiosr/bin/python3       (optional AudioSR)
 #   Chatterbox : inference/.venv-chatterbox/bin/python3    (PHARAOH_CHATTERBOX_PYTHON)
+#   RVC        : inference/.venv-rvc/bin/python3           (PHARAOH_RVC_PYTHON)
 #
-# These envs MUST be separate — qwen-tts, ace-step, Woosh, AudioLDM, and
-# chatterbox-tts all pin or expect incompatible transformers/runtime stacks.
+# These envs MUST be separate — qwen-tts, ace-step, Woosh, AudioLDM,
+# chatterbox-tts, and rvc-python all pin or expect incompatible stacks.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -31,6 +32,7 @@ TTS_PYTHON="${PHARAOH_TTS_PYTHON:-${SCRIPT_DIR}/.venv-tts/bin/python3}"
 MUSIC_PYTHON="${PHARAOH_MUSIC_PYTHON:-${SCRIPT_DIR}/.venv-music/bin/python3}"
 POST_PYTHON="${PHARAOH_POST_PYTHON:-${SCRIPT_DIR}/.venv-audiosr/bin/python3}"
 CHATTERBOX_PYTHON="${PHARAOH_CHATTERBOX_PYTHON:-${SCRIPT_DIR}/.venv-chatterbox/bin/python3}"
+RVC_PYTHON="${PHARAOH_RVC_PYTHON:-${SCRIPT_DIR}/.venv-rvc/bin/python3}"
 WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
 
 missing=0
@@ -63,6 +65,11 @@ if [ -x "${CHATTERBOX_PYTHON}" ]; then
 else
     echo "  Chatterbox : not installed (PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh)"
 fi
+if [ -x "${RVC_PYTHON}" ]; then
+    echo "  RVC        : ${RVC_PYTHON}"
+else
+    echo "  RVC        : not installed (PHARAOH_INSTALL_RVC=1 ./inference/setup.sh)"
+fi
 echo ""
 
 cd "$SCRIPT_DIR"
@@ -76,6 +83,9 @@ fi
 if [ -x "${CHATTERBOX_PYTHON}" ]; then
     "${CHATTERBOX_PYTHON}" chatterbox_server.py &
 fi
+if [ -x "${RVC_PYTHON}" ]; then
+    "${RVC_PYTHON}" rvc_server.py &
+fi
 
 echo "  TTS        → http://localhost:18001/health"
 echo "  SFX        → http://localhost:18002/health"
@@ -85,6 +95,9 @@ if [ -x "${POST_PYTHON}" ]; then
 fi
 if [ -x "${CHATTERBOX_PYTHON}" ]; then
     echo "  Chatterbox → http://localhost:18005/health"
+fi
+if [ -x "${RVC_PYTHON}" ]; then
+    echo "  RVC        → http://localhost:18006/health"
 fi
 echo ""
 echo "Press Ctrl-C to stop all servers."
