@@ -11,6 +11,7 @@ mod integration_tests;
 use models::{AppConfig, AppState};
 use tauri::Manager;
 use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
+use crate::commands::recording::RecordingState;
 
 pub fn run() {
     tauri::Builder::default()
@@ -30,6 +31,7 @@ pub fn run() {
             ensure_app_dirs(&app_config)?;
 
             app.manage(AppState::new(config_path, app_config));
+            app.manage(RecordingState::new());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
@@ -95,6 +97,10 @@ pub fn run() {
             commands::audio_engine::render_scene,
             commands::audio_engine::render_episode,
             commands::audio_engine::read_render_meta,
+            // Audio recording (CPAL / CoreAudio)
+            commands::recording::list_audio_inputs,
+            commands::recording::start_recording,
+            commands::recording::stop_recording,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -33,6 +33,7 @@ thiserror = "2"
 hound = "3"
 zip = { version = "2", features = ["deflate"] }
 dirs = "5"
+cpal = "0.15"
 
 [profile.release]
 panic = "abort"

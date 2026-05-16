@@ -10,3 +10,4 @@ pub mod script;
 pub mod settings;
 pub mod setup;
 pub mod sidecar;
+pub mod recording;

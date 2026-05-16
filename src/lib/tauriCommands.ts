@@ -346,6 +346,45 @@ export interface RenderMeta {
 export const readRenderMeta = (renderPath: string): Promise<RenderMeta | null> =>
   invoke("read_render_meta", { renderPath });
 
+// ── Audio recording (CPAL / CoreAudio) ──────────────────────────────────────
+
+export interface AudioDevice {
+  name: string;
+  channels: number;
+  sample_rates: number[];
+  is_default: boolean;
+}
+
+export interface RecordingResult {
+  path: string;
+  duration_ms: number;
+}
+
+/** List all CoreAudio input devices. Default device is first. */
+export const listAudioInputs = (): Promise<AudioDevice[]> =>
+  invoke("list_audio_inputs");
+
+/**
+ * Open a CPAL stream on `deviceName` and start writing to `outputPath`.
+ * Emits `recording:peak` events { peak_db, rms_db } ~30 Hz while recording.
+ */
+export const startRecording = (args: {
+  deviceName: string;
+  outputPath: string;
+  mono: boolean;
+  sampleRate: number;
+}): Promise<void> =>
+  invoke("start_recording", {
+    deviceName: args.deviceName,
+    outputPath: args.outputPath,
+    mono: args.mono,
+    sampleRate: args.sampleRate,
+  });
+
+/** Stop recording, finalize the WAV. Returns path + duration_ms. */
+export const stopRecording = (): Promise<RecordingResult> =>
+  invoke("stop_recording");
+
 // ── Setup integrity ─────────────────────────────────────────────────────────
 
 export interface ToolStatus {
