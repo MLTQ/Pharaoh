@@ -374,27 +374,78 @@ def _do_train(params: TrainParams, job_id: str = "") -> None:
 
 def _do_convert(params: ConvertParams) -> None:
     """
-    Blocking RVC voice conversion using the loaded RVCInference singleton.
-    Loads the requested model, converts the input file, writes the output.
-    """
-    global _model
+    Blocking RVC voice conversion via applio_infer_worker.py.
 
-    # Load the specific character model into the singleton
-    _model.load_model(params.model_path, params.index_path or "")
-    log.info(f"Loaded RVC model: {params.model_path}")
+    Routes through Applio's run_infer_script (using .venv-applio) so that the
+    same contentvec/768-dim architecture used during training is used at
+    inference time.  This avoids the rvc-python v1/v2 mismatch
+    (SynthesizerTrnMs256NSFsid vs SynthesizerTrnMs768NSFsid).
+    """
+    import json
+    import subprocess
+    import tempfile
+
+    script_dir    = Path(__file__).parent
+    applio_dir    = Path(os.environ.get("PHARAOH_APPLIO_DIR",  str(script_dir / ".applio")))
+    applio_venv   = Path(os.environ.get("PHARAOH_APPLIO_VENV", str(script_dir / ".venv-applio")))
+    applio_python = applio_venv / "bin" / "python3"
+    worker_script = script_dir / "applio_infer_worker.py"
+
+    if not applio_python.is_file():
+        raise RuntimeError(
+            f"Applio venv not found at {applio_venv}. "
+            "Run: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh"
+        )
+    if not worker_script.is_file():
+        raise FileNotFoundError(f"applio_infer_worker.py not found at {worker_script}")
 
     Path(params.output_path).parent.mkdir(parents=True, exist_ok=True)
 
-    _model.infer_file(
-        params.input_path,
-        params.output_path,
-        f0method=params.f0_method,
-        f0_up_key=params.pitch_shift,
-        index_rate=params.index_rate,
-        filter_radius=params.filter_radius,
-        rms_mix_rate=params.rms_mix_rate,
-        protect=params.protect,
-    )
+    worker_params = {
+        "applio_dir":    str(applio_dir),
+        "input_path":    params.input_path,
+        "output_path":   params.output_path,
+        "pth_path":      params.model_path,
+        "index_path":    params.index_path or "",
+        "pitch_shift":   params.pitch_shift,
+        "index_rate":    params.index_rate,
+        "f0_method":     params.f0_method,
+        "filter_radius": params.filter_radius,
+        "rms_mix_rate":  params.rms_mix_rate,
+        "protect":       params.protect,
+    }
+
+    with tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False) as f:
+        json.dump(worker_params, f)
+        params_file = f.name
+
+    try:
+        log.info(f"Launching Applio inference worker for {params.input_path}")
+        result = subprocess.run(
+            [str(applio_python), str(worker_script), params_file],
+            capture_output=True,
+            text=True,
+            cwd=str(applio_dir),
+        )
+        # Mirror worker output to server log
+        if result.stdout:
+            for line in result.stdout.splitlines():
+                log.info(f"[applio-infer] {line}")
+        if result.stderr:
+            for line in result.stderr.splitlines():
+                log.warning(f"[applio-infer] {line}")
+
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"applio_infer_worker exited {result.returncode}. "
+                f"stderr: {result.stderr[-2000:]}"
+            )
+    finally:
+        Path(params_file).unlink(missing_ok=True)
+
+    if not Path(params.output_path).is_file():
+        raise RuntimeError(f"Conversion completed but output not found: {params.output_path}")
+
     log.info(f"RVC conversion done: {params.output_path}")
 
 
@@ -435,12 +486,6 @@ async def _run_train(job_id: str, params: TrainParams) -> None:
 async def _run_convert(job_id: str, params: ConvertParams) -> None:
     """Background task: run RVC conversion and update job store."""
     jobs.update(job_id, status="running", progress=0.05)
-
-    err = await _ensure_model()
-    if err:
-        jobs.update(job_id, status="failed", error=err)
-        return
-
     jobs.update(job_id, progress=0.15)
 
     if not Path(params.input_path).is_file():
@@ -502,7 +547,7 @@ async def health() -> dict:
     """Return server and model-load status."""
     return {
         "status": "ok",
-        "model_loaded": _model is not None,
+        "model_loaded": True,   # conversion now uses applio_infer_worker (no singleton)
         "model_variant": "rvc-v2",
         "vram_mb": 0,
         "stub": False,
