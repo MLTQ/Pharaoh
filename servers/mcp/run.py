@@ -555,6 +555,208 @@ def write_script(
     return json.dumps({"ok": True, "rows_written": len(normalized)})
 
 
+# ── Project / Scene / Character metadata ──────────────────────────────────────
+
+@mcp.tool()
+def list_projects() -> str:
+    """
+    List all projects in the projects directory.
+    Returns id, title, logline, tone, character_count, and updated_at for each,
+    sorted newest-first. Use this at the start of a session to discover projects.
+    """
+    if not PROJECTS_DIR.exists():
+        return json.dumps([])
+    results = []
+    for entry in PROJECTS_DIR.iterdir():
+        proj_file = entry / "project.json"
+        if not proj_file.exists():
+            continue
+        try:
+            p = json.loads(proj_file.read_text())
+            results.append({
+                "id": p.get("id"),
+                "title": p.get("title"),
+                "logline": p.get("logline", ""),
+                "tone": p.get("tone", ""),
+                "character_count": len(p.get("characters", [])),
+                "updated_at": p.get("updated_at"),
+            })
+        except Exception:
+            continue
+    results.sort(key=lambda p: p.get("updated_at") or "", reverse=True)
+    return json.dumps(results, indent=2)
+
+
+@mcp.tool()
+def get_project(project_id: str) -> str:
+    """
+    Return the full project metadata: title, logline, synopsis, tone,
+    global_audio_notes, target_duration_minutes, characters, and llm_config.
+    """
+    return json.dumps(_project_json(project_id), indent=2)
+
+
+@mcp.tool()
+def update_project(
+    project_id: str,
+    title: str = "",
+    logline: str = "",
+    synopsis: str = "",
+    tone: str = "",
+    global_audio_notes: str = "",
+    target_duration_minutes: int = 0,
+) -> str:
+    """
+    Update top-level project metadata. Only supply fields you want to change —
+    empty string or 0 means "no change". Touches updated_at automatically.
+    """
+    proj_path = _project_dir(project_id) / "project.json"
+    project = _project_json(project_id)
+    if title:
+        project["title"] = title
+    if logline:
+        project["logline"] = logline
+    if synopsis:
+        project["synopsis"] = synopsis
+    if tone:
+        project["tone"] = tone
+    if global_audio_notes:
+        project["global_audio_notes"] = global_audio_notes
+    if target_duration_minutes > 0:
+        project["target_duration_minutes"] = target_duration_minutes
+    project["updated_at"] = datetime.now(timezone.utc).isoformat()
+    proj_path.write_text(json.dumps(project, indent=2))
+    return json.dumps({"ok": True, "project_id": project_id})
+
+
+@mcp.tool()
+def list_scenes(project_id: str) -> str:
+    """
+    Return all scenes in a project's storyboard sorted by index.
+    Each entry includes slug, title, description, location, status, and characters.
+    """
+    storyboard = _storyboard_json(project_id)
+    return json.dumps(storyboard.get("scenes", []), indent=2)
+
+
+@mcp.tool()
+def get_scene(project_id: str, scene_slug: str) -> str:
+    """
+    Return full metadata for a single scene identified by its slug.
+    """
+    for scene in _storyboard_json(project_id).get("scenes", []):
+        if scene.get("slug") == scene_slug:
+            return json.dumps(scene, indent=2)
+    return json.dumps({"error": f"scene not found: {scene_slug}"})
+
+
+@mcp.tool()
+def update_scene(
+    project_id: str,
+    scene_slug: str,
+    title: str = "",
+    description: str = "",
+    location: str = "",
+    notes: str = "",
+    status: str = "",
+) -> str:
+    """
+    Update scene metadata in storyboard.json.
+    Only supply fields you want to change — empty string means "no change".
+    status values: draft, generating, assets_ready, composed, rendered.
+    """
+    storyboard_path = _project_dir(project_id) / "storyboard.json"
+    storyboard = _storyboard_json(project_id)
+    for scene in storyboard.get("scenes", []):
+        if scene.get("slug") == scene_slug:
+            if title:
+                scene["title"] = title
+            if description:
+                scene["description"] = description
+            if location:
+                scene["location"] = location
+            if notes:
+                scene["notes"] = notes
+            if status:
+                scene["status"] = status
+            storyboard_path.write_text(json.dumps(storyboard, indent=2))
+            proj_path = _project_dir(project_id) / "project.json"
+            if proj_path.exists():
+                project = json.loads(proj_path.read_text())
+                project["updated_at"] = datetime.now(timezone.utc).isoformat()
+                proj_path.write_text(json.dumps(project, indent=2))
+            return json.dumps({"ok": True, "scene_slug": scene_slug})
+    return json.dumps({"error": f"scene not found: {scene_slug}"})
+
+
+@mcp.tool()
+def list_characters(project_id: str) -> str:
+    """
+    Return all characters in a project with their id, name, description,
+    and voice_assignment (model, speaker, base_voice_description, rvc_enabled, etc.).
+    """
+    return json.dumps(_project_json(project_id).get("characters", []), indent=2)
+
+
+@mcp.tool()
+def update_character(
+    project_id: str,
+    character_id: str,
+    name: str = "",
+    description: str = "",
+    voice_model: str = "",
+    speaker: str = "",
+    base_voice_description: str = "",
+    instruct_default: str = "",
+) -> str:
+    """
+    Update a character's metadata or voice_assignment fields.
+    Only supply fields you want to change — empty string means "no change".
+
+    voice_model: "Chatterbox" | "VoiceDesign" | "Clone" | "FineTuned"
+    base_voice_description: Qwen3-TTS VoiceDesign prompt for this character.
+    instruct_default: Default generation instruction appended to TTS prompts.
+    """
+    proj_path = _project_dir(project_id) / "project.json"
+    project = _project_json(project_id)
+    for char in project.get("characters", []):
+        if char["id"] == character_id:
+            if name:
+                char["name"] = name
+            if description:
+                char["description"] = description
+            va = char.setdefault("voice_assignment", {})
+            if voice_model:
+                va["model"] = voice_model
+            if speaker:
+                va["speaker"] = speaker
+            if base_voice_description:
+                va["base_voice_description"] = base_voice_description
+            if instruct_default:
+                va["instruct_default"] = instruct_default
+            project["updated_at"] = datetime.now(timezone.utc).isoformat()
+            proj_path.write_text(json.dumps(project, indent=2))
+            return json.dumps({"ok": True, "character_id": character_id})
+    return json.dumps({"error": f"character not found: {character_id}"})
+
+
+@mcp.tool()
+def delete_character(project_id: str, character_id: str) -> str:
+    """
+    Remove a character from a project.
+    Does NOT delete generated audio or palette files — those remain on disk.
+    """
+    proj_path = _project_dir(project_id) / "project.json"
+    project = _project_json(project_id)
+    before = len(project.get("characters", []))
+    project["characters"] = [c for c in project.get("characters", []) if c["id"] != character_id]
+    if len(project["characters"]) == before:
+        return json.dumps({"error": f"character not found: {character_id}"})
+    project["updated_at"] = datetime.now(timezone.utc).isoformat()
+    proj_path.write_text(json.dumps(project, indent=2))
+    return json.dumps({"ok": True, "removed": 1})
+
+
 @mcp.tool()
 def generate_tts(
     project_id: str,
@@ -1095,6 +1297,374 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
         }))
 
 
+# ── Asset metadata & take management ─────────────────────────────────────────
+
+@mcp.tool()
+def read_asset_meta(audio_path: str) -> str:
+    """
+    Read the .meta.json sidecar for a generated audio file.
+    Returns model, prompt, seed, qa_status, duration_actual_ms, take_index,
+    parent, generated_at, and other generation parameters.
+    Returns {"error": "..."} if no sidecar exists.
+    """
+    meta = _read_meta(audio_path)
+    if meta is None:
+        return json.dumps({"error": f"no sidecar for: {audio_path}"})
+    return json.dumps(meta, indent=2)
+
+
+@mcp.tool()
+def list_asset_takes(audio_path: str) -> str:
+    """
+    Enumerate all take files for a given base audio path.
+    Scans the parent directory for files matching the stem (e.g. all takes of
+    "mira_line_01.wav" that share the same stem prefix).
+    Returns takes sorted by take_index with paths, qa_status, and metadata.
+    """
+    p = Path(audio_path)
+    stem = p.stem
+    takes = []
+    for meta_file in sorted(p.parent.glob(f"{stem}*.wav.meta.json")):
+        wav = meta_file.parent / meta_file.name.removesuffix(".meta.json")
+        if not wav.exists():
+            continue
+        try:
+            meta = json.loads(meta_file.read_text())
+        except Exception:
+            continue
+        takes.append({
+            "audio_path": str(wav),
+            "take_index": meta.get("take_index", 0),
+            "model": meta.get("model", ""),
+            "qa_status": meta.get("qa_status", "unreviewed"),
+            "duration_ms": meta.get("duration_actual_ms"),
+            "generated_at": meta.get("generated_at", ""),
+            "seed": meta.get("seed"),
+        })
+    takes.sort(key=lambda t: t["take_index"])
+    return json.dumps(takes, indent=2)
+
+
+@mcp.tool()
+def list_palette_takes(project_id: str, character_id: str, emotion: str) -> str:
+    """
+    List all palette take WAV files for a character/emotion combination.
+    Palette takes live in characters/{character_id}/palette/ named like
+    "{emotion}_{timestamp}.wav". Sorted oldest to newest.
+    """
+    palette_dir = _project_dir(project_id) / "characters" / character_id / "palette"
+    if not palette_dir.exists():
+        return json.dumps([])
+    files = []
+    for f in sorted(palette_dir.glob(f"{emotion}_*.wav")):
+        meta = _read_meta(str(f))
+        files.append({
+            "path": str(f),
+            "qa_status": meta.get("qa_status", "unreviewed") if meta else "unreviewed",
+            "seed": meta.get("seed") if meta else None,
+            "generated_at": meta.get("generated_at", "") if meta else "",
+        })
+    return json.dumps(files, indent=2)
+
+
+@mcp.tool()
+def list_rvc_models(project_id: str, character_id: str) -> str:
+    """
+    List trained RVC models available for a character.
+    Scans characters/{character_id}/rvc/ for .pth files and checks for a
+    matching .index (FAISS) file. Returns name, pth_path, index_path, size_bytes.
+    """
+    rvc_dir = _project_dir(project_id) / "characters" / character_id / "rvc"
+    if not rvc_dir.exists():
+        return json.dumps([])
+    models = []
+    for pth in sorted(rvc_dir.glob("*.pth")):
+        index = pth.with_suffix(".index")
+        models.append({
+            "name": pth.stem,
+            "pth_path": str(pth),
+            "index_path": str(index) if index.exists() else None,
+            "size_bytes": pth.stat().st_size,
+        })
+    return json.dumps(models, indent=2)
+
+
+# ── Post-processing (ffmpeg-local + AudioSR) ──────────────────────────────────
+
+def _run_ffmpeg(args: list[str]) -> tuple[bool, str]:
+    """Run ffmpeg with the given args. Returns (success, error_message)."""
+    try:
+        result = subprocess.run(
+            ["ffmpeg"] + args,
+            capture_output=True, text=True, timeout=300,
+        )
+        if result.returncode != 0:
+            return False, result.stderr[-2000:] if result.stderr else "ffmpeg failed"
+        return True, ""
+    except FileNotFoundError:
+        return False, "ffmpeg not found — install ffmpeg"
+    except subprocess.TimeoutExpired:
+        return False, "ffmpeg timed out"
+
+
+def _wav_duration_ms(path: str) -> int | None:
+    """Return duration in milliseconds by reading the WAV header, or None."""
+    try:
+        import wave
+        with wave.open(path, "rb") as w:
+            frames = w.getnframes()
+            rate = w.getframerate()
+            if rate > 0:
+                return int(frames * 1000 / rate)
+    except Exception:
+        pass
+    return None
+
+
+@mcp.tool()
+def import_audio(
+    project_id: str,
+    source_path: str,
+    label: str = "",
+) -> str:
+    """
+    Import an arbitrary audio file into a project as a sidecar-indexed WAV.
+    Converts to 48 kHz mono WAV via ffmpeg and writes it to
+    scenes/__imports/assets/ with a full sidecar.
+    Useful for bringing in reference recordings, foley, or licensed music.
+    Returns the path of the imported WAV.
+    """
+    source = Path(source_path)
+    if not source.exists():
+        return json.dumps({"error": f"source not found: {source_path}"})
+
+    stem = re.sub(r"[^a-z0-9_\-]", "_", (label or source.stem).lower()).strip("_") or "audio"
+    imports_dir = _project_dir(project_id) / "scenes" / "__imports" / "assets"
+    imports_dir.mkdir(parents=True, exist_ok=True)
+
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    output = str(imports_dir / f"{stem}.import.{ts}.wav")
+
+    ok, err = _run_ffmpeg(["-y", "-i", source_path, "-ar", "48000", "-ac", "1", output])
+    if not ok:
+        return json.dumps({"error": err})
+
+    duration_ms = _wav_duration_ms(output)
+    _write_meta(output, {
+        "model": "tts-reference-import",
+        "model_variant": "ffmpeg-import",
+        "prompt": f"Imported reference recording: {label or source.stem}",
+        "instruct": f"source={source_path}",
+        "seed": 0,
+        "duration_actual_ms": duration_ms,
+        "sample_rate": 48000,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "parent": source_path,
+        "take_index": 0,
+        "qa_status": "unreviewed",
+        "qa_notes": "",
+    })
+    return json.dumps({"ok": True, "output_path": output, "duration_ms": duration_ms})
+
+
+@mcp.tool()
+def process_clip(
+    audio_path: str,
+    start_ms: int = 0,
+    end_ms: int = 0,
+    gain_db: float = 0.0,
+    fade_in_ms: int = 0,
+    fade_out_ms: int = 0,
+    normalize_lufs: float = 0.0,
+    highpass_hz: int = 0,
+    lowpass_hz: int = 0,
+) -> str:
+    """
+    Non-destructively trim, fade, and filter a WAV via ffmpeg.
+    Output is written to {stem}.clip.{timestamp}.wav next to the original.
+    A child sidecar is written linking back to the parent.
+
+    start_ms / end_ms: clip window (0 = no trim at that end)
+    gain_db: volume adjustment in dB (0 = no change)
+    fade_in_ms / fade_out_ms: linear fade lengths
+    normalize_lufs: target LUFS for loudnorm (0 = skip; typical values: -16, -23)
+    highpass_hz / lowpass_hz: EQ shelf cutoffs (0 = skip)
+    """
+    if not Path(audio_path).exists():
+        return json.dumps({"error": f"file not found: {audio_path}"})
+
+    stem = Path(audio_path).stem
+    ts = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
+    output = str(Path(audio_path).parent / f"{stem}.clip.{ts}.wav")
+
+    args = ["-y"]
+    if start_ms > 0:
+        args += ["-ss", f"{start_ms / 1000:.3f}"]
+    clip_duration_ms = None
+    if end_ms > 0 and end_ms > start_ms:
+        dur = end_ms - start_ms
+        clip_duration_ms = dur
+        args += ["-t", f"{dur / 1000:.3f}"]
+    args += ["-i", audio_path]
+
+    filters = []
+    if highpass_hz > 0:
+        filters.append(f"highpass=f={highpass_hz}")
+    if lowpass_hz > 0:
+        filters.append(f"lowpass=f={lowpass_hz}")
+    if abs(gain_db) > 0.001:
+        filters.append(f"volume={gain_db:.2f}dB")
+    if fade_in_ms > 0:
+        filters.append(f"afade=t=in:st=0:d={fade_in_ms / 1000:.3f}")
+    if fade_out_ms > 0 and clip_duration_ms and clip_duration_ms > fade_out_ms:
+        st = (clip_duration_ms - fade_out_ms) / 1000
+        filters.append(f"afade=t=out:st={st:.3f}:d={fade_out_ms / 1000:.3f}")
+    if normalize_lufs != 0.0:
+        filters.append(f"loudnorm=I={normalize_lufs:.1f}:TP=-1.5:LRA=11")
+    if filters:
+        args += ["-af", ",".join(filters)]
+
+    args += ["-ar", "48000", "-ac", "2", output]
+
+    ok, err = _run_ffmpeg(args)
+    if not ok:
+        return json.dumps({"error": err})
+
+    duration_ms = _wav_duration_ms(output)
+    parent_meta = _read_meta(audio_path) or {}
+    _write_meta(output, {
+        "model": "clip-studio",
+        "model_variant": "ffmpeg",
+        "prompt": parent_meta.get("prompt", "Manual clip edit"),
+        "instruct": (
+            f"trim={start_ms}..{end_ms or 'end'}ms; gain={gain_db:.2f}dB; "
+            f"fade_in={fade_in_ms}ms; fade_out={fade_out_ms}ms; "
+            f"highpass={highpass_hz}Hz; lowpass={lowpass_hz}Hz; "
+            f"normalize={normalize_lufs}LUFS"
+        ),
+        "seed": parent_meta.get("seed", 0),
+        "duration_actual_ms": duration_ms,
+        "sample_rate": 48000,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "parent": audio_path,
+        "take_index": parent_meta.get("take_index", 0) + 1,
+        "qa_status": "unreviewed",
+        "qa_notes": "",
+    })
+    return json.dumps({"ok": True, "output_path": output, "duration_ms": duration_ms})
+
+
+@mcp.tool()
+def normalize_audio(audio_path: str, target_lufs: float = -16.0) -> str:
+    """
+    Normalize a WAV to target integrated loudness (LUFS) using ffmpeg loudnorm.
+    Output is written to {stem}.norm.wav next to the original.
+    Typical targets: -16 LUFS (podcast/streaming), -23 LUFS (broadcast EBU R128).
+    True peak is clamped to -1.5 dBTP.
+    """
+    if not Path(audio_path).exists():
+        return json.dumps({"error": f"file not found: {audio_path}"})
+
+    output = audio_path.removesuffix(".wav") + ".norm.wav"
+    ok, err = _run_ffmpeg([
+        "-y", "-i", audio_path,
+        "-af", f"loudnorm=I={target_lufs:.1f}:TP=-1.5:LRA=11",
+        "-ar", "48000", "-ac", "2", output,
+    ])
+    if not ok:
+        return json.dumps({"error": err})
+
+    duration_ms = _wav_duration_ms(output)
+    parent_meta = _read_meta(audio_path) or {}
+    _write_meta(output, {
+        "model": "clip-studio",
+        "model_variant": "ffmpeg-loudnorm",
+        "prompt": parent_meta.get("prompt", ""),
+        "instruct": f"loudnorm I={target_lufs} TP=-1.5 LRA=11",
+        "seed": parent_meta.get("seed", 0),
+        "duration_actual_ms": duration_ms,
+        "sample_rate": 48000,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "parent": audio_path,
+        "take_index": parent_meta.get("take_index", 0) + 1,
+        "qa_status": "unreviewed",
+        "qa_notes": "",
+    })
+    return json.dumps({"ok": True, "output_path": output, "duration_ms": duration_ms})
+
+
+@mcp.tool()
+def resample_audio(audio_path: str, output_path: str = "") -> str:
+    """
+    Resample a WAV to 48 kHz stereo via ffmpeg.
+    If output_path is omitted, writes to {stem}.48k.wav next to the original.
+    Use this to normalize sample rates before composition — the audio engine
+    requires all inputs to be 48 kHz.
+    """
+    if not Path(audio_path).exists():
+        return json.dumps({"error": f"file not found: {audio_path}"})
+
+    if not output_path:
+        output_path = audio_path.removesuffix(".wav") + ".48k.wav"
+
+    ok, err = _run_ffmpeg(["-y", "-i", audio_path, "-ar", "48000", "-ac", "2", output_path])
+    if not ok:
+        return json.dumps({"error": err})
+
+    duration_ms = _wav_duration_ms(output_path)
+    return json.dumps({"ok": True, "output_path": output_path, "duration_ms": duration_ms})
+
+
+@mcp.tool()
+def upscale_audio(
+    audio_path: str,
+    output_path: str = "",
+    model_name: str = "basic",
+    ddim_steps: int = 50,
+    guidance_scale: float = 3.5,
+    seed: int = 0,
+) -> str:
+    """
+    Upscale a WAV to 48 kHz via AudioSR (post server).
+    Returns a job_id immediately — poll with job_status("post", job_id).
+
+    model_name: "basic" (faster) or "speech" (optimised for voice)
+    ddim_steps: diffusion steps (higher = better quality, slower)
+    guidance_scale: classifier-free guidance strength
+
+    Output path defaults to {stem}.upscaled.{model}.{timestamp}.wav next to input.
+    """
+    p = Path(audio_path)
+    if not p.exists():
+        return json.dumps({"error": f"file not found: {audio_path}"})
+
+    if not output_path:
+        ts = int(time.time() * 1000)
+        output_path = str(p.parent / f"{p.stem}.upscaled.{model_name}.{ts}.wav")
+
+    job_id = f"audiosr-{uuid.uuid4()}"
+    try:
+        resp = _post("post", "/generate/upscale", {
+            "job_id": job_id,
+            "input_path": audio_path,
+            "output_path": output_path,
+            "model_name": model_name,
+            "ddim_steps": ddim_steps,
+            "guidance_scale": guidance_scale,
+            "seed": seed,
+        })
+        server_job_id = resp.get("job_id", job_id)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+    return json.dumps({
+        "ok": True,
+        "job_id": server_job_id,
+        "output_path": output_path,
+        "poll": "job_status('post', job_id)",
+    })
+
+
 @mcp.tool()
 def unload_model(server: str) -> str:
     """
@@ -1149,6 +1719,40 @@ def server_health(server: str = "") -> str:
         except Exception as e:
             results[s] = {"status": "unreachable", "error": str(e)}
     return json.dumps(results, indent=2)
+
+
+@mcp.tool()
+def load_model(server: str) -> str:
+    """
+    Preload an inference model into VRAM on the given server.
+    Call this before starting a generation batch to avoid cold-start latency on
+    the first job. Complement with unload_model when switching servers.
+
+    server: "tts" | "sfx" | "music" | "chatterbox" | "rvc" | "post"
+    """
+    try:
+        resp = _post(server, "/load", {})
+        return json.dumps(resp)
+    except Exception as e:
+        return json.dumps({"error": str(e)})
+
+
+@mcp.tool()
+def get_server_config() -> str:
+    """
+    Return the currently configured inference server URLs.
+    Useful for verifying which endpoints the MCP server is pointed at,
+    especially when running remote or split inference.
+    """
+    return json.dumps({
+        "tts": SERVER_URLS["tts"],
+        "sfx": SERVER_URLS["sfx"],
+        "music": SERVER_URLS["music"],
+        "post": SERVER_URLS["post"],
+        "chatterbox": SERVER_URLS["chatterbox"],
+        "rvc": SERVER_URLS["rvc"],
+        "projects_dir": str(PROJECTS_DIR),
+    }, indent=2)
 
 
 @mcp.tool()
