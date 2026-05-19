@@ -19,9 +19,12 @@ import csv
 import json
 import logging
 import os
+import re
 import subprocess
 import sys
 import time
+import uuid
+from datetime import datetime, timezone
 from io import StringIO
 from pathlib import Path
 from typing import Any
@@ -346,6 +349,210 @@ def update_script_row(
     rows[row_index].update(updates)
     _write_script_rows(project_id, scene_slug, rows)
     return json.dumps({"ok": True, "updated_row": rows[row_index]})
+
+
+@mcp.tool()
+def create_project(
+    title: str,
+    logline: str = "",
+    tone: str = "",
+    synopsis: str = "",
+    global_audio_notes: str = "",
+    target_duration_minutes: int = 30,
+) -> str:
+    """
+    Create a new Pharaoh project and return its project_id.
+    Sets up the directory structure (scenes/, output/), project.json, and an
+    empty storyboard.json. Call this before create_scene or add_character.
+
+    Returns: {"ok": true, "project_id": "...", "title": "..."}
+    """
+    project_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc).isoformat()
+
+    project = {
+        "id": project_id,
+        "title": title,
+        "logline": logline,
+        "synopsis": synopsis,
+        "tone": tone,
+        "global_audio_notes": global_audio_notes,
+        "target_duration_minutes": target_duration_minutes,
+        "created_at": now,
+        "updated_at": now,
+        "characters": [],
+        "llm_config": {
+            "provider": "anthropic",
+            "model": "claude-sonnet-4-6",
+            "api_key_env": "ANTHROPIC_API_KEY",
+        },
+    }
+
+    proj_dir = _project_dir(project_id)
+    (proj_dir / "scenes").mkdir(parents=True, exist_ok=True)
+    (proj_dir / "output").mkdir(parents=True, exist_ok=True)
+    (proj_dir / "project.json").write_text(json.dumps(project, indent=2))
+    (proj_dir / "storyboard.json").write_text(json.dumps({"scenes": []}, indent=2))
+
+    log.info("created project %s: %s", project_id, title)
+    return json.dumps({"ok": True, "project_id": project_id, "title": title})
+
+
+@mcp.tool()
+def add_character(
+    project_id: str,
+    name: str,
+    description: str = "",
+    voice_model: str = "Chatterbox",
+    speaker: str = "",
+    base_voice_description: str = "",
+) -> str:
+    """
+    Add a character to an existing project.
+
+    voice_model options:
+      "Chatterbox"  — palette-guided zero-shot clone (recommended)
+      "VoiceDesign" — Qwen3-TTS text-described voice
+      "Clone"       — ref-audio clone
+      "FineTuned"   — trained model
+
+    base_voice_description: Qwen3-TTS VoiceDesign prompt that anchors this
+    character's vocal identity. Required for Chatterbox/VoiceDesign workflows.
+
+    Returns: {"ok": true, "character_id": "...", "name": "..."}
+    """
+    proj_path = _project_dir(project_id) / "project.json"
+    if not proj_path.exists():
+        return json.dumps({"error": f"project not found: {project_id}"})
+
+    project = json.loads(proj_path.read_text())
+    char_id = str(uuid.uuid4())
+    project["characters"].append({
+        "id": char_id,
+        "name": name,
+        "description": description,
+        "voice_assignment": {
+            "model": voice_model,
+            "speaker": speaker or None,
+            "instruct_default": None,
+            "ref_audio_path": None,
+            "ref_transcript": None,
+            "base_voice_description": base_voice_description,
+            "emotional_palette": [],
+            "rvc_model_path": None,
+            "rvc_index_path": None,
+            "rvc_pitch_shift": 0,
+            "rvc_index_rate": 0.5,
+            "rvc_protect": 0.33,
+            "rvc_enabled": False,
+        },
+    })
+    project["updated_at"] = datetime.now(timezone.utc).isoformat()
+    proj_path.write_text(json.dumps(project, indent=2))
+
+    log.info("added character %s (%s) to project %s", name, char_id, project_id)
+    return json.dumps({"ok": True, "character_id": char_id, "name": name})
+
+
+@mcp.tool()
+def create_scene(
+    project_id: str,
+    title: str,
+    index: int,
+    description: str = "",
+    location: str = "",
+) -> str:
+    """
+    Add a scene to a project's storyboard and create its directory structure.
+
+    Slug is auto-derived from index + title:
+      index=1, title="Descent" → slug="01_descent"
+
+    Creates:
+      scenes/<slug>/assets/
+      scenes/<slug>/render/
+      scenes/<slug>/script.csv  (empty, with header row)
+
+    Returns: {"ok": true, "scene_slug": "...", "scene_id": "..."}
+    """
+    slug = f"{index:02d}_{re.sub(r'[^a-z0-9_]', '', title.lower().replace(' ', '_'))}"
+
+    scene = {
+        "id": str(uuid.uuid4()),
+        "index": index,
+        "slug": slug,
+        "title": title,
+        "description": description,
+        "location": location,
+        "characters": [],
+        "notes": "",
+        "connects_from": None,
+        "connects_to": None,
+        "status": "draft",
+    }
+
+    scene_dir = _scene_dir(project_id, slug)
+    (scene_dir / "assets").mkdir(parents=True, exist_ok=True)
+    (scene_dir / "render").mkdir(parents=True, exist_ok=True)
+    (scene_dir / "script.csv").write_text(
+        "scene,track,type,character,prompt,file,start_ms,duration_ms,"
+        "loop,pan,gain_db,instruct,fade_in_ms,fade_out_ms,reverb_send,notes\n",
+        encoding="utf-8",
+    )
+
+    storyboard_path = _project_dir(project_id) / "storyboard.json"
+    storyboard = _storyboard_json(project_id)
+    storyboard["scenes"].append(scene)
+    storyboard["scenes"].sort(key=lambda s: s["index"])
+    storyboard_path.write_text(json.dumps(storyboard, indent=2))
+
+    proj_path = _project_dir(project_id) / "project.json"
+    if proj_path.exists():
+        project = json.loads(proj_path.read_text())
+        project["updated_at"] = datetime.now(timezone.utc).isoformat()
+        proj_path.write_text(json.dumps(project, indent=2))
+
+    log.info("created scene %s in project %s", slug, project_id)
+    return json.dumps({"ok": True, "scene_slug": slug, "scene_id": scene["id"]})
+
+
+@mcp.tool()
+def write_script(
+    project_id: str,
+    scene_slug: str,
+    rows: list,
+) -> str:
+    """
+    Write or replace the full script for a scene in a single call.
+
+    Each row is a dict. Required fields: type, prompt.
+    Optional fields (default to ""): scene, track, character, file,
+      start_ms, duration_ms, loop, pan, gain_db, instruct,
+      fade_in_ms, fade_out_ms, reverb_send, notes.
+
+    type values: DIALOGUE, SFX, BED, MUSIC, DIRECTION
+    DIRECTION rows carry no audio — use them for composition notes.
+
+    Overwrites any existing script.csv. Use update_script_row for
+    targeted single-row edits after initial population.
+
+    Returns: {"ok": true, "rows_written": N}
+    """
+    FIELDS = [
+        "scene", "track", "type", "character", "prompt", "file",
+        "start_ms", "duration_ms", "loop", "pan", "gain_db", "instruct",
+        "fade_in_ms", "fade_out_ms", "reverb_send", "notes",
+    ]
+    normalized = []
+    for r in rows:
+        row = {f: r.get(f, "") for f in FIELDS}
+        if not row["scene"]:
+            row["scene"] = scene_slug
+        normalized.append(row)
+
+    _write_script_rows(project_id, scene_slug, normalized)
+    log.info("wrote %d script rows for %s/%s", len(normalized), project_id, scene_slug)
+    return json.dumps({"ok": True, "rows_written": len(normalized)})
 
 
 @mcp.tool()
