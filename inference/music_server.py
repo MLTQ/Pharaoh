@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id
+from _common import JobStore, new_job_id, remap_path
 
 log = logging.getLogger(__name__)
 
@@ -196,7 +196,7 @@ async def _run_music(job_id: str, params: dict) -> None:
     jobs.update(job_id, progress=0.05)
     try:
         endpoint = params.get("_endpoint", "text2music")
-        out_path = params["output_path"]
+        out_path = remap_path(params["output_path"])
         seed     = int(params.get("seed", 0)) or None
         steps    = int(params.get("diffusion_steps", 60))
         duration = float(params.get("duration_seconds", 30.0))

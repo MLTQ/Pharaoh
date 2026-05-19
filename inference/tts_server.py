@@ -24,7 +24,7 @@ from pydantic import BaseModel
 import datetime
 import json
 
-from _common import JobStore, new_job_id
+from _common import JobStore, new_job_id, remap_path
 
 log = logging.getLogger(__name__)
 
@@ -307,7 +307,7 @@ async def _run_tts(job_id: str, params: dict) -> None:
         import soundfile as sf
         import torch
 
-        out_path = params["output_path"]
+        out_path = remap_path(params["output_path"])
         language = _LANG_LABEL.get(params.get("language", "en"), "English")
         seed     = int(params.get("seed", 0))
 

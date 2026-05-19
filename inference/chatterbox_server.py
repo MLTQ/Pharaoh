@@ -24,7 +24,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id
+from _common import JobStore, new_job_id, remap_path
 
 log = logging.getLogger(__name__)
 
@@ -170,7 +170,7 @@ async def _run_clone(job_id: str, params: CloneParams) -> None:
 
     jobs.update(job_id, progress=0.10)
     try:
-        out_path = Path(params.output_path)
+        out_path = Path(remap_path(params.output_path))
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         ref_path = Path(params.ref_audio_path)

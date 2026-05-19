@@ -42,7 +42,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id
+from _common import JobStore, new_job_id, remap_path
 
 log = logging.getLogger(__name__)
 
@@ -454,6 +454,12 @@ def _do_convert(params: ConvertParams) -> None:
 async def _run_train(job_id: str, params: TrainParams) -> None:
     """Background task: run RVC training and update job store."""
     jobs.update(job_id, status="running", progress=0.05)
+    # Remap client-side absolute paths to the server's local projects dir.
+    params = params.model_copy(update={
+        "corpus_paths":      [remap_path(p) for p in params.corpus_paths],
+        "output_model_path": remap_path(params.output_model_path),
+        "output_index_path": remap_path(params.output_index_path),
+    })
 
     loop = asyncio.get_running_loop()
     try:
@@ -486,6 +492,11 @@ async def _run_train(job_id: str, params: TrainParams) -> None:
 async def _run_convert(job_id: str, params: ConvertParams) -> None:
     """Background task: run RVC conversion and update job store."""
     jobs.update(job_id, status="running", progress=0.05)
+    # Remap client-side absolute paths to the server's local projects dir.
+    params = params.model_copy(update={
+        "input_path":  remap_path(params.input_path),
+        "output_path": remap_path(params.output_path),
+    })
     jobs.update(job_id, progress=0.15)
 
     if not Path(params.input_path).is_file():
