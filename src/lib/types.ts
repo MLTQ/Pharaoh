@@ -174,6 +174,10 @@ export interface AppConfig {
   models_dir: string;
   woosh_dir: string;
   single_model_mode: boolean;
+  /** Base URL (scheme + host, no port) shared by all inference servers when split_inference_servers is false. */
+  inference_host: string;
+  /** When true, each server has its own URL field. When false, all derive from inference_host + default port. */
+  split_inference_servers: boolean;
 }
 
 export interface AllServerHealth {

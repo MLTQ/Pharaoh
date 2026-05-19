@@ -199,6 +199,14 @@ fn default_single_model_mode() -> bool {
     false
 }
 
+fn default_inference_host() -> String {
+    "http://127.0.0.1".to_string()
+}
+
+fn default_split_inference_servers() -> bool {
+    false
+}
+
 // ── Persistent app config ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -229,6 +237,14 @@ pub struct AppConfig {
     /// When true, auto-unload other heavy models before starting any generation job.
     #[serde(default = "default_single_model_mode")]
     pub single_model_mode: bool,
+    /// Shared scheme+host (no port) for all inference servers when split_inference_servers=false.
+    /// e.g. "http://192.168.1.42" — each server appends its own default port.
+    #[serde(default = "default_inference_host")]
+    pub inference_host: String,
+    /// When false (default), all server URLs derive from inference_host + port.
+    /// When true, each server has its own independently-configurable URL.
+    #[serde(default = "default_split_inference_servers")]
+    pub split_inference_servers: bool,
 }
 
 impl AppConfig {
@@ -253,6 +269,8 @@ impl AppConfig {
                 .to_string_lossy()
                 .into_owned(),
             single_model_mode: false,
+            inference_host: default_inference_host(),
+            split_inference_servers: false,
         }
     }
 }

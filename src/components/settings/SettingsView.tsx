@@ -657,6 +657,28 @@ function WooshInstall({ hw }: { hw: HardwareProfile | null }) {
 
 // ── Main component ────────────────────────────────────────────────────────────
 
+// ── Port map (single source of truth) ─────────────────────────────────────────
+
+const SERVER_PORTS: Record<string, number> = {
+  tts: 18001, sfx: 18002, music: 18003, post: 18004, chatterbox: 18005, rvc: 18006,
+};
+
+function urlsFromHost(host: string): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(SERVER_PORTS).map(([k, p]) => [k, `${host}:${p}`])
+  );
+}
+
+/** Extract scheme+host (no port) from a full URL like http://1.2.3.4:18001 → http://1.2.3.4 */
+function hostFromUrl(url: string): string {
+  try {
+    const u = new URL(url);
+    return `${u.protocol}//${u.hostname}`;
+  } catch {
+    return "http://127.0.0.1";
+  }
+}
+
 export const SettingsView: React.FC = () => {
   const hw = useHardwareProfile();
   const { tts, sfx, music, post, health, updateServerConfig } = useModelStore();
@@ -664,13 +686,16 @@ export const SettingsView: React.FC = () => {
   const statusMap = { tts, sfx, music, post };
   const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post };
 
-  const [urls, setUrls] = useState({
+  const [urls, setUrls] = useState<Record<string, string>>({
     tts:        `http://127.0.0.1:18001`,
     sfx:        `http://127.0.0.1:18002`,
     music:      `http://127.0.0.1:18003`,
     post:       `http://127.0.0.1:18004`,
     chatterbox: `http://127.0.0.1:18005`,
+    rvc:        `http://127.0.0.1:18006`,
   });
+  const [inferenceHost, setInferenceHost] = useState("http://127.0.0.1");
+  const [splitServers, setSplitServers] = useState(false);
   const [chatterboxHealth, setChatterboxHealth] = useState<"unknown" | "online" | "offline">("unknown");
 
   const [wooshDir, setWooshDir] = useState("");
@@ -680,13 +705,45 @@ export const SettingsView: React.FC = () => {
   useEffect(() => {
     invoke<AppConfig>("get_app_config").then((cfg) => {
       setUrls({
-        tts: cfg.tts_url, sfx: cfg.sfx_url, music: cfg.music_url, post: cfg.post_url,
+        tts:        cfg.tts_url,
+        sfx:        cfg.sfx_url,
+        music:      cfg.music_url,
+        post:       cfg.post_url,
         chatterbox: cfg.chatterbox_url ?? "http://127.0.0.1:18005",
+        rvc:        cfg.rvc_url        ?? "http://127.0.0.1:18006",
       });
+      setInferenceHost(cfg.inference_host ?? hostFromUrl(cfg.tts_url));
+      setSplitServers(cfg.split_inference_servers ?? false);
       setWooshDir(cfg.woosh_dir ?? "");
       setSingleModelMode(cfg.single_model_mode ?? false);
     }).catch(() => {});
   }, []);
+
+  // The URL actually used for a given server key
+  const effectiveUrl = (key: string) =>
+    splitServers ? urls[key] : `${inferenceHost}:${SERVER_PORTS[key]}`;
+
+  const handleHostBlur = async () => {
+    const derived = urlsFromHost(inferenceHost);
+    const cfg = await invoke<AppConfig>("get_app_config");
+    await invoke("save_app_config", {
+      config: {
+        ...cfg,
+        inference_host:        inferenceHost,
+        split_inference_servers: false,
+        tts_url:        derived.tts,
+        sfx_url:        derived.sfx,
+        music_url:      derived.music,
+        post_url:       derived.post,
+        chatterbox_url: derived.chatterbox,
+        rvc_url:        derived.rvc,
+      },
+    });
+    await updateServerConfig({
+      tts_url: derived.tts, sfx_url: derived.sfx,
+      music_url: derived.music, post_url: derived.post,
+    });
+  };
 
   const handleUrlBlur = async (kind: "tts" | "sfx" | "music" | "post") => {
     await updateServerConfig({ [`${kind}_url`]: urls[kind] });
@@ -699,9 +756,34 @@ export const SettingsView: React.FC = () => {
     await invoke("save_app_config", { config: { ...cfg, chatterbox_url: urls.chatterbox } });
   };
 
+  const handleRvcUrlBlur = async () => {
+    const cfg = await invoke<AppConfig>("get_app_config");
+    await invoke("save_app_config", { config: { ...cfg, rvc_url: urls.rvc } });
+  };
+
+  const handleSplitToggle = async (enabled: boolean) => {
+    setSplitServers(enabled);
+    const cfg = await invoke<AppConfig>("get_app_config");
+    if (!enabled) {
+      // Switching to unified — also update saved URLs to match derived values
+      const derived = urlsFromHost(inferenceHost);
+      await invoke("save_app_config", {
+        config: {
+          ...cfg,
+          split_inference_servers: false,
+          inference_host: inferenceHost,
+          tts_url: derived.tts, sfx_url: derived.sfx, music_url: derived.music,
+          post_url: derived.post, chatterbox_url: derived.chatterbox, rvc_url: derived.rvc,
+        },
+      });
+    } else {
+      await invoke("save_app_config", { config: { ...cfg, split_inference_servers: true } });
+    }
+  };
+
   const checkChatterboxHealth = async () => {
     try {
-      const res = await fetch(`${urls.chatterbox}/health`);
+      const res = await fetch(`${effectiveUrl("chatterbox")}/health`);
       setChatterboxHealth(res.ok ? "online" : "offline");
     } catch {
       setChatterboxHealth("offline");
@@ -777,9 +859,60 @@ export const SettingsView: React.FC = () => {
         </div>
 
         {/* ── Server cards ─────────────────────────────────────────────── */}
-        <div style={{ marginBottom: 8 }}>
-          <div className="eyebrow" style={{ marginBottom: 12 }}>Inference servers</div>
+        <div style={{ marginBottom: 12, display: "flex", alignItems: "baseline", gap: 12 }}>
+          <div className="eyebrow">Inference servers</div>
+          <button
+            onClick={() => handleSplitToggle(!splitServers)}
+            style={{
+              fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.05em",
+              color: splitServers ? "var(--tts)" : "var(--fg-4)",
+              background: "none", border: "none", cursor: "pointer", padding: 0,
+              textDecoration: "none",
+            }}
+          >
+            {splitServers ? "▾ individual urls" : "▸ split servers"}
+          </button>
         </div>
+
+        {/* Unified host field */}
+        {!splitServers && (
+          <div style={{
+            border: "1px solid var(--line-1)", background: "var(--bg-1)",
+            borderRadius: 3, marginBottom: 14, padding: "14px 16px",
+            display: "flex", flexDirection: "column", gap: 10,
+          }}>
+            <div>
+              <Label>Inference host</Label>
+              <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <input
+                  type="text"
+                  value={inferenceHost}
+                  onChange={(e) => setInferenceHost(e.target.value)}
+                  onBlur={handleHostBlur}
+                  placeholder="http://127.0.0.1"
+                  style={{
+                    flex: 1, fontFamily: "var(--font-mono)", fontSize: 12,
+                    background: "var(--bg-0)", border: "1px solid var(--line-1)",
+                    borderRadius: 2, padding: "6px 10px", color: "var(--fg-1)",
+                  }}
+                />
+              </div>
+              <div style={{ marginTop: 8, fontSize: 10.5, color: "var(--fg-4)", lineHeight: 1.6 }}>
+                All servers run on this host using their default ports.
+                Change to a remote IP or hostname to point Pharaoh at a cloud GPU box.
+              </div>
+            </div>
+            {/* Port summary */}
+            <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
+              {Object.entries(SERVER_PORTS).map(([key, port]) => (
+                <span key={key} style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)" }}>
+                  <span style={{ color: "var(--fg-2)" }}>{key}</span>
+                  :{port}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
 
         {MODELS.map((m) => {
           const status = statusMap[m.kind];
@@ -821,12 +954,21 @@ export const SettingsView: React.FC = () => {
                   }}>:{m.port}</span>
                 )}
                 <span style={{ flex: 1 }} />
+                {!splitServers && (
+                  <span style={{
+                    fontFamily: "var(--font-mono)", fontSize: 9.5,
+                    color: "var(--fg-4)", marginRight: 8,
+                  }}>
+                    {effectiveUrl(m.kind)}
+                  </span>
+                )}
                 <span style={{ fontSize: 11, color: "var(--fg-3)" }}>{m.description}</span>
               </div>
 
               {/* Body */}
               <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 14 }}>
-                {/* URL + health */}
+                {/* URL + health — only shown in split mode */}
+                {splitServers && (
                 <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
                   <div style={{ flex: 1 }}>
                     <Label>Server URL</Label>
@@ -864,6 +1006,19 @@ export const SettingsView: React.FC = () => {
                     </span>
                   </div>
                 </div>
+                )}
+                {/* Health badge in unified mode (no URL input) */}
+                {!splitServers && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{
+                      width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                      background: STATUS_COLOR[status] ?? "var(--fg-4)",
+                    }} />
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: STATUS_COLOR[status] ?? "var(--fg-4)" }}>
+                      {status}{h?.vram_mb ? ` · ${h.vram_mb} MB` : ""}
+                    </span>
+                  </div>
+                )}
 
                 {/* Woosh directory (SFX only) */}
                 {m.kind === "sfx" && (
@@ -1069,41 +1224,65 @@ export const SettingsView: React.FC = () => {
             <span style={{ fontWeight: 600, fontSize: 13 }}>Chatterbox Turbo</span>
             <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:18005</span>
             <span style={{ flex: 1 }} />
+            {!splitServers && (
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)", marginRight: 8 }}>
+                {effectiveUrl("chatterbox")}
+              </span>
+            )}
             <span style={{ fontSize: 11, color: "var(--fg-3)" }}>0-shot voice cloning + paralinguistic tags · 0.5B</span>
           </div>
           <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 10 }}>
-            <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
-              <div style={{ flex: 1 }}>
-                <Label>Server URL</Label>
-                <input
-                  type="text"
-                  value={urls.chatterbox}
-                  onChange={(e) => setUrls((prev) => ({ ...prev, chatterbox: e.target.value }))}
-                  onBlur={handleChatterboxUrlBlur}
-                  style={{
-                    width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
-                    background: "var(--bg-0)", border: "1px solid var(--line-1)",
-                    borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
-                    boxSizing: "border-box",
-                  }}
-                />
+            {splitServers ? (
+              <div style={{ display: "flex", gap: 10, alignItems: "flex-end" }}>
+                <div style={{ flex: 1 }}>
+                  <Label>Server URL</Label>
+                  <input
+                    type="text"
+                    value={urls.chatterbox}
+                    onChange={(e) => setUrls((prev) => ({ ...prev, chatterbox: e.target.value }))}
+                    onBlur={handleChatterboxUrlBlur}
+                    style={{
+                      width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
+                      background: "var(--bg-0)", border: "1px solid var(--line-1)",
+                      borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
+                      boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
+                  <Label>Health</Label>
+                  <button
+                    onClick={checkChatterboxHealth}
+                    style={{
+                      fontFamily: "var(--font-mono)", fontSize: 10,
+                      padding: "4px 10px", background: "var(--bg-0)",
+                      border: "1px solid var(--line-1)", borderRadius: 2,
+                      color: chatterboxHealth === "online" ? "#22c55e" : chatterboxHealth === "offline" ? "#ef4444" : "var(--fg-4)",
+                      cursor: "pointer",
+                    }}
+                  >
+                    {chatterboxHealth}
+                  </button>
+                </div>
               </div>
-              <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }}>
-                <Label>Health</Label>
+            ) : (
+              <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                <span style={{
+                  width: 7, height: 7, borderRadius: "50%", flexShrink: 0,
+                  background: chatterboxHealth === "online" ? "#22c55e" : chatterboxHealth === "offline" ? "#ef4444" : "var(--fg-4)",
+                }} />
                 <button
                   onClick={checkChatterboxHealth}
                   style={{
-                    fontFamily: "var(--font-mono)", fontSize: 10,
-                    padding: "4px 10px", background: "var(--bg-0)",
-                    border: "1px solid var(--line-1)", borderRadius: 2,
+                    fontFamily: "var(--font-mono)", fontSize: 10.5,
+                    background: "none", border: "none", cursor: "pointer", padding: 0,
                     color: chatterboxHealth === "online" ? "#22c55e" : chatterboxHealth === "offline" ? "#ef4444" : "var(--fg-4)",
-                    cursor: "pointer",
                   }}
                 >
-                  {chatterboxHealth}
+                  {chatterboxHealth} — click to ping
                 </button>
               </div>
-            </div>
+            )}
             <div style={{ fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6 }}>
               Start with:{" "}
               <code style={{ fontFamily: "var(--font-mono)", fontSize: 10, background: "var(--bg-0)", padding: "1px 4px", borderRadius: 2 }}>
@@ -1117,6 +1296,39 @@ export const SettingsView: React.FC = () => {
             </div>
           </div>
         </div>
+
+        {/* ── RVC card ──────────────────────────────────────────────────── */}
+        {splitServers && (
+          <div style={{
+            border: "1px solid var(--line-1)", background: "var(--bg-1)",
+            borderRadius: 3, marginBottom: 14, overflow: "hidden",
+          }}>
+            <div style={{
+              borderBottom: "1px solid var(--line-1)", padding: "12px 16px",
+              display: "flex", alignItems: "center", gap: 10,
+            }}>
+              <span style={{ fontWeight: 600, fontSize: 13 }}>RVC</span>
+              <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:18006</span>
+              <span style={{ flex: 1 }} />
+              <span style={{ fontSize: 11, color: "var(--fg-3)" }}>Voice conversion · Applio v2</span>
+            </div>
+            <div style={{ padding: "14px 16px" }}>
+              <Label>Server URL</Label>
+              <input
+                type="text"
+                value={urls.rvc}
+                onChange={(e) => setUrls((prev) => ({ ...prev, rvc: e.target.value }))}
+                onBlur={handleRvcUrlBlur}
+                style={{
+                  width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
+                  background: "var(--bg-0)", border: "1px solid var(--line-1)",
+                  borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
+                  boxSizing: "border-box",
+                }}
+              />
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
