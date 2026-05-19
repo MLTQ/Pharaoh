@@ -19,9 +19,11 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -59,6 +61,7 @@ AUDIOSR_CLI = Path(
 
 app = FastAPI(title="Pharaoh Post Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+register_upload_route(app)
 jobs = JobStore()
 
 
@@ -129,7 +132,8 @@ async def _run_upscale(job_id: str, params: UpscaleParams) -> None:
         return
 
     input_path = Path(params.input_path)
-    output_path = Path(params.output_path)
+    resolved_output = remap_path(params.output_path) or server_output_path(job_id)
+    output_path = Path(resolved_output)
     if not input_path.is_file():
         jobs.update(job_id, status="failed", error=f"input audio not found: {input_path}")
         return
@@ -179,13 +183,13 @@ async def _run_upscale(job_id: str, params: UpscaleParams) -> None:
 
         jobs.update(job_id, progress=0.92)
         shutil.copyfile(generated, output_path)
-        _write_sidecar(str(output_path), {
+        _write_sidecar(resolved_output, {
             "model": "audiosr", "model_variant": f"AudioSR-{params.model_name}",
             "prompt": f"[upscale: {params.input_path}]",
             "seed": params.seed, "sample_rate": 48000,
             "parent": str(params.input_path),
         })
-        jobs.update(job_id, status="complete", progress=1.0, output_path=str(output_path))
+        jobs.update(job_id, status="complete", progress=1.0, output_path=resolved_output)
     except Exception as exc:
         log.exception("AudioSR upscale failed")
         jobs.update(job_id, status="failed", error=str(exc))
@@ -228,6 +232,36 @@ async def get_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return jobs.response(job_id)
+
+
+@app.get("/files/{job_id}")
+async def download_file(job_id: str) -> FileResponse:
+    """Stream the output file for a completed job, then delete it from the server.
+
+    Used by remote clients to retrieve generated audio without needing shared
+    filesystem access.  The file (and its .meta.json sidecar) are removed after
+    the response is fully sent, keeping server-output/ clean automatically.
+    """
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    output_path = job.get("output_path")
+    if not output_path or not Path(output_path).is_file():
+        raise HTTPException(status_code=404, detail="output file not available")
+
+    def _cleanup():
+        for p in [output_path, output_path + ".meta.json"]:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    return FileResponse(
+        output_path,
+        media_type="audio/wav",
+        filename=Path(output_path).name,
+        background=BackgroundTask(_cleanup),
+    )
 
 
 @app.post("/load")

@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, server_output_path
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
 
 
 def _write_sidecar(audio_path: str, meta: dict) -> None:
@@ -88,6 +88,7 @@ FRAMES_PER_S  = 100.2   # empirical: 501 latent frames ≈ 5 s
 
 app = FastAPI(title="Pharaoh SFX Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+register_upload_route(app)
 jobs = JobStore()
 _model_loaded = False
 

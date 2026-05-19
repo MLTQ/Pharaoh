@@ -17,11 +17,12 @@
 //! a JSON body, and return the `job_id` immediately so the caller can poll.
 
 use crate::app_support::app_projects_dir;
+use crate::commands;
 use crate::error::{Error, Result};
-use crate::models::AppState;
+use crate::models::{AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus};
 use serde::{Deserialize, Serialize};
 use std::time::Duration;
-use tauri::{AppHandle, State};
+use tauri::{AppHandle, Emitter, State};
 
 // ── Data structures ───────────────────────────────────────────────────────
 
@@ -149,11 +150,13 @@ pub async fn list_rvc_models(
 
 /// Submit a voice-conversion job to the RVC server.
 ///
-/// Returns a `job_id` immediately. The caller should poll
-/// [`get_rvc_job`] until the job reaches `"complete"` or `"failed"`.
+/// Returns a `job_id` immediately. When running against a remote server the
+/// input file is uploaded first, and a background task polls for completion
+/// and downloads the result. For local servers the caller polls via
+/// [`get_rvc_job`] as before.
 #[tauri::command]
 pub async fn submit_rvc_convert(
-    _app: AppHandle,
+    app: AppHandle,
     state: State<'_, AppState>,
     params: RvcConvertParams,
 ) -> Result<String> {
@@ -162,9 +165,35 @@ pub async fn submit_rvc_convert(
         (url, state.http.clone())
     };
 
+    let is_remote = commands::inference::is_remote_url(&base_url);
+
+    // Upload the input audio when running remotely.
+    // model_path and index_path are server-side paths (produced by /train)
+    // so they don't need uploading.
+    // TODO: if the client ever supplies a local model_path/index_path for
+    //       a remotely-run convert, upload those too.
+    let server_input = if is_remote {
+        commands::inference::upload_input_file(&http, &base_url, &params.input_path).await?
+    } else {
+        params.input_path.clone()
+    };
+
+    let body = serde_json::json!({
+        "input_path":    server_input,
+        "output_path":   if is_remote { String::new() } else { params.output_path.clone() },
+        "model_path":    params.model_path,
+        "index_path":    params.index_path,
+        "pitch_shift":   params.pitch_shift,
+        "f0_method":     params.f0_method,
+        "index_rate":    params.index_rate,
+        "filter_radius": params.filter_radius,
+        "rms_mix_rate":  params.rms_mix_rate,
+        "protect":       params.protect,
+    });
+
     let resp: serde_json::Value = http
         .post(format!("{}/convert", base_url))
-        .json(&params)
+        .json(&body)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -178,7 +207,138 @@ pub async fn submit_rvc_convert(
         .ok_or_else(|| Error::Other("missing job_id in RVC convert response".into()))?
         .to_string();
 
+    if is_remote {
+        tokio::spawn(poll_rvc_convert_until_done(
+            app,
+            http,
+            base_url.clone(),
+            format!("{}/jobs", base_url),
+            job_id.clone(),
+            params.output_path.clone(),
+        ));
+    }
+
     Ok(job_id)
+}
+
+/// Background poller for remote RVC convert jobs.
+///
+/// Downloads the converted file once the job completes and emits
+/// `job-complete` / `job-failed` events. No script binding is performed
+/// since RVC convert isn't bound to script rows.
+async fn poll_rvc_convert_until_done(
+    app: AppHandle,
+    http: reqwest::Client,
+    server_base_url: String,
+    jobs_url: String,
+    job_id: String,
+    local_output_path: String,
+) {
+    loop {
+        tokio::time::sleep(Duration::from_millis(500)).await;
+
+        let result = http
+            .get(format!("{}/{}", jobs_url, job_id))
+            .timeout(Duration::from_secs(5))
+            .send()
+            .await;
+
+        let status: JobStatus = match result {
+            Ok(r) => match r.json().await {
+                Ok(s) => s,
+                Err(e) => {
+                    let _ = app.emit(
+                        "job-failed",
+                        &JobFailedEvent {
+                            job_id: job_id.clone(),
+                            model: "rvc".into(),
+                            error: format!("parse error: {}", e),
+                        },
+                    );
+                    return;
+                }
+            },
+            Err(e) => {
+                let _ = app.emit(
+                    "job-failed",
+                    &JobFailedEvent {
+                        job_id: job_id.clone(),
+                        model: "rvc".into(),
+                        error: format!("poll error: {}", e),
+                    },
+                );
+                return;
+            }
+        };
+
+        let _ = app.emit(
+            "job-progress",
+            &JobProgressEvent {
+                job_id: job_id.clone(),
+                model: "rvc".into(),
+                status: status.status.clone(),
+                progress: status.progress,
+            },
+        );
+
+        match status.status.as_str() {
+            "complete" => {
+                let server_out = status.output_path.unwrap_or_default();
+                let final_path = if !server_out.is_empty() {
+                    match commands::inference::download_remote_file_to(
+                        &http,
+                        &server_base_url,
+                        &job_id,
+                        &local_output_path,
+                    )
+                    .await
+                    {
+                        Ok(p) => p,
+                        Err(e) => {
+                            let _ = app.emit(
+                                "job-failed",
+                                &JobFailedEvent {
+                                    job_id: job_id.clone(),
+                                    model: "rvc".into(),
+                                    error: format!("download error: {}", e),
+                                },
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    local_output_path.clone()
+                };
+
+                let _ = app.emit(
+                    "job-complete",
+                    &JobCompleteEvent {
+                        job_id,
+                        model: "rvc".into(),
+                        output_path: final_path,
+                        project_id: String::new(),
+                        scene_slug: String::new(),
+                        row_index: 0,
+                        duration_ms: None,
+                        bound_to_script: false,
+                    },
+                );
+                return;
+            }
+            "failed" => {
+                let _ = app.emit(
+                    "job-failed",
+                    &JobFailedEvent {
+                        job_id: job_id.clone(),
+                        model: "rvc".into(),
+                        error: status.error.unwrap_or_else(|| "unknown error".into()),
+                    },
+                );
+                return;
+            }
+            _ => {}
+        }
+    }
 }
 
 /// Submit an RVC training job for a character.

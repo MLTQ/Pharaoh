@@ -245,7 +245,7 @@ pub async fn unload_model(app: AppHandle, model: String) -> Result<()> {
 // ── Remote server detection + file download ──────────────────────────────
 
 /// True when the server URL points at a remote host (not 127.0.0.1 / localhost).
-fn is_remote_url(url: &str) -> bool {
+pub fn is_remote_url(url: &str) -> bool {
     !url.contains("127.0.0.1") && !url.contains("localhost") && !url.contains("::1")
 }
 
@@ -294,18 +294,105 @@ fn is_uuid(s: &str) -> bool {
     true
 }
 
-/// Serialise `params` to JSON and, when the target server is remote, clear the
-/// `output_path` field so the server generates its own path under server-output/.
-/// The Tauri client will later retrieve the file via GET /files/{job_id}.
-fn remote_body<T: serde::Serialize>(base_url: &str, params: &T) -> Result<serde_json::Value> {
+/// Upload a local file to the server's /upload endpoint.
+///
+/// Returns the server-side path where the file was saved, or an empty string
+/// if `local_path` is empty (no-op). Used before job submission to ensure
+/// input files exist on the remote server.
+pub async fn upload_input_file(
+    http: &reqwest::Client,
+    base_url: &str,
+    local_path: &str,
+) -> Result<String> {
+    if local_path.is_empty() {
+        return Ok(String::new());
+    }
+    let bytes = std::fs::read(local_path)
+        .map_err(|e| Error::Other(format!("read input file '{}': {}", local_path, e)))?;
+    let filename = std::path::Path::new(local_path)
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("upload.wav")
+        .to_string();
+    let resp: serde_json::Value = http
+        .post(format!("{}/upload", base_url))
+        .query(&[("filename", &filename)])
+        .body(bytes)
+        .header("content-type", "application/octet-stream")
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("upload to {}: {}", base_url, e)))?
+        .json()
+        .await
+        .map_err(|e| Error::Other(format!("upload response parse: {}", e)))?;
+    Ok(resp["server_path"]
+        .as_str()
+        .unwrap_or("")
+        .to_string())
+}
+
+/// Download a completed job's output to an explicit local path.
+///
+/// Unlike `download_remote_file` (which reconstructs the UUID-based path
+/// structure), this variant writes to `local_path` directly. Used by
+/// audio_enhance which pre-computes a client-side output path.
+pub async fn download_remote_file_to(
+    http: &reqwest::Client,
+    server_base_url: &str,
+    job_id: &str,
+    local_path: &str,
+) -> Result<String> {
+    let path = std::path::Path::new(local_path);
+    if let Some(parent) = path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let url = format!("{}/files/{}", server_base_url, job_id);
+    let bytes = http
+        .get(&url)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("download from {}: {}", url, e)))?
+        .bytes()
+        .await
+        .map_err(|e| Error::Other(format!("download read: {}", e)))?;
+    std::fs::write(local_path, &bytes)?;
+    Ok(local_path.to_string())
+}
+
+/// Serialise `params` to JSON and, when the target server is remote:
+/// - clears `output_path` so the server generates its own path;
+/// - uploads any local file paths named in `upload_fields` and replaces
+///   them with the resulting server-side paths.
+///
+/// The Tauri client will later retrieve the output via GET /files/{job_id}.
+async fn remote_body<T: serde::Serialize>(
+    http: &reqwest::Client,
+    base_url: &str,
+    params: &T,
+    upload_fields: &[&str],
+) -> Result<serde_json::Value> {
     let mut body = serde_json::to_value(params)
-        .map_err(|e| Error::Other(format!("serialise params: {}", e)))?;
+        .map_err(|e| Error::Other(format!("serialize params: {}", e)))?;
     if is_remote_url(base_url) {
-        if let Some(obj) = body.as_object_mut() {
-            obj.insert(
-                "output_path".to_string(),
-                serde_json::Value::String(String::new()),
-            );
+        let obj = body
+            .as_object_mut()
+            .ok_or_else(|| Error::Other("params must be a JSON object".into()))?;
+        obj.insert(
+            "output_path".to_string(),
+            serde_json::Value::String(String::new()),
+        );
+        for &field in upload_fields {
+            if let Some(serde_json::Value::String(path)) = obj.get(field).cloned() {
+                if !path.is_empty() {
+                    let server_path = upload_input_file(http, base_url, &path).await?;
+                    obj.insert(
+                        field.to_string(),
+                        serde_json::Value::String(server_path),
+                    );
+                }
+            }
         }
     }
     Ok(body)
@@ -577,7 +664,7 @@ pub async fn submit_tts_custom_voice(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/custom_voice", base_url))
-        .json(&remote_body(&base_url, &params)?)
+        .json(&remote_body(&http, &base_url, &params, &[]).await?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -652,7 +739,7 @@ pub async fn submit_tts_voice_design(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/voice_design", base_url))
-        .json(&remote_body(&base_url, &params)?)
+        .json(&remote_body(&http, &base_url, &params, &[]).await?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -722,7 +809,7 @@ pub async fn submit_tts_voice_clone(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/voice_clone", base_url))
-        .json(&remote_body(&base_url, &params)?)
+        .json(&remote_body(&http, &base_url, &params, &["ref_audio_path"]).await?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -794,7 +881,7 @@ pub async fn submit_sfx_t2a(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/t2a", base_url))
-        .json(&remote_body(&base_url, &params)?)
+        .json(&remote_body(&http, &base_url, &params, &[]).await?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -873,7 +960,7 @@ pub async fn submit_music_text2music(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/text2music", base_url))
-        .json(&remote_body(&base_url, &params)?)
+        .json(&remote_body(&http, &base_url, &params, &["reference_audio_path"]).await?)
         .timeout(Duration::from_secs(10))
         .send()
         .await

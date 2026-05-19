@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, server_output_path
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -34,6 +34,7 @@ PORT = int(os.environ.get("PHARAOH_CHATTERBOX_PORT", 18005))
 
 app = FastAPI(title="Pharaoh Chatterbox Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+register_upload_route(app)
 jobs = JobStore()
 
 _model = None

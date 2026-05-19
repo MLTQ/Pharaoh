@@ -28,7 +28,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, server_output_path
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -65,6 +65,7 @@ MUSIC_MODEL_DIR = Path(os.environ.get("PHARAOH_MUSIC_MODEL_DIR", "~/pharaoh-mode
 
 app = FastAPI(title="Pharaoh Music Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+register_upload_route(app)
 jobs = JobStore()
 
 STEMS = ["vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard",

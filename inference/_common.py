@@ -73,6 +73,27 @@ def new_job_id() -> str:
     return str(uuid.uuid4())
 
 
+def register_upload_route(app) -> None:
+    """Register POST /upload on a FastAPI app.
+
+    Accepts raw bytes body + ?filename= query param (content-type:
+    application/octet-stream). Saves to SERVER_OUTPUT_DIR/uploads/filename
+    and returns {"server_path": str(dest)}.
+
+    Called by every inference server so that remote clients can upload
+    input files (ref audio, source audio, etc.) before submitting a job.
+    """
+    from fastapi import Query, Request as _Request
+
+    @app.post("/upload")
+    async def upload_file(request: _Request, filename: str = Query(...)):
+        content = await request.body()
+        dest = SERVER_OUTPUT_DIR / "uploads" / filename
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(content)
+        return {"server_path": str(dest)}
+
+
 class JobStore:
     """Thread-safe in-memory job registry."""
 

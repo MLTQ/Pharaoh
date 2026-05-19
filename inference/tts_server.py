@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import datetime
 import json
 
-from _common import JobStore, new_job_id, remap_path, server_output_path
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -64,6 +64,7 @@ TOKENIZER_DIR  = Path(os.environ.get("PHARAOH_TTS_TOKENIZER_DIR",   "~/pharaoh-m
 
 app = FastAPI(title="Pharaoh TTS Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
+register_upload_route(app)
 jobs = JobStore()
 
 SPEAKERS = [

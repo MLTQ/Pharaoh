@@ -1,4 +1,5 @@
 use super::sidecar::{read_sidecar, write_sidecar};
+use crate::commands;
 use crate::error::{Error, Result};
 use crate::models::{
     AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus, SidecarMeta,
@@ -91,13 +92,16 @@ pub fn write_upscale_sidecar(
 async fn poll_post_until_done(
     app: AppHandle,
     http: reqwest::Client,
+    server_base_url: String,
     jobs_url: String,
     job_id: String,
-    input_path: String,
-    output_path: String,
+    local_input_path: String,
+    local_output_path: String,
     model_name: String,
     seed: i64,
 ) {
+    let remote = commands::inference::is_remote_url(&server_base_url);
+
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -147,23 +151,58 @@ async fn poll_post_until_done(
 
         match status.status.as_str() {
             "complete" => {
-                let final_output = status.output_path.unwrap_or_else(|| output_path.clone());
-                let duration_ms =
-                    match write_upscale_sidecar(input_path, final_output.clone(), model_name, seed)
+                let server_out = status.output_path.unwrap_or_default();
+                // For remote servers, download the file to the pre-computed
+                // local output path. For local servers use the server path directly.
+                let final_output = if remote && !server_out.is_empty() {
+                    match commands::inference::download_remote_file_to(
+                        &http,
+                        &server_base_url,
+                        &job_id,
+                        &local_output_path,
+                    )
+                    .await
                     {
-                        Ok(duration_ms) => duration_ms,
+                        Ok(p) => p,
                         Err(e) => {
                             let _ = app.emit(
                                 "job-failed",
                                 &JobFailedEvent {
                                     job_id: job_id.clone(),
                                     model: "post".into(),
-                                    error: format!("finalization error: {}", e),
+                                    error: format!("download error: {}", e),
                                 },
                             );
                             return;
                         }
-                    };
+                    }
+                } else if server_out.is_empty() {
+                    local_output_path.clone()
+                } else {
+                    server_out
+                };
+
+                // write_upscale_sidecar uses local_input_path (original client
+                // path) to read the parent sidecar — never the uploaded server path.
+                let duration_ms = match write_upscale_sidecar(
+                    local_input_path,
+                    final_output.clone(),
+                    model_name,
+                    seed,
+                ) {
+                    Ok(d) => d,
+                    Err(e) => {
+                        let _ = app.emit(
+                            "job-failed",
+                            &JobFailedEvent {
+                                job_id: job_id.clone(),
+                                model: "post".into(),
+                                error: format!("finalization error: {}", e),
+                            },
+                        );
+                        return;
+                    }
+                };
 
                 let _ = app.emit(
                     "job-complete",
@@ -226,19 +265,31 @@ pub async fn upscale_audio_asset(
     let output_path = output_path_for(&input, &model_name)?
         .to_string_lossy()
         .to_string();
-    let params = PostUpscaleRequest {
-        job_id: job_id.clone(),
-        input_path: input_path.clone(),
-        output_path: output_path.clone(),
-        model_name: model_name.clone(),
-        ddim_steps,
-        guidance_scale,
-        seed,
+
+    let is_remote = commands::inference::is_remote_url(&base_url);
+
+    // Upload the input file to the server when running remotely so it can
+    // access it during inference. The original local path is preserved for
+    // sidecar reading after the job completes.
+    let server_input = if is_remote {
+        commands::inference::upload_input_file(&http, &base_url, &input_path).await?
+    } else {
+        input_path.clone()
     };
+
+    let body = serde_json::json!({
+        "job_id": job_id,
+        "input_path": server_input,
+        "output_path": if is_remote { String::new() } else { output_path.clone() },
+        "model_name": model_name,
+        "ddim_steps": ddim_steps,
+        "guidance_scale": guidance_scale,
+        "seed": seed,
+    });
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/upscale", base_url))
-        .json(&params)
+        .json(&body)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -255,6 +306,7 @@ pub async fn upscale_audio_asset(
     tokio::spawn(poll_post_until_done(
         app,
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         server_job_id,
         input_path,
