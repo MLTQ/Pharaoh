@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path
+from _common import JobStore, new_job_id, remap_path, server_output_path
 
 
 def _write_sidecar(audio_path: str, meta: dict) -> None:
@@ -504,7 +504,7 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
         seed     = int(params.get("seed", 0))
         cfg_scale = float(params.get("cfg_scale", 4.5))
         duration = float(params.get("duration_seconds", 3.0))
-        out_path = remap_path(params["output_path"])
+        out_path = remap_path(params.get("output_path")) or server_output_path(job_id)
 
         torch.manual_seed(seed)
 
@@ -595,7 +595,7 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
                 "Native AudioLDM candidate ranking requires CUDA; forcing -n 1 on this platform."
             )
             waveforms = 1
-        out_path = Path(remap_path(params["output_path"]))
+        out_path = Path(remap_path(params.get("output_path")) or server_output_path(job_id))
         cli = _native_audioldm_cli()
         model_name = _native_audioldm_model_name(params)
 
@@ -696,7 +696,7 @@ async def _run_diffusers_audioldm_sfx(job_id: str, params: dict) -> None:
         guidance_scale = float(params.get("guidance_scale", 2.5))
         negative_prompt = str(params.get("negative_prompt", ""))
         waveforms = int(params.get("num_waveforms_per_prompt", 3))
-        out_path = remap_path(params["output_path"])
+        out_path = remap_path(params.get("output_path")) or server_output_path(job_id)
 
         generator_device = "cuda" if _audioldm_device == "cuda" else "cpu"
         generator = torch.Generator(generator_device).manual_seed(seed)

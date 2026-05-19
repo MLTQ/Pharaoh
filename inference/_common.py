@@ -32,40 +32,39 @@ _UUID_RE = re.compile(
 )
 
 
-def _path_root_accessible(path: str) -> bool:
-    """True if the first 3 path components exist on this machine."""
-    parts = Path(path).parts
-    if len(parts) < 2:
-        return True
-    probe = Path(*parts[: min(3, len(parts))])
-    return probe.exists()
+def server_output_path(job_id: str, ext: str = ".wav") -> str:
+    """
+    Return a server-local output path for a job.
+
+    Used when the client sends an empty output_path (remote mode) — the
+    server generates a stable path under ./server-output/{job_id}/output.wav
+    so the client can retrieve it via GET /files/{job_id}.
+    """
+    out = SERVER_OUTPUT_DIR / job_id / f"output{ext}"
+    out.parent.mkdir(parents=True, exist_ok=True)
+    return str(out)
 
 
 def remap_path(path: Optional[str]) -> Optional[str]:
     """
     Remap a client-side absolute path so the server can write it locally.
 
-    Priority:
-      1. PHARAOH_PROJECTS_DIR env var → explicit remap root
-      2. Path root inaccessible on this machine → ./server-output/
-      3. Path root accessible → return unchanged (local mode)
+    Modes (in priority order):
+      1. path is None or empty → caller should use server_output_path() instead.
+         remap_path returns None so the caller can detect this.
+      2. PHARAOH_PROJECTS_DIR env var set → rebuild path under that root using
+         the UUID segment extracted from the client path.
+      3. Otherwise → return unchanged (local/same-machine mode).
 
-    Paths without a UUID (model files, etc.) are always returned unchanged.
-    None is passed through as-is.
+    Paths without a UUID (model files, config, etc.) are always returned as-is.
     """
-    if path is None:
+    if not path:
         return None
 
     explicit_root = os.environ.get("PHARAOH_PROJECTS_DIR", "")
     if explicit_root:
         m = _UUID_RE.search(path)
         return str(Path(explicit_root) / (m.group(1) + m.group(2))) if m else path
-
-    # Auto-mode: remap only if the path's root doesn't exist locally
-    if not _path_root_accessible(path):
-        m = _UUID_RE.search(path)
-        if m:
-            return str(SERVER_OUTPUT_DIR / (m.group(1) + m.group(2)))
 
     return path
 

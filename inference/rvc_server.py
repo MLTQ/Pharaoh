@@ -44,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path
+from _common import JobStore, new_job_id, remap_path, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -496,8 +496,8 @@ async def _run_convert(job_id: str, params: ConvertParams) -> None:
     jobs.update(job_id, status="running", progress=0.05)
     # Remap client-side absolute paths to the server's local projects dir.
     params = params.model_copy(update={
-        "input_path":  remap_path(params.input_path),
-        "output_path": remap_path(params.output_path),
+        "input_path":  remap_path(params.input_path) or params.input_path,
+        "output_path": remap_path(params.output_path) or server_output_path(job_id),
     })
     jobs.update(job_id, progress=0.15)
 

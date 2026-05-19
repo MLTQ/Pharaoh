@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path
+from _common import JobStore, new_job_id, remap_path, server_output_path
 
 log = logging.getLogger(__name__)
 
@@ -172,7 +172,7 @@ async def _run_clone(job_id: str, params: CloneParams) -> None:
 
     jobs.update(job_id, progress=0.10)
     try:
-        out_path = Path(remap_path(params.output_path))
+        out_path = Path(remap_path(params.output_path) or server_output_path(job_id))
         out_path.parent.mkdir(parents=True, exist_ok=True)
 
         ref_path = Path(params.ref_audio_path)

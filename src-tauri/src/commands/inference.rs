@@ -294,6 +294,23 @@ fn is_uuid(s: &str) -> bool {
     true
 }
 
+/// Serialise `params` to JSON and, when the target server is remote, clear the
+/// `output_path` field so the server generates its own path under server-output/.
+/// The Tauri client will later retrieve the file via GET /files/{job_id}.
+fn remote_body<T: serde::Serialize>(base_url: &str, params: &T) -> Result<serde_json::Value> {
+    let mut body = serde_json::to_value(params)
+        .map_err(|e| Error::Other(format!("serialise params: {}", e)))?;
+    if is_remote_url(base_url) {
+        if let Some(obj) = body.as_object_mut() {
+            obj.insert(
+                "output_path".to_string(),
+                serde_json::Value::String(String::new()),
+            );
+        }
+    }
+    Ok(body)
+}
+
 /// Download a completed job's output file from the server's /files/{job_id}
 /// endpoint and save it into the local projects directory, mirroring the
 /// UUID-based path structure.  Returns the local absolute path on success.
@@ -560,7 +577,7 @@ pub async fn submit_tts_custom_voice(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/custom_voice", base_url))
-        .json(&params)
+        .json(&remote_body(&base_url, &params)?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -635,7 +652,7 @@ pub async fn submit_tts_voice_design(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/voice_design", base_url))
-        .json(&params)
+        .json(&remote_body(&base_url, &params)?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -705,7 +722,7 @@ pub async fn submit_tts_voice_clone(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/voice_clone", base_url))
-        .json(&params)
+        .json(&remote_body(&base_url, &params)?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -777,7 +794,7 @@ pub async fn submit_sfx_t2a(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/t2a", base_url))
-        .json(&params)
+        .json(&remote_body(&base_url, &params)?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
@@ -856,7 +873,7 @@ pub async fn submit_music_text2music(
 
     let resp: serde_json::Value = http
         .post(format!("{}/generate/text2music", base_url))
-        .json(&params)
+        .json(&remote_body(&base_url, &params)?)
         .timeout(Duration::from_secs(10))
         .send()
         .await
