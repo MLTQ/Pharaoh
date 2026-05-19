@@ -231,7 +231,10 @@ if [ "${INSTALL_APPLIO}" = "1" ]; then
         hint "The clone may be incomplete. Remove ${APPLIO_DIR} and re-run."
         exit 1
     fi
-    uv pip install --python "${APPLIO_VENV}/bin/python" -r "${APPLIO_REQS}"
+    uv pip install --python "${APPLIO_VENV}/bin/python" \
+        --extra-index-url https://download.pytorch.org/whl/cu128 \
+        --index-strategy unsafe-best-match \
+        -r "${APPLIO_REQS}"
     ok "Applio deps synced"
 
     hint "Applio GUI:   ${APPLIO_VENV}/bin/python ${APPLIO_DIR}/app.py"
