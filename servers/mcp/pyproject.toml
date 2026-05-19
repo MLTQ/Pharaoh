@@ -1,0 +1,11 @@
+[project]
+name = "pharaoh-mcp"
+version = "1.0.0"
+requires-python = ">=3.10"
+dependencies = [
+    "mcp[cli]>=1.0",
+    "httpx>=0.27",
+]
+
+[tool.uv]
+# Keep the lock file next to pyproject.toml when bundled

@@ -1,0 +1,63 @@
+{
+  "manifest_version": "0.3",
+  "name": "pharaoh",
+  "display_name": "Pharaoh Audio Drama Suite",
+  "version": "1.0.0",
+  "description": "AI production pipeline for audio dramas. Generate dialogue with Qwen3-TTS or Chatterbox voice cloning, sound effects, music via ACE-Step, and run RVC voice conversion — all from Claude. Connects to local or remote Pharaoh inference servers.\n\nRequires: uv (https://docs.astral.sh/uv/) and at least one running Pharaoh inference server.",
+  "author": {
+    "name": "Aureum",
+    "email": "max@aureum.ai"
+  },
+  "repository": "https://github.com/MLTQ/Pharaoh",
+  "server": {
+    "type": "uv",
+    "entry_point": "run.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": [
+        "run",
+        "--project",
+        "${__dirname}",
+        "${__dirname}/run.py",
+        "--projects-dir",
+        "${user_config.projects_dir}",
+        "--tts-url",
+        "http://${user_config.inference_host}:18001",
+        "--sfx-url",
+        "http://${user_config.inference_host}:18002",
+        "--music-url",
+        "http://${user_config.inference_host}:18003",
+        "--post-url",
+        "http://${user_config.inference_host}:18004",
+        "--chatterbox-url",
+        "http://${user_config.inference_host}:18005",
+        "--rvc-url",
+        "http://${user_config.inference_host}:18006"
+      ]
+    }
+  },
+  "user_config": {
+    "projects_dir": {
+      "type": "directory",
+      "title": "Projects Directory",
+      "description": "Folder where your Pharaoh audio drama projects are stored. Will be created if it doesn't exist.",
+      "required": true,
+      "default": "${HOME}/pharaoh-projects"
+    },
+    "inference_host": {
+      "type": "string",
+      "title": "Inference Server Host",
+      "description": "Hostname or IP of the machine running the Pharaoh inference servers. Use 127.0.0.1 for local inference, or your server's IP/hostname for a remote GPU box. Individual server ports (18001–18006) are fixed.",
+      "required": false,
+      "default": "127.0.0.1"
+    }
+  },
+  "tools_generated": true,
+  "keywords": ["audio", "drama", "tts", "voice", "music", "sfx", "production"],
+  "compatibility": {
+    "platforms": ["darwin", "linux", "win32"],
+    "runtimes": {
+      "python": ">=3.10"
+    }
+  }
+}

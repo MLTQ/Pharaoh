@@ -22,3 +22,4 @@ inference/.applio
 target/release/
 
 inference/server-output/uploads/
+pharaoh.mcpb
