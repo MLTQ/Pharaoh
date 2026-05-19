@@ -38,9 +38,10 @@ from pathlib import Path
 from typing import Optional
 
 import uvicorn
-from fastapi import BackgroundTask, FastAPI, HTTPException, Query
+from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from _common import JobStore, new_job_id, remap_path

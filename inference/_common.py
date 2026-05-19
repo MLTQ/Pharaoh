@@ -4,7 +4,7 @@ import re
 import time
 import uuid
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Dict, Optional
 
 # ── Remote path remapping ─────────────────────────────────────────────────────
 #
@@ -41,7 +41,7 @@ def _path_root_accessible(path: str) -> bool:
     return probe.exists()
 
 
-def remap_path(path: str | None) -> str | None:
+def remap_path(path: Optional[str]) -> Optional[str]:
     """
     Remap a client-side absolute path so the server can write it locally.
 
@@ -78,7 +78,7 @@ class JobStore:
     """Thread-safe in-memory job registry."""
 
     def __init__(self) -> None:
-        self._jobs: dict[str, dict[str, Any]] = {}
+        self._jobs: Dict[str, Dict[str, Any]] = {}
 
     def create(self, job_id: str, model: str, endpoint: str, params: dict) -> dict:
         job = {
