@@ -12,3 +12,11 @@ inference/.venv-tts/
 inference/.venv-music/
 
 .claude/worktrees/
+
+inference/.venv-rvc
+
+
+
+inference/.applio
+
+target/release/
