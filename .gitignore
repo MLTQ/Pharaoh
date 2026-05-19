@@ -20,3 +20,5 @@ inference/.venv-rvc
 inference/.applio
 
 target/release/
+
+inference/server-output/uploads/
