@@ -242,11 +242,107 @@ pub async fn unload_model(app: AppHandle, model: String) -> Result<()> {
     Ok(())
 }
 
+// ── Remote server detection + file download ──────────────────────────────
+
+/// True when the server URL points at a remote host (not 127.0.0.1 / localhost).
+fn is_remote_url(url: &str) -> bool {
+    !url.contains("127.0.0.1") && !url.contains("localhost") && !url.contains("::1")
+}
+
+/// Extract the UUID segment and everything that follows from a server-side path.
+///
+/// "/home/m/.../server-output/97bb.../characters/CHAR_JACK/take.wav"
+///   → Some(("97bb...", "/characters/CHAR_JACK/take.wav"))
+fn extract_uuid_suffix(path: &str) -> Option<(String, String)> {
+    // UUID pattern: 8-4-4-4-12 hex chars
+    let bytes = path.as_bytes();
+    let len = bytes.len();
+    if len < 36 {
+        return None;
+    }
+    for i in 0..=(len - 36) {
+        let candidate = &path[i..i + 36];
+        if is_uuid(candidate) {
+            let uuid = candidate.to_string();
+            let suffix = path[i + 36..].to_string();
+            return Some((uuid, suffix));
+        }
+    }
+    None
+}
+
+fn is_uuid(s: &str) -> bool {
+    let b = s.as_bytes();
+    if b.len() != 36 {
+        return false;
+    }
+    // 8-4-4-4-12, dashes at positions 8, 13, 18, 23
+    for (i, &byte) in b.iter().enumerate() {
+        match i {
+            8 | 13 | 18 | 23 => {
+                if byte != b'-' {
+                    return false;
+                }
+            }
+            _ => {
+                if !byte.is_ascii_hexdigit() {
+                    return false;
+                }
+            }
+        }
+    }
+    true
+}
+
+/// Download a completed job's output file from the server's /files/{job_id}
+/// endpoint and save it into the local projects directory, mirroring the
+/// UUID-based path structure.  Returns the local absolute path on success.
+async fn download_remote_file(
+    http: &reqwest::Client,
+    server_base_url: &str,
+    job_id: &str,
+    server_output_path: &str,
+    projects_dir: &Path,
+) -> Result<String> {
+    // Reconstruct the local path: projects_dir / uuid / suffix
+    let local_path = if let Some((uuid, suffix)) = extract_uuid_suffix(server_output_path) {
+        // suffix starts with '/' on Unix; strip it for joining
+        let rel = suffix.trim_start_matches(['/', '\\']);
+        projects_dir.join(&uuid).join(rel)
+    } else {
+        // No UUID — fall back to filename only inside a temp dir
+        let filename = std::path::Path::new(server_output_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .unwrap_or("output.wav");
+        projects_dir.join("remote-output").join(filename)
+    };
+
+    if let Some(parent) = local_path.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let url = format!("{}/files/{}", server_base_url, job_id);
+    let bytes = http
+        .get(&url)
+        .timeout(Duration::from_secs(120))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("file download failed: {}", e)))?
+        .bytes()
+        .await
+        .map_err(|e| Error::Other(format!("file read failed: {}", e)))?;
+
+    std::fs::write(&local_path, &bytes)?;
+    Ok(local_path.to_string_lossy().into_owned())
+}
+
 // ── Background polling ───────────────────────────────────────────────────
 
 async fn poll_until_done(
     app: AppHandle,
     http: reqwest::Client,
+    server_base_url: String,
     jobs_url: String,
     job_id: String,
     model: String,
@@ -256,6 +352,8 @@ async fn poll_until_done(
     projects_dir: PathBuf,
     sidecar_meta: SidecarMeta,
 ) {
+    let remote = is_remote_url(&server_base_url);
+
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
 
@@ -305,7 +403,38 @@ async fn poll_until_done(
 
         match status.status.as_str() {
             "complete" => {
-                let output_path = status.output_path.unwrap_or_default();
+                let server_output_path = status.output_path.unwrap_or_default();
+
+                // For remote servers, download the file to the local projects dir
+                // and delete it from the server.  For local servers, use the path
+                // directly — the file is already on the same filesystem.
+                let output_path = if remote && !server_output_path.is_empty() {
+                    match download_remote_file(
+                        &http,
+                        &server_base_url,
+                        &job_id,
+                        &server_output_path,
+                        &projects_dir,
+                    )
+                    .await
+                    {
+                        Ok(local) => local,
+                        Err(e) => {
+                            let _ = app.emit(
+                                "job-failed",
+                                &JobFailedEvent {
+                                    job_id: job_id.clone(),
+                                    model: model.clone(),
+                                    error: format!("download error: {}", e),
+                                },
+                            );
+                            return;
+                        }
+                    }
+                } else {
+                    server_output_path
+                };
+
                 let finalized = match finalize_generation_output(
                     &projects_dir,
                     &project_id,
@@ -472,6 +601,7 @@ pub async fn submit_tts_custom_voice(
     tokio::spawn(poll_until_done(
         app.clone(),
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         job_id.clone(),
         "tts".into(),
@@ -542,6 +672,7 @@ pub async fn submit_tts_voice_design(
     tokio::spawn(poll_until_done(
         app.clone(),
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         job_id.clone(),
         "tts".into(),
@@ -611,6 +742,7 @@ pub async fn submit_tts_voice_clone(
     tokio::spawn(poll_until_done(
         app.clone(),
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         job_id.clone(),
         "tts".into(),
@@ -689,6 +821,7 @@ pub async fn submit_sfx_t2a(
     tokio::spawn(poll_until_done(
         app.clone(),
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         job_id.clone(),
         "sfx".into(),
@@ -768,6 +901,7 @@ pub async fn submit_music_text2music(
     tokio::spawn(poll_until_done(
         app.clone(),
         http,
+        base_url.clone(),
         format!("{}/jobs", base_url),
         job_id.clone(),
         "music".into(),

@@ -22,7 +22,8 @@ import os
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI, HTTPException
+from fastapi import BackgroundTask, FastAPI, HTTPException
+from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -334,6 +335,36 @@ async def get_job(job_id: str) -> dict:
     if job is None:
         raise HTTPException(status_code=404, detail="job not found")
     return jobs.response(job_id)
+
+@app.get("/files/{job_id}")
+async def download_file(job_id: str) -> FileResponse:
+    """Stream the output file for a completed job, then delete it from the server.
+
+    Used by remote clients to retrieve generated audio without needing shared
+    filesystem access.  The file (and its .meta.json sidecar) are removed after
+    the response is fully sent, keeping server-output/ clean automatically.
+    """
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    output_path = job.get("output_path")
+    if not output_path or not Path(output_path).is_file():
+        raise HTTPException(status_code=404, detail="output file not available")
+
+    def _cleanup():
+        for p in [output_path, output_path + ".meta.json"]:
+            try:
+                Path(p).unlink(missing_ok=True)
+            except Exception:
+                pass
+
+    return FileResponse(
+        output_path,
+        media_type="audio/wav",
+        filename=Path(output_path).name,
+        background=BackgroundTask(_cleanup),
+    )
+
 
 
 @app.post("/load")
