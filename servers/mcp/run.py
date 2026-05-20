@@ -50,7 +50,7 @@ parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=18000)
 args, _ = parser.parse_known_args()
 
-PROJECTS_DIR = Path(args.projects_dir).expanduser()
+PROJECTS_DIR = Path(os.path.expandvars(args.projects_dir)).expanduser()
 SERVER_URLS = {
     "tts": args.tts_url,
     "sfx": args.sfx_url,
