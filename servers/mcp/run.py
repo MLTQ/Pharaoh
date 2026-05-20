@@ -1866,92 +1866,235 @@ def get_server_config() -> str:
     }, indent=2)
 
 
+def _compose_scene_ffmpeg(project_id: str, scene_slug: str) -> dict:
+    """Mix all resolved audio rows in a scene into a single stereo 48 kHz WAV.
+
+    Implements the full compositing pipeline in pure Python + ffmpeg:
+      - per-track gain, stereo pan, fade-in / fade-out
+      - timeline placement via adelay
+      - looping (background music / ambience)
+      - all tracks mixed down with amix (no normalisation)
+
+    Returns a plain dict ready for json.dumps().
+    """
+    rows = _script_rows(project_id, scene_slug)
+    scene_d = _scene_dir(project_id, scene_slug)
+
+    AUDIO_TYPES = {"DIALOGUE", "SFX", "MUSIC", "AMBIENCE", "EFFECT", "EFFECT_SFX"}
+    audio_rows = [
+        r for r in rows
+        if r.get("type", "").upper() in AUDIO_TYPES and r.get("file")
+    ]
+
+    # Check all files exist before starting ffmpeg
+    missing = [r["file"] for r in audio_rows if not Path(r["file"]).is_file()]
+    if missing:
+        return {
+            "error": "missing audio files — run generate/QA first",
+            "missing": missing,
+        }
+
+    if not audio_rows:
+        return {"error": "no resolved audio rows to compose — assign files to all rows first"}
+
+    render_dir = scene_d / "render"
+    render_dir.mkdir(parents=True, exist_ok=True)
+    output_path = render_dir / f"scene_{scene_slug}.wav"
+
+    # ── Compute total timeline duration ───────────────────────────────────────
+    max_end_ms = 0
+    for r in audio_rows:
+        start = int(r.get("start_ms") or 0)
+        dur   = int(r.get("duration_ms") or 0)
+        if dur > 0:
+            max_end_ms = max(max_end_ms, start + dur)
+    if max_end_ms == 0:
+        max_end_ms = 30_000  # fallback: 30 s if no durations set
+    # Add 500 ms tail so fades don't get clipped
+    total_s = (max_end_ms + 500) / 1000.0
+
+    # ── Build ffmpeg command ───────────────────────────────────────────────────
+    cmd = ["ffmpeg", "-y"]
+
+    for r in audio_rows:
+        if str(r.get("loop", "")).lower() in ("true", "1", "yes"):
+            cmd += ["-stream_loop", "-1"]
+        cmd += ["-i", r["file"]]
+
+    filter_chains: list[str] = []
+    mix_labels:    list[str] = []
+
+    for i, r in enumerate(audio_rows):
+        start_ms   = int(r.get("start_ms")    or 0)
+        dur_ms     = int(r.get("duration_ms") or 0)
+        gain_db    = float(r.get("gain_db")   or 0)
+        pan        = float(r.get("pan")       or 0)   # -1 (L) .. 0 (C) .. 1 (R)
+        fi_ms      = int(r.get("fade_in_ms")  or 0)
+        fo_ms      = int(r.get("fade_out_ms") or 0)
+
+        parts: list[str] = [
+            "aresample=48000",
+            "aformat=channel_layouts=stereo",
+        ]
+
+        # Trim to declared duration (also stops looped inputs)
+        if dur_ms > 0:
+            parts.append(f"atrim=duration={dur_ms / 1000:.3f}")
+
+        # Gain
+        if abs(gain_db) > 0.001:
+            parts.append(f"volume={gain_db:.2f}dB")
+
+        # Stereo pan: -1 → hard left, 0 → centre, +1 → hard right
+        if abs(pan) > 0.01:
+            l = min(1.0, max(0.0, 1.0 - pan))
+            r_gain = min(1.0, max(0.0, 1.0 + pan))
+            parts.append(f"pan=stereo|c0={l:.3f}*c0|c1={r_gain:.3f}*c1")
+
+        # Fades
+        if fi_ms > 0:
+            parts.append(f"afade=t=in:st=0:d={fi_ms / 1000:.3f}")
+        if fo_ms > 0 and dur_ms > fo_ms:
+            st = (dur_ms - fo_ms) / 1000.0
+            parts.append(f"afade=t=out:st={st:.3f}:d={fo_ms / 1000:.3f}")
+
+        # Timeline placement
+        if start_ms > 0:
+            parts.append(f"adelay={start_ms}|{start_ms}")
+
+        # Pad every track to the full mix length so amix sees equal-length streams
+        parts.append(f"apad=whole_dur={total_s:.3f}")
+
+        label = f"[a{i}]"
+        filter_chains.append(f"[{i}:a]{','.join(parts)}{label}")
+        mix_labels.append(label)
+
+    # Combine all labelled streams
+    n = len(mix_labels)
+    filter_chains.append(
+        f"{''.join(mix_labels)}amix=inputs={n}:normalize=0[out]"
+    )
+    complex_filter = ";".join(filter_chains)
+
+    cmd += [
+        "-filter_complex", complex_filter,
+        "-map", "[out]",
+        "-ar", "48000",
+        "-ac", "2",
+        str(output_path),
+    ]
+
+    log.info("compose_scene ffmpeg: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError:
+        return {"error": "ffmpeg not found — install ffmpeg and ensure it is in PATH"}
+    except subprocess.TimeoutExpired:
+        return {"error": "ffmpeg timed out during scene composition"}
+
+    if result.returncode != 0:
+        return {"error": result.stderr[-3000:] or "ffmpeg failed", "cmd": " ".join(cmd)}
+
+    return {"ok": True, "output_path": str(output_path), "tracks": n, "duration_s": total_s}
+
+
 @mcp.tool()
 def compose_scene(project_id: str, scene_slug: str) -> str:
     """
-    Render a scene by calling the Pharaoh audio engine via ffmpeg.
-    All approved assets must be present and QA-approved before composing.
-    Returns the output render path on success.
-    This invokes pharaoh's compose pipeline directly — make sure all assets are resolved first.
+    Mix all resolved audio rows for a scene into a single stereo 48 kHz WAV.
+
+    Reads script.csv, applies per-track gain / pan / fades / timeline placement,
+    and produces render/scene_<slug>.wav via ffmpeg.  No external binary required.
+
+    All rows that have a non-empty `file` column are included.  Rows still
+    missing a file path are reported as an error before any rendering starts.
     """
     scene_d = _scene_dir(project_id, scene_slug)
-    script_path = scene_d / "script.csv"
-    if not script_path.exists():
+    if not (scene_d / "script.csv").exists():
         return json.dumps({"error": f"no script found for scene {scene_slug}"})
-    render_dir = scene_d / "render"
-    render_dir.mkdir(parents=True, exist_ok=True)
-
-    # Locate the pharaoh CLI binary.
-    # Search order: PATH first (works when installed as MCPB or binary in PATH),
-    # then repo-relative paths (works when running from a local dev checkout).
-    exe_name = "pharaoh.exe" if sys.platform == "win32" else "pharaoh"
-    which_result = shutil.which(exe_name)
-    mcp_dir = Path(__file__).parent
-    repo_root = mcp_dir.parent.parent
-    cli_candidates = [
-        repo_root / "target" / "release" / exe_name,
-        repo_root / "target" / "debug" / exe_name,
-        repo_root / "src-tauri" / "target" / "release" / exe_name,
-        repo_root / "src-tauri" / "target" / "debug" / exe_name,
-    ]
-    cli_path = which_result or next((str(c) for c in cli_candidates if c.exists()), None)
-    if cli_path is None:
-        return json.dumps({
-            "error": (
-                "pharaoh CLI binary not found. "
-                "Either add it to PATH or build with: cargo build --release"
-            ),
-            "searched": ["PATH"] + [str(c) for c in cli_candidates],
-        })
-
-    result = subprocess.run(
-        [cli_path, "compose", "render", "scene", project_id, scene_slug],
-        capture_output=True,
-        text=True,
-    )
-    if result.returncode == 0:
-        render_path = render_dir / f"scene_{scene_slug}.wav"
-        return json.dumps({"ok": True, "output_path": str(render_path), "stdout": result.stdout})
-    else:
-        return json.dumps({"ok": False, "error": result.stderr, "stdout": result.stdout})
+    return json.dumps(_compose_scene_ffmpeg(project_id, scene_slug))
 
 
 @mcp.tool()
 def render_final(project_id: str, crossfade_ms: int = 500) -> str:
     """
-    Assemble all rendered scenes into a final output WAV.
-    All scenes must be rendered before calling this.
-    Returns the path to the final output file.
+    Assemble all scene renders into a final output WAV with crossfades.
+
+    Reads the storyboard for scene order, loads render/scene_<slug>.wav for
+    each scene (compose_scene must be run first), and concatenates them with
+    an acrossfade of crossfade_ms milliseconds between scenes.
+
+    Output: {project_dir}/output/final.wav
     """
-    exe_name = "pharaoh.exe" if sys.platform == "win32" else "pharaoh"
-    which_result = shutil.which(exe_name)
-    repo_root = Path(__file__).parent.parent.parent
-    cli_candidates = [
-        repo_root / "target" / "release" / exe_name,
-        repo_root / "target" / "debug" / exe_name,
-        repo_root / "src-tauri" / "target" / "release" / exe_name,
-        repo_root / "src-tauri" / "target" / "debug" / exe_name,
-    ]
-    cli_path = which_result or next((str(c) for c in cli_candidates if c.exists()), None)
-    if cli_path is None:
+    storyboard = _storyboard_json(project_id)
+    scenes = sorted(storyboard.get("scenes", []), key=lambda s: s.get("index", 0))
+    if not scenes:
+        return json.dumps({"error": "no scenes in storyboard"})
+
+    # Collect scene render files in order
+    renders: list[Path] = []
+    missing: list[str]  = []
+    for s in scenes:
+        slug = s.get("slug", "")
+        p = _scene_dir(project_id, slug) / "render" / f"scene_{slug}.wav"
+        if p.is_file():
+            renders.append(p)
+        else:
+            missing.append(str(p))
+
+    if missing:
         return json.dumps({
-            "error": (
-                "pharaoh CLI binary not found. "
-                "Either add it to PATH or build with: cargo build --release"
-            ),
-            "searched": ["PATH"] + [str(c) for c in cli_candidates],
+            "error": "some scenes have not been composed yet",
+            "missing_renders": missing,
         })
 
-    result = subprocess.run(
-        [cli_path, "compose", "final", project_id, "--crossfade", str(crossfade_ms)],
-        capture_output=True,
-        text=True,
-    )
-    output_path = _project_dir(project_id) / "output" / "final.wav"
-    if result.returncode == 0:
-        return json.dumps({"ok": True, "output_path": str(output_path), "stdout": result.stdout})
-    else:
-        return json.dumps({"ok": False, "error": result.stderr})
+    output_dir = _project_dir(project_id) / "output"
+    output_dir.mkdir(parents=True, exist_ok=True)
+    output_path = output_dir / "final.wav"
+
+    if len(renders) == 1:
+        # Single scene — just copy it
+        shutil.copy2(renders[0], output_path)
+        return json.dumps({"ok": True, "output_path": str(output_path), "scenes": 1})
+
+    # ── Build ffmpeg concat with acrossfade ───────────────────────────────────
+    cmd = ["ffmpeg", "-y"]
+    for r in renders:
+        cmd += ["-i", str(r)]
+
+    cf_s = crossfade_ms / 1000.0
+    n = len(renders)
+
+    # Chain: [0][1] acrossfade → [cf0], [cf0][2] acrossfade → [cf1], …
+    filter_parts: list[str] = []
+    prev_label = "[0:a]"
+    for i in range(1, n):
+        out_label = f"[cf{i}]" if i < n - 1 else "[out]"
+        filter_parts.append(
+            f"{prev_label}[{i}:a]acrossfade=d={cf_s:.3f}:c1=tri:c2=tri{out_label}"
+        )
+        prev_label = out_label
+
+    cmd += [
+        "-filter_complex", ";".join(filter_parts),
+        "-map", "[out]",
+        "-ar", "48000",
+        "-ac", "2",
+        str(output_path),
+    ]
+
+    log.info("render_final ffmpeg: %s", " ".join(cmd))
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=600)
+    except FileNotFoundError:
+        return json.dumps({"error": "ffmpeg not found — install ffmpeg and ensure it is in PATH"})
+    except subprocess.TimeoutExpired:
+        return json.dumps({"error": "ffmpeg timed out during final render"})
+
+    if result.returncode != 0:
+        return json.dumps({"error": result.stderr[-3000:] or "ffmpeg failed"})
+
+    return json.dumps({"ok": True, "output_path": str(output_path), "scenes": n})
 
 
 # ── SSE health endpoint (for Rust server health check) ────────────────────────
