@@ -23,3 +23,5 @@ target/release/
 
 inference/server-output/uploads/
 pharaoh.mcpb
+
+inference/server-output
