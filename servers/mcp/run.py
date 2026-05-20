@@ -213,14 +213,116 @@ def _auto_unload_others(active: str) -> None:
 
 # ── Inference proxy helpers ───────────────────────────────────────────────────
 
-def _post(server: str, path: str, body: dict) -> dict:
+def _is_remote(server: str) -> bool:
+    """True when the inference server is NOT running on this machine.
+
+    We detect this by checking the configured URL's hostname.  If it's
+    anything other than 127.0.0.1 / localhost / ::1 we treat it as remote
+    and apply the upload/download path-remapping logic so Mac paths never
+    reach a Linux server.
+    """
+    url = SERVER_URLS.get(server, "")
+    host = url.split("://")[-1].split(":")[0].split("/")[0]
+    return host not in ("127.0.0.1", "localhost", "::1", "")
+
+
+# job_id → (server, intended_local_output_path)
+# Populated by _post when the server is remote and the body contains output_path.
+# Consumed (and removed) by _resolve_job_output once the job completes.
+_pending_downloads: dict[str, tuple[str, str]] = {}
+
+
+def _download_job_output(server: str, job_id: str, local_path: str) -> str:
+    """Download a completed remote job's output file to *local_path*.
+
+    Calls GET /files/{job_id} which streams the file and then deletes it from
+    the server, keeping server-output/ clean automatically.
+    """
+    url = SERVER_URLS[server] + f"/files/{job_id}"
+    dest = Path(local_path)
+    dest.parent.mkdir(parents=True, exist_ok=True)
+    resp = httpx.get(url, timeout=120.0)
+    resp.raise_for_status()
+    dest.write_bytes(resp.content)
+    log.info("Downloaded job %s → %s", job_id, local_path)
+    return local_path
+
+
+def _resolve_job_output(server: str, job_id: str, result: dict) -> dict:
+    """If *job_id* has a pending remote download and the job is complete,
+    download the file to the originally-intended local path and update
+    result['output_path'] to that local path."""
+    if result.get("status") != "complete":
+        return result
+    if job_id not in _pending_downloads:
+        return result
+    dl_server, local_path = _pending_downloads.pop(job_id)
+    try:
+        _download_job_output(dl_server, job_id, local_path)
+        return {**result, "output_path": local_path}
+    except Exception as exc:
+        log.error("Download failed for job %s: %s", job_id, exc)
+        return {**result, "download_error": str(exc)}
+
+
+def _upload_input_file(server: str, local_path: str) -> str:
+    """Upload a local file to the inference server's /upload endpoint.
+
+    Used when input files (ref_audio, source_audio, etc.) are on the local
+    machine but the server is remote.  Returns the server-side path.
+    """
+    if not local_path:
+        return local_path
+    p = Path(local_path)
+    if not p.is_file():
+        raise FileNotFoundError(f"Input file not found: {local_path}")
+    url = SERVER_URLS[server] + "/upload"
+    resp = httpx.post(
+        url,
+        content=p.read_bytes(),
+        params={"filename": p.name},
+        headers={"content-type": "application/octet-stream"},
+        timeout=120.0,
+    )
+    resp.raise_for_status()
+    server_path = resp.json()["server_path"]
+    log.info("Uploaded %s → %s:%s", local_path, server, server_path)
+    return server_path
+
+
+def _post(server: str, path: str, body: dict,
+          upload_fields: tuple[str, ...] = ()) -> dict:
+    """POST to an inference server.
+
+    Remote-mode path handling (applied automatically when _is_remote(server)):
+    - output_path is cleared so the server generates a path in server-output/;
+      the intended local path is registered in _pending_downloads so
+      _resolve_job_output can download the file once the job completes.
+    - Any fields named in *upload_fields* that contain local file paths are
+      uploaded to /upload first and replaced with the returned server path.
+    """
     url = SERVER_URLS[server] + path
+    intended_output = body.get("output_path", "")
+
+    if _is_remote(server):
+        body = dict(body)  # don't mutate caller's dict
+        if intended_output:
+            body["output_path"] = ""
+        for field in upload_fields:
+            if body.get(field):
+                body[field] = _upload_input_file(server, body[field])
+
     try:
         resp = httpx.post(url, json=body, timeout=10.0)
         resp.raise_for_status()
-        return resp.json()
+        result = resp.json()
     except httpx.ConnectError:
         raise RuntimeError(f"{server} server not reachable at {SERVER_URLS[server]}. Start it first.")
+
+    if _is_remote(server) and intended_output and "job_id" in result:
+        _pending_downloads[result["job_id"]] = (server, intended_output)
+
+    return result
 
 
 def _get(server: str, path: str) -> dict:
@@ -822,7 +924,7 @@ def generate_tts(
                             "ref_transcript": entry.get("ref_transcript") or "",
                             "seed": seed,
                             "output_path": output_path,
-                        })
+                        }, upload_fields=("ref_audio_path",))
                         return json.dumps(result)
         except Exception as exc:
             log.warning(f"Chatterbox auto-routing failed, falling back to Qwen3: {exc}")
@@ -1017,7 +1119,7 @@ def generate_chatterbox(
         "cfg_weight": cfg_weight,
         "seed": seed,
         "output_path": output_path,
-    })
+    }, upload_fields=("ref_audio_path",))
     return json.dumps(result)
 
 
@@ -1178,6 +1280,7 @@ def job_status(server: str, job_id: str) -> str:
     if server not in SERVER_URLS:
         return json.dumps({"error": f"unknown server: {server}. Use: {list(SERVER_URLS)}"})
     result = _get(server, f"/jobs/{job_id}")
+    result = _resolve_job_output(server, job_id, result)
     return json.dumps(result)
 
 
@@ -1194,6 +1297,7 @@ def wait_for_job(server: str, job_id: str, timeout_seconds: int = 300) -> str:
         result = _get(server, f"/jobs/{job_id}")
         status = result.get("status", "")
         if status == "complete":
+            result = _resolve_job_output(server, job_id, result)
             return json.dumps({"ok": True, **result})
         if status == "failed":
             return json.dumps({"ok": False, **result})
@@ -1652,7 +1756,7 @@ def upscale_audio(
             "ddim_steps": ddim_steps,
             "guidance_scale": guidance_scale,
             "seed": seed,
-        })
+        }, upload_fields=("input_path",))
         server_job_id = resp.get("job_id", job_id)
     except Exception as e:
         return json.dumps({"error": str(e)})
@@ -1996,7 +2100,7 @@ def build_corpus(
                     "temperature": 0.8,
                     "seed": i,
                     "output_path": out_path,
-                })
+                }, upload_fields=("ref_audio_path",))
                 job_ids.append(resp.get("job_id", "unknown"))
             except Exception as exc:
                 return json.dumps({"error": str(exc), "partial_job_ids": job_ids})
@@ -2131,7 +2235,7 @@ def rvc_convert(
             "filter_radius": 3,
             "rms_mix_rate": 0.25,
             "protect": va.get("rvc_protect", 0.33),
-        })
+        }, upload_fields=("input_path",))
         return json.dumps(resp, indent=2)
     except Exception as exc:
         return json.dumps({"error": str(exc)})
