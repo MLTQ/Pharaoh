@@ -753,10 +753,21 @@ def _submit(params: dict) -> dict:
 async def health() -> dict:
     ws = _woosh_status()
     als = _audioldm_status()
+    # Report actual runtime device so operators can confirm GPU is in use
+    try:
+        import torch
+        cuda_available = torch.cuda.is_available()
+        cuda_device_name = torch.cuda.get_device_name(0) if cuda_available else None
+    except Exception:
+        cuda_available = False
+        cuda_device_name = None
     return {
         "status": "ok",
         "model_loaded": _model_loaded or _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),
         "model_variant": MODEL_VARIANT,
+        "device": _device,                     # actual device woosh model is on (null if not loaded)
+        "cuda_available": cuda_available,       # whether this venv's torch has CUDA
+        "cuda_device": cuda_device_name,        # e.g. "NVIDIA RTX 4090"
         "vram_mb": 2048 if _model_loaded else 0,
         "stub": False,
         "woosh_dir": str(WOOSH_DIR),

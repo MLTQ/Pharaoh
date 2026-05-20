@@ -94,14 +94,35 @@ step "SFX env (Woosh)"
 if [ -d "${WOOSH_DIR}" ]; then
     if [ -d "${WOOSH_DIR}/.venv" ]; then
         ok "Reusing ${WOOSH_DIR}/.venv"
+
+        # Woosh's uv sync installs CPU-only PyTorch by default.
+        # If an NVIDIA GPU is present, reinstall torch with CUDA so the model
+        # actually runs on GPU instead of silently falling back to CPU.
+        WOOSH_PYTHON="${WOOSH_DIR}/.venv/bin/python3"
+        if command -v nvidia-smi >/dev/null 2>&1 && [ -x "${WOOSH_PYTHON}" ]; then
+            if "${WOOSH_PYTHON}" -c "import torch; raise SystemExit(0 if torch.cuda.is_available() else 1)" >/dev/null 2>&1; then
+                ok "Woosh venv already has CUDA PyTorch"
+            else
+                echo "  NVIDIA GPU detected — reinstalling CUDA PyTorch into Woosh venv..."
+                uv pip install --python "${WOOSH_PYTHON}" \
+                    --extra-index-url https://download.pytorch.org/whl/cu128 \
+                    --index-strategy unsafe-best-match \
+                    "torch>=2.3" torchaudio
+                ok "Woosh venv: CUDA PyTorch installed"
+            fi
+        else
+            ok "Woosh venv: no NVIDIA GPU detected, using CPU/MPS PyTorch as-is"
+        fi
     else
         warn "Woosh repo at ${WOOSH_DIR} has no .venv yet."
         hint "Run:  cd ${WOOSH_DIR} && uv sync"
+        hint "Then re-run this script to apply the CUDA PyTorch patch."
     fi
 else
     warn "Woosh repo not found at ${WOOSH_DIR}"
     hint "Clone:  git clone https://github.com/SonyResearch/Woosh ${WOOSH_DIR} && cd ${WOOSH_DIR} && uv sync"
     hint "Or set PHARAOH_WOOSH_DIR to an existing checkout."
+    hint "Then re-run this script to apply the CUDA PyTorch patch."
 fi
 
 # ── Optional Chatterbox Turbo ────────────────────────────────────────────────
