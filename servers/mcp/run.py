@@ -20,6 +20,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import time
@@ -48,6 +49,8 @@ parser.add_argument("--rvc-url", default="http://127.0.0.1:18006")
 parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"])
 parser.add_argument("--host", default="127.0.0.1")
 parser.add_argument("--port", type=int, default=18000)
+parser.add_argument("--single-model-mode", action="store_true", default=False,
+                    help="Unload other heavy servers before loading a new model (saves VRAM)")
 args, _ = parser.parse_known_args()
 
 PROJECTS_DIR = Path(os.path.expandvars(args.projects_dir)).expanduser()
@@ -198,9 +201,13 @@ _HEAVY_SERVERS = {"tts", "music", "chatterbox", "rvc"}
 
 
 def _auto_unload_others(active: str) -> None:
-    """If single_model_mode is enabled, unload all heavy servers except `active`."""
-    cfg = _cfg()
-    if not cfg.get("single_model_mode", False):
+    """If single_model_mode is enabled, unload all heavy servers except `active`.
+
+    Enabled by either the --single-model-mode CLI flag or the Tauri app's
+    persisted single_model_mode setting (read from config.json if present).
+    """
+    enabled = args.single_model_mode or _cfg().get("single_model_mode", False)
+    if not enabled:
         return
     for server in _HEAVY_SERVERS:
         if server == active:
@@ -1874,24 +1881,31 @@ def compose_scene(project_id: str, scene_slug: str) -> str:
     render_dir = scene_d / "render"
     render_dir.mkdir(parents=True, exist_ok=True)
 
-    # Locate the pharaoh CLI binary next to this script
+    # Locate the pharaoh CLI binary.
+    # Search order: PATH first (works when installed as MCPB or binary in PATH),
+    # then repo-relative paths (works when running from a local dev checkout).
+    exe_name = "pharaoh.exe" if sys.platform == "win32" else "pharaoh"
+    which_result = shutil.which(exe_name)
     mcp_dir = Path(__file__).parent
     repo_root = mcp_dir.parent.parent
     cli_candidates = [
-        repo_root / "target" / "release" / "pharaoh",
-        repo_root / "target" / "debug" / "pharaoh",
-        repo_root / "src-tauri" / "target" / "release" / "pharaoh",
-        repo_root / "src-tauri" / "target" / "debug" / "pharaoh",
+        repo_root / "target" / "release" / exe_name,
+        repo_root / "target" / "debug" / exe_name,
+        repo_root / "src-tauri" / "target" / "release" / exe_name,
+        repo_root / "src-tauri" / "target" / "debug" / exe_name,
     ]
-    cli = next((c for c in cli_candidates if c.exists()), None)
-    if cli is None:
+    cli_path = which_result or next((str(c) for c in cli_candidates if c.exists()), None)
+    if cli_path is None:
         return json.dumps({
-            "error": "pharaoh CLI binary not found. Build with: cargo build --release",
-            "searched": [str(c) for c in cli_candidates],
+            "error": (
+                "pharaoh CLI binary not found. "
+                "Either add it to PATH or build with: cargo build --release"
+            ),
+            "searched": ["PATH"] + [str(c) for c in cli_candidates],
         })
 
     result = subprocess.run(
-        [str(cli), "compose", "render", "scene", project_id, scene_slug],
+        [cli_path, "compose", "render", "scene", project_id, scene_slug],
         capture_output=True,
         text=True,
     )
@@ -1909,21 +1923,27 @@ def render_final(project_id: str, crossfade_ms: int = 500) -> str:
     All scenes must be rendered before calling this.
     Returns the path to the final output file.
     """
+    exe_name = "pharaoh.exe" if sys.platform == "win32" else "pharaoh"
+    which_result = shutil.which(exe_name)
     repo_root = Path(__file__).parent.parent.parent
     cli_candidates = [
-        repo_root / "target" / "release" / "pharaoh",
-        repo_root / "target" / "debug" / "pharaoh",
-        repo_root / "src-tauri" / "target" / "release" / "pharaoh",
-        repo_root / "src-tauri" / "target" / "debug" / "pharaoh",
+        repo_root / "target" / "release" / exe_name,
+        repo_root / "target" / "debug" / exe_name,
+        repo_root / "src-tauri" / "target" / "release" / exe_name,
+        repo_root / "src-tauri" / "target" / "debug" / exe_name,
     ]
-    cli = next((c for c in cli_candidates if c.exists()), None)
-    if cli is None:
+    cli_path = which_result or next((str(c) for c in cli_candidates if c.exists()), None)
+    if cli_path is None:
         return json.dumps({
-            "error": "pharaoh CLI binary not found. Build with: cargo build --release",
+            "error": (
+                "pharaoh CLI binary not found. "
+                "Either add it to PATH or build with: cargo build --release"
+            ),
+            "searched": ["PATH"] + [str(c) for c in cli_candidates],
         })
 
     result = subprocess.run(
-        [str(cli), "compose", "final", project_id, "--crossfade", str(crossfade_ms)],
+        [cli_path, "compose", "final", project_id, "--crossfade", str(crossfade_ms)],
         capture_output=True,
         text=True,
     )
