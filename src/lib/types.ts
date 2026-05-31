@@ -77,6 +77,12 @@ export interface RvcConfig {
 }
 
 export interface VoiceAssignment {
+  /**
+   * Legacy field — overloaded enum for "how was the ref made" + "what runs at
+   * production time". Kept for back-compat reads from existing project.json.
+   * New code should derive the UI badge from data shape (palette length,
+   * presence of `rvc`, value of `production_pipeline`) rather than reading this.
+   */
   model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned" | "Chatterbox";
   speaker: string | null;
   instruct_default: string | null;
@@ -92,9 +98,22 @@ export interface VoiceAssignment {
   /** Named emotional states for the Chatterbox Turbo palette workflow. */
   emotional_palette: PaletteEntry[];
   /**
+   * Which production pipeline runs per dialogue line.
+   * - "chatterbox": Chatterbox only, no RVC pass.
+   * - "chatterbox+rvc": Chatterbox followed by RVC voice conversion.
+   *
+   * Replaces the overloaded legacy `model` enum as the only thing that affects
+   * per-line generation. Defaults to "chatterbox" for new characters.
+   */
+  production_pipeline: "chatterbox" | "chatterbox+rvc";
+  /**
    * Stage 4 voice pipeline: RVC model trained on the Chatterbox corpus.
    * Undefined/null when RVC has not been configured for this character.
    * Present (even with model_path null) once the user opens Stage 4.
+   *
+   * `corpus_count` / `corpus_duration_ms` are recomputed by the backend on
+   * every `get_project` call by scanning the rvc_corpus/ directory, so the
+   * UI sees fresh values without an extra request.
    */
   rvc?: RvcConfig | null;
 }
@@ -137,6 +156,13 @@ export interface Character {
   name: string;
   description: string;
   voice_assignment: VoiceAssignment;
+  /**
+   * Bumped whenever the on-disk character shape changes. Migration runs on
+   * every project load (Rust `migrate_project_in_place`); the UI should treat
+   * this as informational only — it never has to migrate itself.
+   * Absent in pre-migration project.json — defaults to 1.
+   */
+  schema_version: number;
 }
 
 export interface LlmConfig {

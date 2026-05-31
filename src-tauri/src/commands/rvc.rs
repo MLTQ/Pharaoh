@@ -16,7 +16,7 @@
 //! `inference.rs`: read the base URL from `AppState → server_config`, POST
 //! a JSON body, and return the `job_id` immediately so the caller can poll.
 
-use crate::app_support::app_projects_dir;
+use crate::app_support::{app_projects_dir, scan_rvc_corpus_dir};
 use crate::commands;
 use crate::error::{Error, Result};
 use crate::models::{AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus};
@@ -451,54 +451,11 @@ pub async fn get_corpus_status(
         .join("rvc_corpus");
 
     let corpus_dir_str = corpus_dir.to_string_lossy().into_owned();
-
-    if !corpus_dir.exists() {
-        return Ok(CorpusStatus {
-            file_count: 0,
-            total_duration_ms: 0,
-            corpus_dir: corpus_dir_str,
-            ready_for_training: false,
-        });
-    }
-
-    let mut file_count: usize = 0;
-    let mut total_duration_ms: u64 = 0;
-
-    let entries = std::fs::read_dir(&corpus_dir)?;
-    for entry in entries.flatten() {
-        let path = entry.path();
-        if path.extension().and_then(|e| e.to_str()) != Some("wav") {
-            continue;
-        }
-        file_count += 1;
-
-        // Attempt to read duration from sidecar: <name>.wav.meta.json
-        let meta_path = {
-            let mut p = path.clone();
-            let mut name = path
-                .file_name()
-                .and_then(|n| n.to_str())
-                .unwrap_or("")
-                .to_string();
-            name.push_str(".meta.json");
-            p.set_file_name(name);
-            p
-        };
-
-        if let Ok(raw) = std::fs::read_to_string(&meta_path) {
-            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
-                if let Some(ms) = json["duration_ms"].as_u64() {
-                    total_duration_ms += ms;
-                } else if let Some(ms) = json["duration_actual_ms"].as_u64() {
-                    total_duration_ms += ms;
-                }
-            }
-        }
-    }
+    let (file_count, total_duration_ms) = scan_rvc_corpus_dir(&corpus_dir);
 
     const MIN_TRAINING_MS: u64 = 5 * 60 * 1000; // 5 minutes
     Ok(CorpusStatus {
-        file_count,
+        file_count: file_count as usize,
         total_duration_ms,
         corpus_dir: corpus_dir_str,
         ready_for_training: total_duration_ms >= MIN_TRAINING_MS,

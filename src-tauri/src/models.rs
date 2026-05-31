@@ -21,6 +21,9 @@ pub struct PaletteEntry {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VoiceAssignment {
+    /// Legacy field — kept for back-compat reads from existing project.json.
+    /// New code should derive the badge/UI hint from data shape
+    /// (palette length, presence of rvc, production_pipeline).
     pub model: String,
     pub speaker: Option<String>,
     pub instruct_default: Option<String>,
@@ -33,26 +36,120 @@ pub struct VoiceAssignment {
     /// Named emotional states for the Chatterbox Turbo palette workflow.
     #[serde(default)]
     pub emotional_palette: Vec<PaletteEntry>,
-    /// Absolute path to the trained RVC `.pth` weights file for this character.
+    /// Which production pipeline runs per dialogue line.
+    /// "chatterbox" (default) skips RVC. "chatterbox+rvc" runs RVC after Chatterbox.
+    /// Replaces the overloaded legacy `model` enum as the only thing that affects
+    /// per-line generation.
+    #[serde(default = "default_production_pipeline")]
+    pub production_pipeline: String,
+    /// Nested RVC config. None when RVC is not configured for this character.
+    /// Legacy flat `rvc_*` fields below are lifted into this struct on load
+    /// by [`VoiceAssignment::consolidate_legacy_rvc`].
     #[serde(default)]
+    pub rvc: Option<RvcConfig>,
+
+    // ── Legacy flat fields ──────────────────────────────────────────────────
+    // Read from older project.json files, never written back. Always consolidated
+    // into the nested `rvc` field on load.
+    #[serde(default, skip_serializing)]
     pub rvc_model_path: Option<String>,
-    /// Absolute path to the RVC `.index` FAISS file for this character.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub rvc_index_path: Option<String>,
-    /// Pitch shift applied by RVC at production time, in semitones. Default: `0`.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub rvc_pitch_shift: i32,
-    /// Index influence strength used during RVC conversion (0–1). Default: `0.5`.
-    #[serde(default = "default_rvc_index_rate")]
+    #[serde(default = "default_rvc_index_rate", skip_serializing)]
     pub rvc_index_rate: f32,
-    /// Consonant protection strength for RVC (0–0.5). Default: `0.33`.
-    #[serde(default = "default_rvc_protect")]
+    #[serde(default = "default_rvc_protect", skip_serializing)]
     pub rvc_protect: f32,
-    /// When `true`, production dialogue lines are passed through RVC after
-    /// Chatterbox generation.
-    #[serde(default)]
+    #[serde(default, skip_serializing)]
     pub rvc_enabled: bool,
 }
+
+/// Nested RVC configuration for a character. Stage 4 of the voice pipeline.
+///
+/// `corpus_count` and `corpus_duration_ms` are transient — recomputed from
+/// the on-disk `rvc_corpus/` directory whenever a project is loaded, never
+/// trusted on read. They're persisted only so the on-disk shape stays
+/// round-trippable; the UI reads fresh values on each `get_project`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct RvcConfig {
+    /// Absolute path to the trained `.pth` weights file. None = model not yet trained.
+    #[serde(default)]
+    pub model_path: Option<String>,
+    /// Absolute path to the FAISS `.index` file alongside the model.
+    #[serde(default)]
+    pub index_path: Option<String>,
+    /// Pitch shift in semitones applied at inference time. Range -12..=12.
+    #[serde(default)]
+    pub pitch_shift: i32,
+    /// Retrieval index influence (0..=1). Default 0.5.
+    #[serde(default = "default_rvc_index_rate")]
+    pub index_rate: f32,
+    /// Voiceless consonant protection (0..=0.5). Default 0.33.
+    #[serde(default = "default_rvc_protect")]
+    pub protect: f32,
+    /// When true, production dialogue lines pass through RVC after Chatterbox.
+    /// Mirrors `VoiceAssignment::production_pipeline == "chatterbox+rvc"`; kept
+    /// here for the existing RvcModelStage toggle. Future cleanup: collapse.
+    #[serde(default)]
+    pub enabled: bool,
+    /// Number of WAV files in the corpus dir at last load (transient).
+    #[serde(default)]
+    pub corpus_count: u32,
+    /// Total corpus duration in milliseconds at last load (transient).
+    #[serde(default)]
+    pub corpus_duration_ms: u64,
+}
+
+impl VoiceAssignment {
+    /// Lift legacy flat `rvc_*` fields into the nested [`RvcConfig`] when present.
+    /// Idempotent — safe to call on already-migrated VoiceAssignments.
+    /// Called on every project load before the UI sees the data.
+    pub fn consolidate_legacy_rvc(&mut self) {
+        let has_legacy = self.rvc_model_path.is_some()
+            || self.rvc_index_path.is_some()
+            || self.rvc_enabled
+            || self.rvc_pitch_shift != 0;
+        if self.rvc.is_none() && has_legacy {
+            self.rvc = Some(RvcConfig {
+                model_path: self.rvc_model_path.take(),
+                index_path: self.rvc_index_path.take(),
+                pitch_shift: self.rvc_pitch_shift,
+                index_rate: self.rvc_index_rate,
+                protect: self.rvc_protect,
+                enabled: self.rvc_enabled,
+                corpus_count: 0,
+                corpus_duration_ms: 0,
+            });
+        }
+        // Reset legacy fields so a manual save doesn't accidentally round-trip them
+        // (skip_serializing already prevents that, but clean state is friendlier).
+        self.rvc_model_path = None;
+        self.rvc_index_path = None;
+        self.rvc_pitch_shift = 0;
+        self.rvc_enabled = false;
+
+        // Back-fill production_pipeline from legacy rvc enable state if unset.
+        if self.production_pipeline.is_empty() {
+            self.production_pipeline = if self.rvc.as_ref().is_some_and(|r| r.enabled) {
+                "chatterbox+rvc".to_string()
+            } else {
+                "chatterbox".to_string()
+            };
+        }
+    }
+}
+
+fn default_production_pipeline() -> String {
+    "chatterbox".to_string()
+}
+
+fn default_character_schema_version() -> u32 {
+    1
+}
+
+/// Latest character schema version. Migration brings characters up to this.
+pub const CURRENT_CHARACTER_SCHEMA: u32 = 2;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {
@@ -60,6 +157,11 @@ pub struct Character {
     pub name: String,
     pub description: String,
     pub voice_assignment: VoiceAssignment,
+    /// Bumped whenever the character data shape changes. Migration in
+    /// `commands/project.rs::migrate_project` brings older characters up.
+    /// Absent in legacy project.json — defaults to 1.
+    #[serde(default = "default_character_schema_version")]
+    pub schema_version: u32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

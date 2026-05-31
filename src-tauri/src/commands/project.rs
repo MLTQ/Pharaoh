@@ -1,9 +1,51 @@
+use std::path::Path;
+
 use tauri::AppHandle;
 use uuid::Uuid;
 use chrono::Utc;
-use crate::app_support::{app_projects_dir, project_dir, read_json, write_json};
-use crate::models::{Project, Scene, Storyboard, LlmConfig, SceneStatus};
+use crate::app_support::{
+    app_projects_dir, character_dir, project_dir, read_json, scan_rvc_corpus_dir, write_json,
+};
+use crate::models::{
+    Project, Scene, Storyboard, LlmConfig, RvcConfig, SceneStatus, CURRENT_CHARACTER_SCHEMA,
+};
 use crate::error::{Error, Result};
+
+/// Bring a project's characters up to [`CURRENT_CHARACTER_SCHEMA`] and refresh
+/// transient stats (corpus count/duration) from on-disk truth.
+///
+/// Idempotent. Called on every read path (`get_project`, `open_project`,
+/// `list_projects`) so the UI always sees a consistent, current shape regardless
+/// of how the project was last written.
+fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
+    for character in project.characters.iter_mut() {
+        character.voice_assignment.consolidate_legacy_rvc();
+
+        // Refresh transient corpus stats. If a corpus dir exists but there's no
+        // RvcConfig yet, create one with stats only — keeps the UI in sync when
+        // a corpus is populated outside the standard flow (MCP, manual copy).
+        let bundle = character_dir(projects_dir, &project.id, &character.id);
+        let corpus_dir = bundle.join("rvc_corpus");
+        let (count, dur_ms) = scan_rvc_corpus_dir(&corpus_dir);
+
+        match character.voice_assignment.rvc.as_mut() {
+            Some(rvc) => {
+                rvc.corpus_count = count;
+                rvc.corpus_duration_ms = dur_ms;
+            }
+            None if count > 0 => {
+                character.voice_assignment.rvc = Some(RvcConfig {
+                    corpus_count: count,
+                    corpus_duration_ms: dur_ms,
+                    ..RvcConfig::default()
+                });
+            }
+            None => {}
+        }
+
+        character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    }
+}
 
 #[tauri::command]
 pub fn get_projects_dir(app: AppHandle) -> String {
@@ -55,14 +97,20 @@ pub fn create_project(
 
 #[tauri::command]
 pub fn open_project(app: AppHandle, project_id: String) -> Result<Project> {
-    let path = project_dir(&app_projects_dir(&app)?, &project_id).join("project.json");
-    read_json(&path)
+    let projects_dir = app_projects_dir(&app)?;
+    let path = project_dir(&projects_dir, &project_id).join("project.json");
+    let mut project: Project = read_json(&path)?;
+    migrate_project_in_place(&mut project, &projects_dir);
+    Ok(project)
 }
 
 #[tauri::command]
 pub fn get_project(app: AppHandle, project_id: String) -> Result<Project> {
-    let path = project_dir(&app_projects_dir(&app)?, &project_id).join("project.json");
-    read_json(&path)
+    let projects_dir = app_projects_dir(&app)?;
+    let path = project_dir(&projects_dir, &project_id).join("project.json");
+    let mut project: Project = read_json(&path)?;
+    migrate_project_in_place(&mut project, &projects_dir);
+    Ok(project)
 }
 
 #[tauri::command]
@@ -77,7 +125,8 @@ pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
         let entry = entry?;
         let project_json = entry.path().join("project.json");
         if project_json.exists() {
-            if let Ok(p) = read_json::<Project>(&project_json) {
+            if let Ok(mut p) = read_json::<Project>(&project_json) {
+                migrate_project_in_place(&mut p, &dir);
                 projects.push(p);
             }
         }
@@ -90,7 +139,15 @@ pub fn list_projects(app: AppHandle) -> Result<Vec<Project>> {
 pub fn update_project(app: AppHandle, project: Project) -> Result<Project> {
     let mut p = project;
     p.updated_at = Utc::now();
-    let path = project_dir(&app_projects_dir(&app)?, &p.id).join("project.json");
+    // Ensure write conforms to the current schema regardless of caller hygiene:
+    // - lift any stray legacy rvc_* fields the UI sent back
+    // - stamp schema_version=CURRENT so the file no longer needs migration on read
+    let projects_dir = app_projects_dir(&app)?;
+    for character in p.characters.iter_mut() {
+        character.voice_assignment.consolidate_legacy_rvc();
+        character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    }
+    let path = project_dir(&projects_dir, &p.id).join("project.json");
     write_json(&path, &p)?;
     Ok(p)
 }

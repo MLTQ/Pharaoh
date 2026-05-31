@@ -63,6 +63,97 @@ pub fn scene_dir(projects_dir: &Path, project_id: &str, scene_slug: &str) -> Pat
         .join(scene_slug)
 }
 
+// Character bundle helpers — see app_support.md for the bundle layout contract.
+
+pub fn character_dir(projects_dir: &Path, project_id: &str, character_id: &str) -> PathBuf {
+    project_dir(projects_dir, project_id)
+        .join("characters")
+        .join(character_id)
+}
+
+/// Resolve a character-bundle asset path to an absolute filesystem path.
+/// - If `path` is absolute, returned as-is (external Clip Studio refs etc.).
+/// - If `path` is relative, joined onto `bundle_dir`.
+///
+/// Currently unused; future issue Pharaoh-vor (library import/export) and a
+/// follow-up sweep will switch in-bundle path storage to relative and call this
+/// at every job-submit site.
+#[allow(dead_code)]
+pub fn resolve_character_asset(bundle_dir: &Path, path: &str) -> PathBuf {
+    let p = PathBuf::from(path);
+    if p.is_absolute() {
+        p
+    } else {
+        bundle_dir.join(p)
+    }
+}
+
+/// If `abs_path` lies inside `bundle_dir`, return the path relative to the bundle.
+/// Returns None for paths outside the bundle (e.g. external references).
+///
+/// Paired with [`resolve_character_asset`]; see that doc for context.
+#[allow(dead_code)]
+pub fn relativize_character_asset(bundle_dir: &Path, abs_path: &str) -> Option<String> {
+    let p = PathBuf::from(abs_path);
+    if !p.is_absolute() {
+        return None;
+    }
+    p.strip_prefix(bundle_dir)
+        .ok()
+        .map(|rel| rel.to_string_lossy().into_owned())
+}
+
+/// Scan a `rvc_corpus/` directory: count `.wav` files and sum `duration_ms`
+/// from any adjacent `<name>.wav.meta.json` sidecars.
+/// Returns `(file_count, total_duration_ms)`. Missing dir → `(0, 0)`.
+///
+/// Shared between [`commands::rvc::get_corpus_status`] and the project-load
+/// migration so corpus stats stay consistent regardless of caller.
+pub fn scan_rvc_corpus_dir(corpus_dir: &Path) -> (u32, u64) {
+    if !corpus_dir.exists() {
+        return (0, 0);
+    }
+    let entries = match std::fs::read_dir(corpus_dir) {
+        Ok(e) => e,
+        Err(_) => return (0, 0),
+    };
+
+    let mut file_count: u32 = 0;
+    let mut total_duration_ms: u64 = 0;
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.extension().and_then(|e| e.to_str()) != Some("wav") {
+            continue;
+        }
+        file_count += 1;
+
+        let meta_path = {
+            let mut p = path.clone();
+            let mut name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("")
+                .to_string();
+            name.push_str(".meta.json");
+            p.set_file_name(name);
+            p
+        };
+
+        if let Ok(raw) = std::fs::read_to_string(&meta_path) {
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&raw) {
+                if let Some(ms) = json["duration_ms"].as_u64() {
+                    total_duration_ms += ms;
+                } else if let Some(ms) = json["duration_actual_ms"].as_u64() {
+                    total_duration_ms += ms;
+                }
+            }
+        }
+    }
+
+    (file_count, total_duration_ms)
+}
+
 pub fn script_path(projects_dir: &Path, project_id: &str, scene_slug: &str) -> PathBuf {
     scene_dir(projects_dir, project_id, scene_slug).join("script.csv")
 }

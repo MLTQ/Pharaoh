@@ -9,6 +9,11 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 - **Does**: Represent the persistent story and composition data model on disk.
 - **Interacts with**: `project.rs`, `script.rs`, `cli.rs`.
 
+### `Character`, `VoiceAssignment`, `RvcConfig`, `PaletteEntry`
+- **Does**: Per-character cast and voice configuration. `RvcConfig` is the nested home for all RVC fields (model path, index path, pitch shift, index rate, protect, enabled, transient corpus stats). `VoiceAssignment.production_pipeline` is the single source of truth for which generation chain runs per line.
+- **Interacts with**: `commands/project.rs` (migration), `commands/rvc.rs`, `CharacterDesignerView.tsx`.
+- **Rationale**: The legacy `model` enum mixed "how the ref was made" with "what runs at production time"; `production_pipeline` isolates the latter. The flat `rvc_*` fields are kept for back-compat reads only (`#[serde(skip_serializing)]`) and lifted into nested `RvcConfig` by `VoiceAssignment::consolidate_legacy_rvc`. `Character::schema_version` is bumped by `CURRENT_CHARACTER_SCHEMA` so future shape changes have a versioned migration story.
+
 ### `AppConfig`, `ServerConfig`, `AppState`
 - **Does**: Hold runtime configuration and shared clients/locks for the native app, including TTS/SFX/music/Post server URLs.
 - **Interacts with**: `lib.rs`, `settings.rs`, `app_support.rs`.

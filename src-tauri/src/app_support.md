@@ -18,6 +18,16 @@ Shared filesystem and config helpers for both Tauri commands and the headless CL
 - **Does**: Central path builders for project and scene resources.
 - **Interacts with**: `project.rs`, `script.rs`, `audio_engine.rs`, `inference.rs`, `cli.rs`.
 
+### `character_dir`, `resolve_character_asset`, `relativize_character_asset`
+- **Does**: Path helpers for character bundles — the directory holding all artifacts for one character (`palette/`, `rvc/`, `rvc_corpus/`).
+- **Interacts with**: `project.rs` (migration on load), future library import/export commands.
+- **Rationale**: The bundle is the unit of portability for the planned character library. `resolve_character_asset` and `relativize_character_asset` accept either absolute or relative paths so callers can be switched to relative-by-default in a follow-up sweep without breaking existing data.
+
+### `scan_rvc_corpus_dir`
+- **Does**: Counts `.wav` files in a corpus directory and sums duration_ms from adjacent `<name>.wav.meta.json` sidecars.
+- **Interacts with**: `commands/rvc.rs::get_corpus_status`, `commands/project.rs::migrate_project_in_place`.
+- **Rationale**: Corpus stats are transient — recomputed from disk on every project load — so the same scan must be used by both code paths to avoid drift.
+
 ### `read_json`, `write_json`
 - **Does**: Small JSON persistence helpers used by both GUI and CLI flows.
 - **Interacts with**: `project.rs`, `cli.rs`.
