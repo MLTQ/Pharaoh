@@ -593,3 +593,17 @@ export const getLibraryCharacter = (libraryId: string): Promise<Character> =>
  */
 export const saveLibraryCharacter = (character: Character): Promise<Character> =>
   invoke("save_library_character", { character });
+
+/**
+ * Pull the canonical library version into a project, overwriting the project
+ * character's bundle and inline record. The project-local `id` is preserved
+ * (so script.csv rows stay valid). Destructive — callers must confirm intent.
+ *
+ * Errors if the character has no `library_id` or the library entry no longer
+ * exists.
+ */
+export const pullCharacterFromLibrary = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<Character> =>
+  invoke("pull_character_from_library", args);

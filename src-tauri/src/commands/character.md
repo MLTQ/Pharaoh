@@ -39,6 +39,11 @@ relativization pass.
 - **Interacts with**: `LibraryView.tsx` save / new-character flows.
 - **Rationale**: Lets the library editor mutate metadata (name, description, base voice description, palette directions) without going through a project. Audio-generating mutations remain project-scoped for now.
 
+### `pull_character_from_library`
+- **Does**: Replaces a project character's inline record + bundle with the canonical library version. Preserves the project-local `id` (script.csv references stay valid) and bumps `library_version` to the library's current value.
+- **Interacts with**: `CharacterDesignerView.tsx` drift-banner "Pull library version" action.
+- **Rationale**: Destructive (overwrites local edits); the UI confirms intent. Errors if the character has no `library_id` or the library entry has been deleted — surfaces the "detached" state explicitly rather than silently no-op'ing.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

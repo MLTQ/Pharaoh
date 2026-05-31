@@ -114,6 +114,7 @@ pub fn run() {
             commands::character::delete_library_character,
             commands::character::get_library_character,
             commands::character::save_library_character,
+            commands::character::pull_character_from_library,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

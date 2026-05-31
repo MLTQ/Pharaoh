@@ -297,6 +297,86 @@ pub fn get_library_character(app: AppHandle, library_id: String) -> Result<Chara
     Ok(character)
 }
 
+/// Pull the canonical library version into a project, replacing the existing
+/// project character's bundle and inline record. The project-local character
+/// `id` is preserved so script.csv rows that reference it keep resolving.
+///
+/// Destructive — overwrites any local edits to palette refs, RVC config,
+/// description, etc. The caller (UI) is expected to confirm intent.
+///
+/// Pre-conditions:
+/// - The project character must have `library_id` set (we only pull what we
+///   originally imported from). Returns an error otherwise.
+/// - The library entry must still exist. Returns an error if the library_id
+///   has been deleted from the library (the project character is "detached").
+#[tauri::command]
+pub fn pull_character_from_library(
+    app: AppHandle,
+    project_id: String,
+    character_id: String,
+) -> Result<Character> {
+    let projects_dir = app_projects_dir(&app)?;
+    let project_path = project_dir(&projects_dir, &project_id).join("project.json");
+    let mut project: Project = read_json(&project_path)?;
+
+    let original_idx = project
+        .characters
+        .iter()
+        .position(|c| c.id == character_id)
+        .ok_or_else(|| {
+            Error::Other(format!(
+                "character {} not found in project {}",
+                character_id, project_id
+            ))
+        })?;
+
+    let library_id = project.characters[original_idx]
+        .library_id
+        .clone()
+        .ok_or_else(|| {
+            Error::Other(format!(
+                "character {} is not linked to a library entry — nothing to pull",
+                character_id
+            ))
+        })?;
+
+    let library_bundle = library_character_dir(&projects_dir, &library_id);
+    let library_bundle_file = library_bundle.join(LIBRARY_BUNDLE_FILE);
+    if !library_bundle_file.exists() {
+        return Err(Error::Other(format!(
+            "library entry {} no longer exists — character is detached",
+            library_id
+        )));
+    }
+
+    // Read fresh library character. Paths are relative to the library bundle.
+    let mut fresh: Character = read_json(&library_bundle_file)?;
+
+    // Wipe and re-copy the project bundle from the library.
+    let project_bundle = character_dir(&projects_dir, &project_id, &character_id);
+    if project_bundle.exists() {
+        std::fs::remove_dir_all(&project_bundle)?;
+    }
+    std::fs::create_dir_all(&project_bundle)?;
+    copy_dir_recursive(&library_bundle, &project_bundle)?;
+    // Drop the library's character.json copy — project records live inline.
+    let _ = std::fs::remove_file(project_bundle.join(LIBRARY_BUNDLE_FILE));
+
+    // Preserve the project-local id; absolutize paths against the project bundle.
+    fresh.id = character_id.clone();
+    fresh.library_id = Some(library_id);
+    // library_version remains whatever the library has — that's the version
+    // we just synchronized to, which is the whole point.
+    fresh.schema_version = CURRENT_CHARACTER_SCHEMA;
+    absolutize_voice_paths(&mut fresh.voice_assignment, &project_bundle);
+
+    project.characters[original_idx] = fresh.clone();
+    project.updated_at = Utc::now();
+    write_json(&project_path, &project)?;
+
+    Ok(fresh)
+}
+
 /// Create or update a library character directly (no project context).
 /// - If `character.library_id` is None, allocates a new UUID and bundle dir.
 /// - If set, overwrites the existing library entry in place.

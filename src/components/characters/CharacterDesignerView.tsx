@@ -16,6 +16,7 @@ import {
   listLibraryCharacters,
   importCharacterFromLibrary,
   saveCharacterToLibrary,
+  pullCharacterFromLibrary,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
@@ -114,6 +115,7 @@ export const CharacterDesignerView: React.FC = () => {
   const [libraryLoading, setLibraryLoading] = useState(false);
   const [importing, setImporting]         = useState<string | null>(null);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
+  const [pullingFromLibrary, setPullingFromLibrary] = useState(false);
   const [referenceAssets, setReferenceAssets] = useState<GeneratedAudioAsset[]>([]);
   const [referencePeaks, setReferencePeaks] = useState<Record<string, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -533,6 +535,35 @@ export const CharacterDesignerView: React.FC = () => {
     }
   };
 
+  const handlePullFromLibrary = async () => {
+    if (!char || !realProjectId || !char.library_id) return;
+    if (!window.confirm(
+      `Pull the library version of "${char.name}" into this project? ` +
+      `This OVERWRITES any local edits to palette refs, RVC config, ` +
+      `description, and voice settings. The character's script-row id (${char.id}) is preserved.`
+    )) return;
+    setPullingFromLibrary(true);
+    try {
+      await pullCharacterFromLibrary({ projectId: realProjectId, characterId: char.id });
+      await reloadProjectFromDisk();
+      await refreshLibrary();
+    } catch (e) {
+      window.alert(`Pull from library failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setPullingFromLibrary(false);
+    }
+  };
+
+  const handleDetachFromLibrary = () => {
+    if (!char || !char.library_id) return;
+    if (!window.confirm(
+      `Detach "${char.name}" from the library? ` +
+      `The character stays in the project unchanged, but loses its link to ` +
+      `the library entry. Push/pull will no longer be available.`
+    )) return;
+    updateCharacter(char.id, { library_id: null, library_version: null });
+  };
+
   const charColor = char ? `oklch(0.7 0.12 ${CHAR_HUE(char.id)})` : "";
   const refPath   = char?.voice_assignment.ref_audio_path ?? null;
 
@@ -765,6 +796,61 @@ export const CharacterDesignerView: React.FC = () => {
             placeholder="Character notes — age, role, personality, vocal direction…"
           />
         </div>
+
+        {/* ── Library drift banner ───────────────────────────────────────── */}
+        {char.library_id && hasDrift(char) && (
+          <div style={{
+            display: "flex", alignItems: "center", gap: 12,
+            padding: "10px 24px",
+            background: "color-mix(in oklch, var(--st-gen) 8%, var(--bg-1))",
+            borderBottom: "1px solid color-mix(in oklch, var(--st-gen) 30%, var(--line-1))",
+            flexShrink: 0,
+            fontSize: 11.5, color: "var(--fg-2)", lineHeight: 1.5,
+          }}>
+            <span style={{
+              width: 7, height: 7, borderRadius: "50%",
+              background: "var(--st-gen)", flexShrink: 0,
+            }} />
+            <span style={{ flex: 1 }}>
+              <strong style={{ color: "var(--fg-1)" }}>This character has drifted from the library.</strong>{" "}
+              The library copy was last updated{" "}
+              {(() => {
+                const remote = libraryVersionMap.get(char.library_id!);
+                if (!remote) return "(unknown)";
+                try { return new Date(remote).toLocaleString(); }
+                catch { return remote; }
+              })()}.
+            </span>
+            <button
+              className="btn btn-sm"
+              onClick={handleSaveToLibrary}
+              disabled={savingToLibrary || pullingFromLibrary}
+              title="Save the project version over the library entry"
+              style={{
+                background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
+              }}
+            >
+              {savingToLibrary ? "Pushing…" : "Push your changes"}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={handlePullFromLibrary}
+              disabled={savingToLibrary || pullingFromLibrary}
+              title="Overwrite the project version with the library copy"
+            >
+              {pullingFromLibrary ? "Pulling…" : "Pull library version"}
+            </button>
+            <button
+              className="btn btn-sm"
+              onClick={handleDetachFromLibrary}
+              disabled={savingToLibrary || pullingFromLibrary}
+              title="Keep this character but break the link to the library"
+              style={{ color: "var(--fg-3)" }}
+            >
+              Detach
+            </button>
+          </div>
+        )}
 
         {/* Pipeline stage header — replaces flat tab bar */}
         {(() => {

@@ -39,7 +39,12 @@ Cast and voice-design workspace for creating characters, testing generated voice
 
 ### `refreshLibrary` + `libraryVersionMap` + `hasDrift`
 - **Does**: Fetches library summaries on mount and whenever the character list changes; builds a `library_id → library_version` map; per-character `hasDrift` compares the project's `library_version` against the live library value.
-- **Rationale**: Drift gets surfaced as a small dot on the sidebar character chip and a "Drift" badge in the detail header. Push/pull resolution itself is Pharaoh-wpk; this only flags the state.
+- **Rationale**: Drift gets surfaced as a small dot on the sidebar character chip, a "Drift" badge in the detail header, and a full action banner above the pipeline stages (push / pull / detach).
+
+### Drift banner (`handlePullFromLibrary`, `handleDetachFromLibrary`)
+- **Does**: When the active character is library-linked and has drifted, renders a banner above the pipeline header offering three actions: Push your changes (existing `handleSaveToLibrary`), Pull library version (`pullCharacterFromLibrary`), and Detach (clears `library_id` + `library_version` locally via `updateCharacter`).
+- **Interacts with**: `pullCharacterFromLibrary`, `updateCharacter`, `reloadProjectFromDisk`, `refreshLibrary`.
+- **Rationale**: Pull is destructive (overwrites local edits) so it's gated by a confirm. Detach is purely a local mutation — no backend round-trip — because the character record is what owns the library_id field; clearing it on the project side severs the link without disturbing the library entry itself.
 
 ## Contracts
 
