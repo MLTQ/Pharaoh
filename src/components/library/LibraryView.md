@@ -6,14 +6,19 @@ Character Library — project-independent browser/editor for library characters 
 ## Components
 
 ### `LibraryView`
-- **Does**: Lists library characters in a left sidebar (driven by `listLibraryCharacters`) and opens a metadata editor on the right when one is selected. Supports creating empty characters, editing name/description/base voice description/palette directions, and deleting.
-- **Interacts with**: `tauriCommands::listLibraryCharacters`, `getLibraryCharacter`, `saveLibraryCharacter`, `deleteLibraryCharacter`.
-- **Rationale**: Library editing is intentionally scoped to metadata only in this MVP — generating palette takes, building the corpus, and training RVC require project context (output paths, job tracking) and are deferred to a follow-up. The user can import the character into a project to do those steps, then "Save to library" to push back.
+- **Does**: Lists library characters in a left sidebar (driven by `listLibraryCharacters`) and opens a full editor on the right when one is selected. Supports creating empty characters, editing name / description / base voice description, adding palette emotions, generating palette take audio directly into the library bundle (Pharaoh-g8z), approving takes as references, and deleting.
+- **Interacts with**: `tauriCommands::listLibraryCharacters`, `getLibraryCharacter`, `saveLibraryCharacter`, `deleteLibraryCharacter`, `listPaletteTakes`, `submitTtsVoiceDesign`, `useJobStore`, `useProjectStore`.
+- **Rationale**: Library characters are real first-class artifacts now — you can design and refine a character entirely in the library without ever creating a project. Corpus building + RVC training are still deferred — those workflows are infrequent and fit cleanly behind import-to-project + push-back.
 
-### `PaletteRow`
-- **Does**: Per-emotion accordion row showing the label, emotion slug, approval state, and a play button for the reference audio. Expands to an editable "emotional direction" textarea.
-- **Interacts with**: `PlayButton`.
-- **Rationale**: Direction text is metadata, so it's editable here. Adding/removing palette entries or regenerating the reference WAV is a generation operation — deferred with the rest.
+### Synthetic `LIBRARY_PROJECT_ID = "_library"`
+- **Does**: Routes every backend path-resolution site (`<projects_dir>/<project_id>/characters/<character_id>/...`) into the library bundle (`<projects_dir>/_library/characters/<library_id>/...`) without modifying any existing command.
+- **Interacts with**: `submitTtsVoiceDesign`, `listPaletteTakes`, future corpus/rvc commands.
+- **Rationale**: The library bundle layout was deliberately designed to mirror a project bundle, so the path math just works. No `_library`-aware variants of TTS/RVC commands needed.
+
+### `PaletteRow` (extended)
+- **Does**: Per-emotion accordion row. Header shows label, emotion slug, approval state, and a play button for the reference audio. Expanded body has the emotional direction textarea, a "Generate take" button, the per-emotion take list (job-store jobs + MCP/disk takes deduped), and an "Approve as reference" action that promotes a take to the entry's ref_audio_path.
+- **Interacts with**: `PlayButton`, `TakeList`/`TakeRow`, `RunningBadge`, `EmptyTakes` from shared.
+- **Rationale**: Generation flows through `submitTtsVoiceDesign` with the synthetic library project id and a slug `__library_palette__<library_id>__<emotion>` so the job store can group takes per emotion the same way it does for project palette tabs.
 
 ### `emptyCharacter`
 - **Does**: Builds the default Character payload for "+ New". `library_id` is null; the backend allocates one on first save and the UI refreshes from the returned record.

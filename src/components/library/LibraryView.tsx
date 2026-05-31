@@ -2,33 +2,53 @@
  * LibraryView.tsx
  *
  * Character Library — project-independent browser/editor for library characters
- * (Pharaoh-z21). Library bundles live at
+ * (Pharaoh-z21 + g8z). Library bundles live at
  *   <projects_dir>/_library/characters/<library_id>/
  * and are reusable across episodes via fork-and-pull sync.
  *
- * Scope of this view (MVP):
- *   - Browse all library characters
- *   - Create a new (empty) library character
- *   - Edit metadata: name, description, base voice description, emotional
- *     palette directions
- *   - Play approved palette reference audio
- *   - Delete library characters
+ * Supports:
+ *   - Browse / create / delete library characters
+ *   - Edit metadata: name, description, base voice description
+ *   - Add emotions to the palette
+ *   - Generate palette take audio directly into the library bundle
+ *     (Pharaoh-g8z) using the synthetic projectId="_library" trick — the
+ *     existing `<projects_dir>/<project_id>/characters/<character_id>/...`
+ *     path math resolves correctly because `_library/characters/<id>/` mirrors
+ *     a project bundle's layout.
+ *   - Approve takes as the entry's reference audio
  *
- * Out of scope (deferred to a follow-up):
- *   - Generating palette takes / corpus / RVC from inside the library.
- *     For now, audio generation requires importing the character into a
- *     project first.
+ * Out of scope (deferred to a future follow-up):
+ *   - Corpus building + RVC model training from inside the library. Both
+ *     pipelines are heavier and rarely needed library-side; the recommended
+ *     workflow is import-to-project, train, push-back-to-library.
  */
 
 import React, { useEffect, useMemo, useState } from "react";
 import { PlayButton } from "../shared/PlayButton";
+import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import {
   listLibraryCharacters,
   getLibraryCharacter,
   saveLibraryCharacter,
   deleteLibraryCharacter,
+  listPaletteTakes,
+  submitTtsVoiceDesign,
 } from "../../lib/tauriCommands";
-import type { Character, LibraryCharacterSummary, PaletteEntry } from "../../lib/types";
+import type { PaletteTakeFile } from "../../lib/tauriCommands";
+import { useJobStore } from "../../store/jobStore";
+import { useProjectStore } from "../../store/projectStore";
+import type { Character, LibraryCharacterSummary, PaletteEntry, QaJobStatus } from "../../lib/types";
+
+// Synthetic "project id" used at every backend path-resolution site so the
+// existing tts/sidecar/corpus commands route to <projects_dir>/_library/
+// instead of an actual project dir. Matches the library bundle layout.
+const LIBRARY_PROJECT_ID = "_library";
+const LIBRARY_PALETTE_ROW = 0;
+const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
+
+function libraryPaletteSlug(libraryId: string, emotion: string): string {
+  return `__library_palette__${libraryId}__${emotion}`;
+}
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -78,6 +98,18 @@ export const LibraryView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  // Palette take generation state (Pharaoh-g8z)
+  const [paletteTestLine, setPaletteTestLine] = useState(DEFAULT_TEST_LINE);
+  const [addingEmotion, setAddingEmotion] = useState(false);
+  const [newEmotionKey, setNewEmotionKey] = useState("");
+  const [newEmotionLabel, setNewEmotionLabel] = useState("");
+  const [newEmotionDirection, setNewEmotionDirection] = useState("");
+  const [paletteGenError, setPaletteGenError] = useState<string | null>(null);
+  const [paletteDiskTakes, setPaletteDiskTakes] = useState<Record<string, PaletteTakeFile[]>>({});
+
+  const { jobs, addJob, setQaStatus } = useJobStore();
+  const { projectsDir } = useProjectStore();
 
   // ── Load list ──
   const refreshList = async (selectAfter?: string | null) => {
@@ -179,6 +211,154 @@ export const LibraryView: React.FC = () => {
       setCharacter(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Delete failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // ── Palette take generation (Pharaoh-g8z) ──
+
+  // Refresh disk-scanned palette takes for every emotion whenever the active
+  // character changes. listPaletteTakes hits the library bundle dir directly
+  // because the path math (<projects_dir>/<project_id>/characters/<id>/palette)
+  // matches the library layout when project_id == "_library".
+  useEffect(() => {
+    if (!character?.library_id) {
+      setPaletteDiskTakes({});
+      return;
+    }
+    const entries = character.voice_assignment.emotional_palette ?? [];
+    Promise.all(
+      entries.map((e) =>
+        listPaletteTakes({
+          projectId: LIBRARY_PROJECT_ID,
+          characterId: character.library_id!,
+          emotion: e.emotion,
+        })
+          .then((files) => ({ emotion: e.emotion, files }))
+          .catch(() => ({ emotion: e.emotion, files: [] as PaletteTakeFile[] }))
+      )
+    ).then((results) => {
+      const map: Record<string, PaletteTakeFile[]> = {};
+      for (const { emotion, files } of results) map[emotion] = files;
+      setPaletteDiskTakes(map);
+    });
+  }, [character?.library_id, character?.voice_assignment.emotional_palette.length]);
+
+  const handleAddEmotion = () => {
+    if (!character) return;
+    const key = newEmotionKey.trim().toLowerCase().replace(/\s+/g, "_");
+    if (!key) return;
+    const existing = character.voice_assignment.emotional_palette ?? [];
+    if (existing.some((e) => e.emotion === key)) {
+      setPaletteGenError(`Emotion "${key}" already exists.`);
+      return;
+    }
+    const entry: PaletteEntry = {
+      emotion: key,
+      label: newEmotionLabel.trim() || key.charAt(0).toUpperCase() + key.slice(1),
+      direction: newEmotionDirection.trim(),
+      ref_audio_path: null,
+      ref_transcript: null,
+      qa_status: "unreviewed",
+    };
+    patch((c) => ({
+      ...c,
+      voice_assignment: {
+        ...c.voice_assignment,
+        emotional_palette: [...(c.voice_assignment.emotional_palette ?? []), entry],
+      },
+    }));
+    setNewEmotionKey("");
+    setNewEmotionLabel("");
+    setNewEmotionDirection("");
+    setAddingEmotion(false);
+    setPaletteGenError(null);
+  };
+
+  const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
+    if (!character?.library_id || !projectsDir) return;
+    if (dirty) {
+      setPaletteGenError("Save your changes first — generation uses the saved character state.");
+      return;
+    }
+    const baseDesc = (character.voice_assignment.base_voice_description ?? "").trim();
+    if (!baseDesc) {
+      setPaletteGenError("Set the base voice description first.");
+      return;
+    }
+    const fullInstruct = entry.direction.trim()
+      ? `${baseDesc} ${entry.direction.trim()}`
+      : baseDesc;
+    setPaletteGenError(null);
+
+    const slug = libraryPaletteSlug(character.library_id, entry.emotion);
+    const seed = Math.floor(Math.random() * 9999);
+    const ts = Date.now();
+    const paletteDir = `${projectsDir}/_library/characters/${character.library_id}/palette`;
+    const outputPath = `${paletteDir}/${entry.emotion}_${seed}_${ts}.wav`;
+
+    try {
+      const jobId = await submitTtsVoiceDesign({
+        projectId: LIBRARY_PROJECT_ID,
+        sceneSlug: slug,
+        rowIndex: LIBRARY_PALETTE_ROW,
+        params: {
+          text: paletteTestLine || DEFAULT_TEST_LINE,
+          voice_description: fullInstruct,
+          language: "en",
+          seed,
+          temperature: 0.7,
+          top_p: 0.9,
+          max_new_tokens: 2048,
+          output_path: outputPath,
+        },
+      });
+      addJob({
+        id: jobId,
+        model: "tts",
+        description: `Library palette · ${character.name} · ${entry.label}`,
+        status: "pending",
+        progress: 0,
+        eta: "…",
+        started_at: new Date().toISOString(),
+        scene_id: null,
+        scene_slug: slug,
+        row_index: LIBRARY_PALETTE_ROW,
+        output_path: null,
+        peaks: null,
+        qa_status: "unreviewed",
+        error: null,
+      });
+    } catch (e) {
+      setPaletteGenError(e instanceof Error ? e.message : "Generation failed");
+    }
+  };
+
+  const handleApprovePaletteTake = async (emotion: string, audioPath: string) => {
+    if (!character) return;
+    const updated: Character = {
+      ...character,
+      voice_assignment: {
+        ...character.voice_assignment,
+        emotional_palette: character.voice_assignment.emotional_palette.map((e) =>
+          e.emotion === emotion
+            ? { ...e, ref_audio_path: audioPath, qa_status: "approved" as const }
+            : e,
+        ),
+      },
+    };
+    setCharacter(updated);
+    // Persist immediately — approval is a high-value action; don't make the
+    // user remember to hit Save afterwards.
+    setSaving(true);
+    try {
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+      await refreshList(saved.library_id ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Approve failed");
     } finally {
       setSaving(false);
     }
@@ -389,37 +569,159 @@ export const LibraryView: React.FC = () => {
 
               {/* Palette */}
               <div style={{ marginBottom: 18 }}>
-                <label style={labelStyle}>
-                  Emotional palette · {character.voice_assignment.emotional_palette.length}
-                </label>
-                {character.voice_assignment.emotional_palette.length === 0 ? (
+                <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 8 }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>
+                    Emotional palette · {character.voice_assignment.emotional_palette.length}
+                  </label>
+                  <button
+                    className="btn btn-sm btn-primary"
+                    onClick={() => {
+                      setAddingEmotion(true);
+                      setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDirection("");
+                      setPaletteGenError(null);
+                    }}
+                    style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 8px" }}
+                  >+ Add emotion</button>
+                </div>
+
+                {/* Test line for take generation */}
+                {character.voice_assignment.emotional_palette.length > 0 && (
+                  <div style={{ marginBottom: 10 }}>
+                    <input
+                      className="input"
+                      value={paletteTestLine}
+                      onChange={(e) => setPaletteTestLine(e.target.value)}
+                      placeholder="Test line to synthesise for palette takes…"
+                      style={{ width: "100%", fontSize: 12 }}
+                    />
+                  </div>
+                )}
+
+                {addingEmotion && (
+                  <div style={{
+                    padding: "12px 14px", marginBottom: 10,
+                    border: "1px solid var(--tts)", borderRadius: "var(--r)",
+                    background: "color-mix(in oklch, var(--tts) 6%, var(--bg-1))",
+                    display: "flex", flexDirection: "column", gap: 8,
+                  }}>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <div style={{ flex: 1 }}>
+                        <label style={labelStyle}>Emotion key (slug)</label>
+                        <input
+                          className="input" autoFocus
+                          value={newEmotionKey}
+                          onChange={(e) => setNewEmotionKey(e.target.value)}
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder="neutral, sardonic, tense…"
+                        />
+                      </div>
+                      <div style={{ flex: 1 }}>
+                        <label style={labelStyle}>Display label</label>
+                        <input
+                          className="input"
+                          value={newEmotionLabel}
+                          onChange={(e) => setNewEmotionLabel(e.target.value)}
+                          style={{ width: "100%", fontSize: 12 }}
+                          placeholder="Defaults to key"
+                        />
+                      </div>
+                    </div>
+                    <div>
+                      <label style={labelStyle}>Emotional direction</label>
+                      <textarea
+                        className="input"
+                        value={newEmotionDirection}
+                        onChange={(e) => setNewEmotionDirection(e.target.value)}
+                        rows={2}
+                        style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                        placeholder="e.g. Slower, more deliberate. Controlled dread just beneath the surface."
+                      />
+                    </div>
+                    <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+                      <button className="btn btn-sm" onClick={() => setAddingEmotion(false)}>Cancel</button>
+                      <button
+                        className="btn btn-sm btn-primary"
+                        onClick={handleAddEmotion}
+                        disabled={!newEmotionKey.trim()}
+                        style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
+                      >Add</button>
+                    </div>
+                  </div>
+                )}
+
+                {paletteGenError && (
+                  <div style={{ marginBottom: 8, fontSize: 11, color: "var(--sfx)" }}>{paletteGenError}</div>
+                )}
+
+                {character.voice_assignment.emotional_palette.length === 0 && !addingEmotion ? (
                   <div style={{
                     padding: "14px 16px", textAlign: "center",
                     border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
                     color: "var(--fg-4)", fontSize: 11.5, lineHeight: 1.6,
                   }}>
-                    No palette entries. To add or generate emotional references,
-                    import this character into a project.
+                    No palette entries. Click "+ Add emotion" to start.
                   </div>
                 ) : (
                   <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                    {character.voice_assignment.emotional_palette.map((entry, idx) => (
-                      <PaletteRow
-                        key={entry.emotion}
-                        entry={entry}
-                        onChangeDirection={(direction) =>
-                          patch((c) => ({
-                            ...c,
-                            voice_assignment: {
-                              ...c.voice_assignment,
-                              emotional_palette: c.voice_assignment.emotional_palette.map((e, i) =>
-                                i === idx ? { ...e, direction } : e,
-                              ),
-                            },
-                          }))
-                        }
-                      />
-                    ))}
+                    {character.voice_assignment.emotional_palette.map((entry, idx) => {
+                      const libraryId = character.library_id;
+                      const slug = libraryId ? libraryPaletteSlug(libraryId, entry.emotion) : "";
+                      const entryJobs = libraryId
+                        ? [...jobs]
+                            .filter((j) => j.scene_slug === slug && j.row_index === LIBRARY_PALETTE_ROW && j.status === "complete" && j.output_path)
+                            .reverse()
+                        : [];
+                      const runningEntry = libraryId && jobs.some(
+                        (j) => j.scene_slug === slug && (j.status === "running" || j.status === "pending"),
+                      );
+                      const jobPaths = new Set(entryJobs.map((j) => j.output_path));
+                      const diskTakes = (paletteDiskTakes[entry.emotion] ?? []).filter(
+                        (f) => !jobPaths.has(f.path),
+                      );
+                      const diskJobs = diskTakes.map((f) => ({
+                        id: `disk::${f.path}`,
+                        model: "tts" as const,
+                        description: f.path.split("/").pop() ?? "",
+                        status: "complete" as const,
+                        progress: 100,
+                        eta: "",
+                        started_at: f.sidecar?.generated_at ?? "",
+                        scene_id: null,
+                        scene_slug: slug,
+                        row_index: LIBRARY_PALETTE_ROW,
+                        output_path: f.path,
+                        peaks: null,
+                        qa_status: (f.sidecar?.qa_status ?? "unreviewed") as QaJobStatus,
+                        error: null,
+                      }));
+                      const allTakes = [...entryJobs, ...diskJobs];
+
+                      return (
+                        <PaletteRow
+                          key={entry.emotion}
+                          entry={entry}
+                          allTakes={allTakes}
+                          running={!!runningEntry}
+                          canGenerate={!!character.library_id && !!projectsDir}
+                          onChangeDirection={(direction) =>
+                            patch((c) => ({
+                              ...c,
+                              voice_assignment: {
+                                ...c.voice_assignment,
+                                emotional_palette: c.voice_assignment.emotional_palette.map((e, i) =>
+                                  i === idx ? { ...e, direction } : e,
+                                ),
+                              },
+                            }))
+                          }
+                          onGenerateTake={() => handleGeneratePaletteTake(entry)}
+                          onApprove={(audioPath) => handleApprovePaletteTake(entry.emotion, audioPath)}
+                          onQa={(jobId, status) => {
+                            if (!jobId.startsWith("disk::")) setQaStatus(jobId, status);
+                          }}
+                        />
+                      );
+                    })}
                   </div>
                 )}
               </div>
@@ -475,10 +777,20 @@ export const LibraryView: React.FC = () => {
 
 // ── PaletteRow ─────────────────────────────────────────────────────────────
 
+// Job-shaped object accepted by TakeList — includes job-store jobs and synthesized
+// "disk job" rows for MCP-generated takes that bypass the in-memory queue.
+type TakeJob = Parameters<typeof TakeRow>[0]["job"];
+
 const PaletteRow: React.FC<{
   entry: PaletteEntry;
+  allTakes: TakeJob[];
+  running: boolean;
+  canGenerate: boolean;
   onChangeDirection: (direction: string) => void;
-}> = ({ entry, onChangeDirection }) => {
+  onGenerateTake: () => void;
+  onApprove: (audioPath: string) => void;
+  onQa: (jobId: string, status: QaJobStatus) => void;
+}> = ({ entry, allTakes, running, canGenerate, onChangeDirection, onGenerateTake, onApprove, onQa }) => {
   const [expanded, setExpanded] = useState(false);
   const approved = entry.qa_status === "approved";
   return (
@@ -525,9 +837,44 @@ const PaletteRow: React.FC<{
             value={entry.direction}
             onChange={(e) => onChangeDirection(e.target.value)}
             rows={2}
-            style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+            style={{ width: "100%", resize: "vertical", fontSize: 12, marginBottom: 10 }}
             placeholder="e.g. Slower, more deliberate. Controlled dread just beneath the surface."
           />
+
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+            <button
+              className="btn btn-primary"
+              onClick={onGenerateTake}
+              disabled={running || !canGenerate}
+              style={{
+                background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
+                opacity: canGenerate ? 1 : 0.4,
+              }}
+              title={canGenerate ? "Generate a Voice Design take for this emotion" : "Save the character first"}
+            >
+              {running ? "Generating…" : "Generate take"}
+            </button>
+            {running && <RunningBadge label="Synthesising…" />}
+          </div>
+
+          {allTakes.length === 0 && !running && (
+            <EmptyTakes label="No takes yet — click Generate take." />
+          )}
+          {allTakes.length > 0 && (
+            <TakeList label={`Takes · ${allTakes.length}`}>
+              {allTakes.map((job, i) => (
+                <TakeRow
+                  key={job.id}
+                  job={job}
+                  index={i}
+                  saveLabel="Approve as reference"
+                  isSaved={entry.ref_audio_path === job.output_path && approved}
+                  onSave={() => job.output_path && onApprove(job.output_path)}
+                  onQa={(s) => onQa(job.id, s)}
+                />
+              ))}
+            </TakeList>
+          )}
         </div>
       )}
     </div>
