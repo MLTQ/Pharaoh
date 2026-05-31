@@ -13,10 +13,13 @@ import {
   listPaletteTakes,
   submitTtsVoiceDesign,
   submitTtsVoiceClone,
+  listLibraryCharacters,
+  importCharacterFromLibrary,
+  saveCharacterToLibrary,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
-import type { Character, GeneratedAudioAsset, PaletteEntry, VoicePipelineStage } from "../../lib/types";
+import type { Character, GeneratedAudioAsset, LibraryCharacterSummary, PaletteEntry, VoicePipelineStage } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -85,6 +88,7 @@ export const CharacterDesignerView: React.FC = () => {
     setSelectedChar, addCharacter, removeCharacter,
     updateCharacter, updateVoiceAssignment,
     realProjectId, projectsDir,
+    reloadProjectFromDisk,
   } = useProjectStore();
   const { jobs, addJob, setQaStatus } = useJobStore();
 
@@ -101,8 +105,15 @@ export const CharacterDesignerView: React.FC = () => {
   const [generating, setGenerating]       = useState(false);
   const [submitting, setSubmitting]       = useState<DesignTab | null>(null);
   const [genError, setGenError]           = useState<string | null>(null);
-  const [addingChar, setAddingChar]       = useState(false);
   const [newName, setNewName]             = useState("");
+  // Cast + button now opens a modal that offers two paths: import from library
+  // or new project-only character.
+  const [castModalOpen, setCastModalOpen] = useState(false);
+  const [castModalMode, setCastModalMode] = useState<"choose" | "import" | "new">("choose");
+  const [librarySummaries, setLibrarySummaries] = useState<LibraryCharacterSummary[]>([]);
+  const [libraryLoading, setLibraryLoading] = useState(false);
+  const [importing, setImporting]         = useState<string | null>(null);
+  const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [referenceAssets, setReferenceAssets] = useState<GeneratedAudioAsset[]>([]);
   const [referencePeaks, setReferencePeaks] = useState<Record<string, number[]>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -180,6 +191,39 @@ export const CharacterDesignerView: React.FC = () => {
         .catch(() => {});
     }
   }, [referenceAssets, referencePeaks, fetchPeaks]);
+
+  // Fetch library summaries so we can:
+  //   - show drift dots on sidebar character chips when project version <
+  //     library version
+  //   - populate the "import from library" modal without an extra fetch
+  // Refreshed on mount and whenever the character list changes (a save-to-library
+  // bumps the library_version of the saved entry, and we want the dot to clear).
+  const refreshLibrary = React.useCallback(async () => {
+    setLibraryLoading(true);
+    try {
+      const rows = await listLibraryCharacters();
+      setLibrarySummaries(rows);
+    } catch {
+      setLibrarySummaries([]);
+    } finally {
+      setLibraryLoading(false);
+    }
+  }, []);
+  useEffect(() => { refreshLibrary(); }, [refreshLibrary, characters.length]);
+
+  // library_id → current library_version. Used for drift detection.
+  const libraryVersionMap = useMemo(() => {
+    const m = new Map<string, string>();
+    for (const s of librarySummaries) m.set(s.library_id, s.library_version);
+    return m;
+  }, [librarySummaries]);
+
+  const hasDrift = (c: Character): boolean => {
+    if (!c.library_id || !c.library_version) return false;
+    const remote = libraryVersionMap.get(c.library_id);
+    if (!remote) return false;
+    return remote !== c.library_version;
+  };
 
   // Refresh disk-scanned takes for all palette entries whenever the palette tab is
   // visible or when a new emotion is expanded. Catches MCP-generated takes that
@@ -432,13 +476,61 @@ export const CharacterDesignerView: React.FC = () => {
       },
       schema_version: 2,
     });
-    setNewName(""); setAddingChar(false);
+    setNewName("");
+    setCastModalOpen(false);
   };
 
   const handleRemoveCharacter = (id: string) => {
     const name = characters.find((c) => c.id === id)?.name ?? "this character";
     if (!window.confirm(`Delete "${name}" from the cast? This keeps existing generated audio files but removes the character from project.json.`)) return;
     removeCharacter(id);
+  };
+
+  const openCastModal = () => {
+    setCastModalOpen(true);
+    setCastModalMode("choose");
+    setNewName("");
+    refreshLibrary();
+  };
+
+  const handleImportFromLibrary = async (libraryId: string) => {
+    if (!realProjectId) return;
+    setImporting(libraryId);
+    try {
+      const imported = await importCharacterFromLibrary({
+        projectId: realProjectId,
+        libraryId,
+      });
+      // Pull fresh project state from disk so the new character lands in the
+      // sidebar with its full bundle data (palette refs, RVC config) intact —
+      // a plain addCharacter() would only know what import returned.
+      await reloadProjectFromDisk();
+      setSelectedChar(imported.id);
+      setCastModalOpen(false);
+    } catch (e) {
+      window.alert(`Import failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setImporting(null);
+    }
+  };
+
+  const handleSaveToLibrary = async () => {
+    if (!char || !realProjectId) return;
+    const isUpdate = !!char.library_id;
+    const verb = isUpdate ? "Update" : "Save";
+    if (!window.confirm(`${verb} "${char.name}" ${isUpdate ? "in" : "to"} the library? This copies the full bundle (palette refs, RVC model if trained, corpus).`)) return;
+    setSavingToLibrary(true);
+    try {
+      await saveCharacterToLibrary({ projectId: realProjectId, characterId: char.id });
+      // Pull fresh project state so the new library_id + library_version
+      // appear on the character (used by drift detection).
+      await reloadProjectFromDisk();
+      await refreshLibrary();
+    } catch (e) {
+      window.alert(`Save to library failed: ${e instanceof Error ? e.message : String(e)}`);
+    } finally {
+      setSavingToLibrary(false);
+    }
   };
 
   const charColor = char ? `oklch(0.7 0.12 ${CHAR_HUE(char.id)})` : "";
@@ -480,28 +572,9 @@ export const CharacterDesignerView: React.FC = () => {
             className="btn btn-sm"
             style={{ padding: "2px 7px", fontSize: 14, lineHeight: 1 }}
             title="Add character"
-            onClick={() => { setAddingChar(true); setNewName(""); }}
+            onClick={openCastModal}
           >+</button>
         </div>
-
-        {/* New character inline form */}
-        {addingChar && (
-          <div style={{ padding: "8px 10px", borderBottom: "1px solid var(--line-1)", display: "flex", gap: 4 }}>
-            <input
-              className="input"
-              autoFocus
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") handleAddCharacter(); if (e.key === "Escape") setAddingChar(false); }}
-              placeholder="Character name…"
-              style={{ flex: 1, fontSize: 11, padding: "3px 6px" }}
-            />
-            <button className="btn btn-sm btn-primary" onClick={handleAddCharacter}
-              style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 6px" }}>
-              Add
-            </button>
-          </div>
-        )}
 
         {characters.map((c) => {
           const active = c.id === char.id;
@@ -510,19 +583,35 @@ export const CharacterDesignerView: React.FC = () => {
             : c.voice_assignment.model === "VoiceDesign" ? "design"
             : c.voice_assignment.model === "Chatterbox" ? "chatterbox"
             : "custom";
+          const driftDot = hasDrift(c);
+          const libraryLinked = !!c.library_id;
           return (
             <div
               key={c.id}
               className={`side-item ${active ? "active" : ""}`}
               onClick={() => setSelectedChar(c.id)}
               style={{ paddingTop: 8, paddingBottom: 8, cursor: "pointer", paddingRight: 6 }}
+              title={driftDot
+                ? "Library has a newer version of this character"
+                : libraryLinked
+                  ? "Imported from library"
+                  : undefined}
             >
-              <span className="ico">
+              <span className="ico" style={{ position: "relative" }}>
                 <span style={{
                   display: "inline-block", width: 10, height: 10, borderRadius: "50%",
                   background: `oklch(0.7 0.12 ${hue})`,
                   border: "1px solid var(--line-2)",
                 }} />
+                {driftDot && (
+                  <span style={{
+                    position: "absolute",
+                    top: -2, right: -3,
+                    width: 6, height: 6, borderRadius: "50%",
+                    background: "var(--st-gen)",
+                    border: "1px solid var(--bg-1)",
+                  }} />
+                )}
               </span>
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
                 <span style={{
@@ -565,7 +654,7 @@ export const CharacterDesignerView: React.FC = () => {
           <button
             className="btn btn-primary"
             style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", marginTop: 4 }}
-            onClick={() => { setAddingChar(true); setNewName(""); }}
+            onClick={openCastModal}
           >
             + Add character
           </button>
@@ -606,6 +695,49 @@ export const CharacterDesignerView: React.FC = () => {
                 : char.voice_assignment.model === "Chatterbox" ? "Chatterbox"
                 : "Custom"}
             </span>
+            {char.library_id && (
+              <span
+                title={hasDrift(char)
+                  ? "Library has a newer version. Use Update library to push your changes."
+                  : "Imported from library — in sync"}
+                style={{
+                  fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em",
+                  color: hasDrift(char) ? "var(--st-gen)" : "var(--st-rendered)",
+                  textTransform: "uppercase",
+                  background: hasDrift(char)
+                    ? "color-mix(in oklch, var(--st-gen) 12%, var(--bg-2))"
+                    : "color-mix(in oklch, var(--st-rendered) 10%, var(--bg-2))",
+                  padding: "2px 6px", borderRadius: 3, flexShrink: 0,
+                  display: "inline-flex", alignItems: "center", gap: 4,
+                }}
+              >
+                {hasDrift(char) && <span style={{
+                  width: 5, height: 5, borderRadius: "50%",
+                  background: "var(--st-gen)",
+                }} />}
+                {hasDrift(char) ? "Drift" : "Linked"}
+              </span>
+            )}
+            <button
+              className="btn btn-sm"
+              onClick={handleSaveToLibrary}
+              disabled={savingToLibrary}
+              title={char.library_id
+                ? "Push the current project version over the existing library entry"
+                : "Create a new library entry from this character"}
+              style={{
+                color: "var(--tts)",
+                borderColor: "color-mix(in oklch, var(--tts) 45%, var(--line-1))",
+                background: "color-mix(in oklch, var(--tts) 8%, transparent)",
+                flexShrink: 0,
+              }}
+            >
+              {savingToLibrary
+                ? "Saving…"
+                : char.library_id
+                  ? "Update library"
+                  : "Save to library"}
+            </button>
             <button
               className="btn btn-sm"
               style={{
@@ -1338,6 +1470,192 @@ export const CharacterDesignerView: React.FC = () => {
         </MetaSection>
       </div>
       </div>
+      )}
+
+      {/* ── Add-character modal ────────────────────────────────────────── */}
+      {castModalOpen && (
+        <div
+          onClick={() => setCastModalOpen(false)}
+          style={{
+            position: "fixed", inset: 0, zIndex: 50,
+            background: "color-mix(in oklch, var(--bg-0) 70%, transparent)",
+            display: "flex", alignItems: "center", justifyContent: "center",
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              background: "var(--bg-1)",
+              border: "1px solid var(--line-2)",
+              borderRadius: "var(--r)",
+              width: 480, maxHeight: "80vh",
+              boxShadow: "0 12px 40px rgba(0,0,0,0.4)",
+              display: "flex", flexDirection: "column", overflow: "hidden",
+            }}
+          >
+            <div style={{
+              padding: "14px 18px",
+              borderBottom: "1px solid var(--line-1)",
+              display: "flex", alignItems: "center", justifyContent: "space-between",
+            }}>
+              <span style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-1)" }}>
+                {castModalMode === "choose" ? "Add character"
+                  : castModalMode === "import" ? "Import from library"
+                  : "New character"}
+              </span>
+              <button
+                className="btn btn-sm"
+                onClick={() => setCastModalOpen(false)}
+                style={{ padding: "2px 8px", fontSize: 13, lineHeight: 1 }}
+              >×</button>
+            </div>
+
+            <div style={{ padding: "16px 18px", flex: 1, overflowY: "auto" }}>
+              {/* ── Choose path ── */}
+              {castModalMode === "choose" && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button
+                    className="btn"
+                    onClick={() => setCastModalMode("import")}
+                    style={{
+                      textAlign: "left", padding: "12px 14px",
+                      background: "var(--bg-2)", border: "1px solid var(--line-2)",
+                      borderRadius: "var(--r)", cursor: "pointer",
+                      display: "flex", flexDirection: "column", gap: 4,
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "var(--fg-1)", fontWeight: 500 }}>
+                      Import from library
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-3)" }}>
+                      {libraryLoading
+                        ? "Loading library…"
+                        : `${librarySummaries.length} character${librarySummaries.length === 1 ? "" : "s"} available — reuse across episodes`}
+                    </span>
+                  </button>
+                  <button
+                    className="btn"
+                    onClick={() => setCastModalMode("new")}
+                    style={{
+                      textAlign: "left", padding: "12px 14px",
+                      background: "var(--bg-2)", border: "1px solid var(--line-2)",
+                      borderRadius: "var(--r)", cursor: "pointer",
+                      display: "flex", flexDirection: "column", gap: 4,
+                    }}
+                  >
+                    <span style={{ fontSize: 13, color: "var(--fg-1)", fontWeight: 500 }}>
+                      New character (project-only)
+                    </span>
+                    <span style={{ fontSize: 11, color: "var(--fg-3)" }}>
+                      Create from scratch. You can save it to the library later.
+                    </span>
+                  </button>
+                </div>
+              )}
+
+              {/* ── Import from library ── */}
+              {castModalMode === "import" && (
+                <div>
+                  {libraryLoading && (
+                    <div style={{ padding: "20px 12px", textAlign: "center", color: "var(--fg-4)", fontSize: 12 }}>
+                      Loading…
+                    </div>
+                  )}
+                  {!libraryLoading && librarySummaries.length === 0 && (
+                    <div style={{
+                      padding: "20px 14px", textAlign: "center",
+                      border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+                      color: "var(--fg-4)", fontSize: 11.5, lineHeight: 1.6,
+                    }}>
+                      Library is empty. Use "Save to library" on any character
+                      in this project, or create one in the Character Library
+                      view.
+                    </div>
+                  )}
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    {librarySummaries.map((s) => {
+                      const alreadyImported = characters.some((c) => c.library_id === s.library_id);
+                      return (
+                        <button
+                          key={s.library_id}
+                          onClick={() => handleImportFromLibrary(s.library_id)}
+                          disabled={importing === s.library_id || alreadyImported}
+                          style={{
+                            display: "grid",
+                            gridTemplateColumns: "auto 1fr auto",
+                            alignItems: "center", gap: 10,
+                            width: "100%", textAlign: "left",
+                            padding: "10px 12px",
+                            border: "1px solid var(--line-1)",
+                            borderRadius: "var(--r)",
+                            background: alreadyImported
+                              ? "color-mix(in oklch, var(--bg-2) 60%, transparent)"
+                              : "var(--bg-1)",
+                            cursor: alreadyImported ? "default" : "pointer",
+                            color: "var(--fg-1)",
+                            opacity: alreadyImported ? 0.55 : 1,
+                          }}
+                        >
+                          <span style={{
+                            display: "inline-block", width: 10, height: 10, borderRadius: "50%",
+                            background: `oklch(0.7 0.12 ${(s.library_id.charCodeAt(0) * 13) % 360})`,
+                            border: "1px solid var(--line-2)",
+                          }} />
+                          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+                            <span style={{ fontSize: 12.5, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {s.name}
+                            </span>
+                            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)", letterSpacing: "0.04em" }}>
+                              {s.palette_count} palette
+                              {s.has_rvc_model ? " · rvc" : ""}
+                              {alreadyImported ? " · already in cast" : ""}
+                            </span>
+                          </span>
+                          <span style={{ fontSize: 11, color: "var(--tts)", fontFamily: "var(--font-mono)" }}>
+                            {importing === s.library_id ? "Importing…" : alreadyImported ? "" : "Import →"}
+                          </span>
+                        </button>
+                      );
+                    })}
+                  </div>
+                  <div style={{ marginTop: 12, textAlign: "right" }}>
+                    <button className="btn btn-sm" onClick={() => setCastModalMode("choose")}>← Back</button>
+                  </div>
+                </div>
+              )}
+
+              {/* ── New project-only character ── */}
+              {castModalMode === "new" && (
+                <div>
+                  <label style={labelStyle}>Character name</label>
+                  <input
+                    className="input"
+                    autoFocus
+                    value={newName}
+                    onChange={(e) => setNewName(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") handleAddCharacter();
+                      if (e.key === "Escape") setCastModalOpen(false);
+                    }}
+                    placeholder="e.g. Jack Rourke"
+                    style={{ width: "100%", fontSize: 13, padding: "6px 9px" }}
+                  />
+                  <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <button className="btn btn-sm" onClick={() => setCastModalMode("choose")}>← Back</button>
+                    <button
+                      className="btn btn-primary"
+                      onClick={handleAddCharacter}
+                      disabled={!newName.trim()}
+                      style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
+                    >
+                      Create
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
 
     </div>

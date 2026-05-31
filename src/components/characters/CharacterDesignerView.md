@@ -28,12 +28,27 @@ Cast and voice-design workspace for creating characters, testing generated voice
 - **Interacts with**: `removeCharacter` in `projectStore.ts`.
 - **Rationale**: Generated character audio remains on disk, but the cast record should be removable from the project metadata.
 
+### Cast modal (`openCastModal`, `handleImportFromLibrary`, `handleAddCharacter`)
+- **Does**: The Cast `+` button opens a modal with two paths: "Import from library" lists `LibraryCharacterSummary` entries with click-to-import, and "New character (project-only)" prompts for a name. Import calls `importCharacterFromLibrary` then `reloadProjectFromDisk` so the new bundle's palette refs / RVC config land in the in-memory project.
+- **Interacts with**: `listLibraryCharacters`, `importCharacterFromLibrary`, `projectStore.reloadProjectFromDisk`.
+- **Rationale**: Replaces the old inline-form `+` flow. Library-already-imported entries are shown disabled so you can't accidentally add the same character twice.
+
+### `handleSaveToLibrary`
+- **Does**: Header button that copies the current character bundle to the library via `saveCharacterToLibrary`. Labelled "Save to library" for project-only characters and "Update library" for library-linked ones — same backend call.
+- **Interacts with**: `saveCharacterToLibrary`, `reloadProjectFromDisk` (so the new `library_id` + `library_version` appear on the character).
+
+### `refreshLibrary` + `libraryVersionMap` + `hasDrift`
+- **Does**: Fetches library summaries on mount and whenever the character list changes; builds a `library_id → library_version` map; per-character `hasDrift` compares the project's `library_version` against the live library value.
+- **Rationale**: Drift gets surfaced as a small dot on the sidebar character chip and a "Drift" badge in the detail header. Push/pull resolution itself is Pharaoh-wpk; this only flags the state.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `projectStore.ts` | Voice assignment updates persist into `project.json` | Changing assignment shape |
 | `projectStore.ts` | Character deletion removes the cast record and updates selection, including empty-cast state | Blocking deletion of the final character |
+| `projectStore.ts` | `reloadProjectFromDisk` exists and returns a promise | Removing the disk-reload hook (import + save-to-library both need it) |
+| `commands/character.rs` | `importCharacterFromLibrary` returns the new Character with a project-local `CHAR_XXXX` id | Returning the library id (would collide with existing chars) |
 | `jobStore.ts` | Character takes use `scene_slug` + `row_index` keys | Key format changes |
 | `ClipStudioView.tsx` | Cropped/imported references are sidecar-indexed and listable | Saving clips without sidecars |
 | `inference.rs` | Clone requests include a bounded `max_new_tokens` value | Removing the cap from clone requests |
