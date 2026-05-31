@@ -4,7 +4,8 @@ use tauri::AppHandle;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::app_support::{
-    app_projects_dir, character_dir, project_dir, read_json, scan_rvc_corpus_dir, write_json,
+    absolutize_voice_paths, app_projects_dir, character_dir, project_dir, read_json,
+    relativize_voice_paths, scan_rvc_corpus_dir, write_json,
 };
 use crate::models::{
     Project, Scene, Storyboard, LlmConfig, RvcConfig, SceneStatus, CURRENT_CHARACTER_SCHEMA,
@@ -21,10 +22,17 @@ fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
     for character in project.characters.iter_mut() {
         character.voice_assignment.consolidate_legacy_rvc();
 
+        let bundle = character_dir(projects_dir, &project.id, &character.id);
+
+        // Path absolutization: if disk paths are relative (post-Pharaoh-1qp),
+        // turn them into absolute paths joined onto the bundle dir so the UI
+        // and downstream callers don't need to know about the storage format.
+        // Idempotent — absolute paths pass through unchanged.
+        absolutize_voice_paths(&mut character.voice_assignment, &bundle);
+
         // Refresh transient corpus stats. If a corpus dir exists but there's no
         // RvcConfig yet, create one with stats only — keeps the UI in sync when
         // a corpus is populated outside the standard flow (MCP, manual copy).
-        let bundle = character_dir(projects_dir, &project.id, &character.id);
         let corpus_dir = bundle.join("rvc_corpus");
         let (count, dur_ms) = scan_rvc_corpus_dir(&corpus_dir);
 
@@ -44,6 +52,16 @@ fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
         }
 
         character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    }
+}
+
+/// Relativize all in-bundle voice paths before writing project.json to disk.
+/// Paired with [`absolutize_voice_paths`] on the read side; together they make
+/// the on-disk storage format (relative) transparent to the UI and MCP.
+fn relativize_for_write(project: &mut Project, projects_dir: &Path) {
+    for character in project.characters.iter_mut() {
+        let bundle = character_dir(projects_dir, &project.id, &character.id);
+        relativize_voice_paths(&mut character.voice_assignment, &bundle);
     }
 }
 
@@ -147,8 +165,13 @@ pub fn update_project(app: AppHandle, project: Project) -> Result<Project> {
         character.voice_assignment.consolidate_legacy_rvc();
         character.schema_version = CURRENT_CHARACTER_SCHEMA;
     }
+    // Convert in-bundle voice paths to relative for portable on-disk storage.
+    // Mutates a clone so the response we return to the UI keeps its absolute
+    // paths (avoids the UI having to re-resolve everything after a save).
+    let mut to_write = p.clone();
+    relativize_for_write(&mut to_write, &projects_dir);
     let path = project_dir(&projects_dir, &p.id).join("project.json");
-    write_json(&path, &p)?;
+    write_json(&path, &to_write)?;
     Ok(p)
 }
 

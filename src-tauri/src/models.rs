@@ -149,7 +149,9 @@ fn default_character_schema_version() -> u32 {
 }
 
 /// Latest character schema version. Migration brings characters up to this.
-pub const CURRENT_CHARACTER_SCHEMA: u32 = 2;
+/// - 2 (Pharaoh-rjr + 82v): nested `RvcConfig`, `production_pipeline` field.
+/// - 3 (Pharaoh-1qp): in-bundle voice paths stored relative on disk.
+pub const CURRENT_CHARACTER_SCHEMA: u32 = 3;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Character {

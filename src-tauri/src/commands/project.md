@@ -13,10 +13,10 @@ Tauri commands for project and scene CRUD. This file owns persistence of `projec
 - **Does**: Manage top-level project records and metadata.
 - **Interacts with**: `Project` in `models.rs`, `projectStore.ts`.
 
-### `migrate_project_in_place`
-- **Does**: Brings each character up to `CURRENT_CHARACTER_SCHEMA` and refreshes transient RVC corpus stats from disk. Runs on every read path (`get_project`, `open_project`, `list_projects`) and before every write (`update_project`).
-- **Interacts with**: `VoiceAssignment::consolidate_legacy_rvc` (lifts legacy flat `rvc_*` fields into nested `RvcConfig`), `app_support::scan_rvc_corpus_dir`, `app_support::character_dir`.
-- **Rationale**: Idempotent so the UI always sees a consistent shape regardless of when the file was last written. The frontend never has to handle migration itself.
+### `migrate_project_in_place` + `relativize_for_write`
+- **Does**: `migrate_project_in_place` runs on every read path (`get_project`, `open_project`, `list_projects`): lifts legacy flat `rvc_*` fields into nested `RvcConfig`, absolutizes in-bundle voice paths so the UI sees absolute paths, refreshes transient corpus stats, stamps `schema_version = CURRENT_CHARACTER_SCHEMA`. `relativize_for_write` runs on the write side in `update_project`: walks each character's `voice_assignment` and rewrites in-bundle paths to relative so on-disk `project.json` stays portable.
+- **Interacts with**: `VoiceAssignment::consolidate_legacy_rvc`, `app_support::absolutize_voice_paths`, `app_support::relativize_voice_paths`, `app_support::scan_rvc_corpus_dir`, `app_support::character_dir`.
+- **Rationale**: Pharaoh-1qp introduced the on-disk relative-path convention; these two functions are the seam. The UI never sees a relative path; on-disk `project.json` never has an absolute path inside a bundle (external Clip Studio refs stay absolute). Migration is idempotent in both directions.
 
 ### `create_scene`, `update_scene`, `get_scene`, `list_scenes`
 - **Does**: Manage `storyboard.json` scene entries and scene folder scaffolding.

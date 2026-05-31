@@ -89,6 +89,46 @@ def _scene_dir(project_id: str, scene_slug: str) -> Path:
     return _project_dir(project_id) / "scenes" / scene_slug
 
 
+def _character_dir(project_id: str, character_id: str) -> Path:
+    return _project_dir(project_id) / "characters" / character_id
+
+
+def _resolve_voice_path(project_id: str, character_id: str, path: str | None) -> str | None:
+    """Resolve a path stored inside a character's voice_assignment to an absolute path.
+
+    Pharaoh-1qp switched in-bundle path storage to relative; this helper handles
+    both formats transparently:
+      - absolute path → returned as-is (external Clip Studio refs etc.)
+      - relative path → joined onto the character's bundle dir
+      - empty / None → None
+    """
+    if not path:
+        return None
+    p = Path(path)
+    if p.is_absolute():
+        return str(p)
+    return str(_character_dir(project_id, character_id) / p)
+
+
+def _relativize_voice_path(project_id: str, character_id: str, path: str | None) -> str | None:
+    """Inverse of :func:`_resolve_voice_path`. Used when MCP writes back to project.json.
+
+    Paths inside the character's bundle become relative; paths outside (or already
+    relative) stay as-is.
+    """
+    if not path:
+        return None
+    p = Path(path)
+    if not p.is_absolute():
+        return path
+    bundle = _character_dir(project_id, character_id).resolve()
+    try:
+        rel = p.resolve().relative_to(bundle)
+        return str(rel)
+    except ValueError:
+        return path
+
+
 def _script_rows(project_id: str, scene_slug: str) -> list[dict]:
     path = _scene_dir(project_id, scene_slug) / "script.csv"
     if not path.exists():
@@ -925,9 +965,14 @@ def generate_tts(
                         palette[0] if palette else None,
                     )
                     if entry and entry.get("ref_audio_path"):
+                        # Resolve relative paths (Pharaoh-1qp) against the
+                        # character's bundle dir before uploading.
+                        resolved_ref = _resolve_voice_path(
+                            project_id, character["id"], entry["ref_audio_path"]
+                        )
                         result = _post("chatterbox", "/generate/clone", {
                             "text": row["prompt"],
-                            "ref_audio_path": entry["ref_audio_path"],
+                            "ref_audio_path": resolved_ref,
                             "ref_transcript": entry.get("ref_transcript") or "",
                             "seed": seed,
                             "output_path": output_path,
@@ -1109,7 +1154,10 @@ def generate_chatterbox(
                     palette[0] if palette else None,
                 )
                 if entry and entry.get("ref_audio_path"):
-                    resolved_ref = entry["ref_audio_path"]
+                    # Resolve relative paths (Pharaoh-1qp) against the bundle dir.
+                    resolved_ref = _resolve_voice_path(
+                        project_id, character["id"], entry["ref_audio_path"]
+                    )
         except Exception as exc:
             return json.dumps({"error": f"palette resolution failed: {exc}"})
 
@@ -1243,7 +1291,9 @@ def approve_palette_take(
             entry = next((e for e in palette if e["emotion"] == emotion), None)
             if entry is None:
                 return json.dumps({"error": f"emotion {emotion!r} not found in palette. Run generate_palette_take first."})
-            entry["ref_audio_path"] = audio_path
+            # Pharaoh-1qp: store paths inside the character bundle as relative
+            # so project.json stays portable across machines / library imports.
+            entry["ref_audio_path"] = _relativize_voice_path(project_id, character_id, audio_path)
             entry["qa_status"] = "approved"
             # Promote model to Chatterbox
             va["model"] = "Chatterbox"
@@ -2243,7 +2293,8 @@ def build_corpus(
 
     for entry in approved:
         emotion = entry["emotion"]
-        ref_path = entry["ref_audio_path"]
+        # Resolve relative paths (Pharaoh-1qp) so the chatterbox server sees absolute.
+        ref_path = _resolve_voice_path(project_id, character_id, entry["ref_audio_path"])
         tag_cycle = tag_variants * ((per_emotion // len(tag_variants)) + 1)
 
         for i in range(per_emotion):
