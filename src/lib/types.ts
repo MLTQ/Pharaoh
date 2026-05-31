@@ -386,7 +386,7 @@ export interface AssetItem {
 // ── UI state ────────────────────────────────────────────────────────────────
 
 export type ViewId =
-  | "pyramid" | "composition" | "bible" | "characters"
+  | "pyramid" | "composition" | "bible" | "characters" | "library"
   | "tts" | "sfx" | "music"
   | "clip-studio" | "upscale" | "final"
   | "settings" | "models";
@@ -402,6 +402,7 @@ export const WORKSPACE_OF: Record<ViewId, WorkspaceId> = {
   pyramid:        "pyramid",
   bible:          "story",
   characters:     "story",
+  library:        "story",
   composition:    "scenes",
   tts:            "scenes",
   sfx:            "scenes",

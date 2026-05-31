@@ -24,9 +24,9 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 - **Interacts with**: `UpscaleView.tsx`, `commands/sidecar.rs`, `commands/audio_enhance.rs`.
 
 ### Character library wrappers
-- **Does**: `listLibraryCharacters`, `saveCharacterToLibrary`, `importCharacterFromLibrary`, `deleteLibraryCharacter`. Lightweight pass-through to `commands/character.rs`.
-- **Interacts with**: future Character Library UI (Pharaoh-z21), Cast view picker (Pharaoh-65s).
-- **Rationale**: Returns `LibraryCharacterSummary[]` from the list call rather than full Characters — list views never need the heavy payload.
+- **Does**: `listLibraryCharacters`, `saveCharacterToLibrary`, `importCharacterFromLibrary`, `deleteLibraryCharacter`, `getLibraryCharacter`, `saveLibraryCharacter`. Lightweight pass-through to `commands/character.rs`.
+- **Interacts with**: `LibraryView.tsx` (Pharaoh-z21), future Cast view picker (Pharaoh-65s).
+- **Rationale**: Returns `LibraryCharacterSummary[]` from the list call rather than full Characters — list views never need the heavy payload. `getLibraryCharacter` / `saveLibraryCharacter` are the direct library-side editor pair; `saveCharacterToLibrary` is the project-→-library promotion path.
 
 ## Contracts
 

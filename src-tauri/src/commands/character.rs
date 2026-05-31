@@ -276,3 +276,57 @@ pub fn delete_library_character(app: AppHandle, library_id: String) -> Result<()
     std::fs::remove_dir_all(&bundle)?;
     Ok(())
 }
+
+/// Read a full library character by id. Paths are absolutized so the result is
+/// usable directly (audio playback, take previews, etc.) without further work
+/// on the caller side.
+#[tauri::command]
+pub fn get_library_character(app: AppHandle, library_id: String) -> Result<Character> {
+    let projects_dir = app_projects_dir(&app)?;
+    let bundle = library_character_dir(&projects_dir, &library_id);
+    let bundle_file = bundle.join(LIBRARY_BUNDLE_FILE);
+    if !bundle_file.exists() {
+        return Err(Error::Other(format!(
+            "library character {} not found",
+            library_id
+        )));
+    }
+    let mut character: Character = read_json(&bundle_file)?;
+    absolutize_voice_paths(&mut character.voice_assignment, &bundle);
+    character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    Ok(character)
+}
+
+/// Create or update a library character directly (no project context).
+/// - If `character.library_id` is None, allocates a new UUID and bundle dir.
+/// - If set, overwrites the existing library entry in place.
+/// - Always bumps `library_version` to now.
+/// - Paths inside the character are relativized against the library bundle
+///   dir before write; the returned Character has them absolutized again so
+///   the caller can keep using it.
+///
+/// Used by the Character Library route (Pharaoh-z21) for metadata edits and
+/// for creating empty library characters from scratch.
+#[tauri::command]
+pub fn save_library_character(app: AppHandle, character: Character) -> Result<Character> {
+    let projects_dir = app_projects_dir(&app)?;
+    let now = Utc::now().to_rfc3339();
+
+    let library_id = character
+        .library_id
+        .clone()
+        .unwrap_or_else(|| Uuid::new_v4().to_string());
+    let bundle = library_character_dir(&projects_dir, &library_id);
+    std::fs::create_dir_all(&bundle)?;
+
+    let mut to_write = character;
+    to_write.library_id = Some(library_id.clone());
+    to_write.library_version = Some(now);
+    to_write.schema_version = CURRENT_CHARACTER_SCHEMA;
+    relativize_voice_paths(&mut to_write.voice_assignment, &bundle);
+    write_json(&bundle.join(LIBRARY_BUNDLE_FILE), &to_write)?;
+
+    // Re-absolutize so the returned value is ready to use as-is.
+    absolutize_voice_paths(&mut to_write.voice_assignment, &bundle);
+    Ok(to_write)
+}

@@ -30,6 +30,15 @@ relativization pass.
 - **Interacts with**: `app_support::library_character_dir`.
 - **Rationale**: Does not scan or modify any project. Project characters that imported from this entry become "detached" (library_id still set, library entry missing); surfacing that state is a UI concern handled in Pharaoh-wpk.
 
+### `get_library_character`
+- **Does**: Reads a single library character.json by library_id, absolutizes paths, returns the full `Character`.
+- **Interacts with**: `LibraryView.tsx` (Pharaoh-z21 detail panel).
+
+### `save_library_character`
+- **Does**: Direct library-side create/update. Accepts a full `Character`; allocates a new UUID if `library_id` is None; bumps `library_version` to now; relativizes paths before write; returns the saved record with paths re-absolutized.
+- **Interacts with**: `LibraryView.tsx` save / new-character flows.
+- **Rationale**: Lets the library editor mutate metadata (name, description, base voice description, palette directions) without going through a project. Audio-generating mutations remain project-scoped for now.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

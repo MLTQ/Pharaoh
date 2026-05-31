@@ -3,6 +3,7 @@ import { Icon, Wave } from "./components/shared/atoms";
 import { PyramidView } from "./components/pyramid/PyramidView";
 import { StoryBibleView } from "./components/pyramid/StoryBibleView";
 import { CharacterDesignerView } from "./components/characters/CharacterDesignerView";
+import { LibraryView } from "./components/library/LibraryView";
 import { CompositionView } from "./components/timeline/CompositionView";
 import { TTSPanel } from "./components/generators/TTSPanel";
 import { SFXPanel } from "./components/generators/SFXPanel";
@@ -248,6 +249,7 @@ export default function App() {
     if (view === "pyramid")     return [{ k: "Project", v: project.title, active: true }];
     if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
     if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
+    if (view === "library")     return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Character Library", active: true }];
     if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
     if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
     if (view === "clip-studio") return [{ k: "Project", v: project.title }, { k: "Post", v: "Clip Studio", active: true }];
@@ -453,6 +455,10 @@ export default function App() {
                 <span>Cast & Voices</span>
                 <span className="num">{characters.length}</span>
               </div>
+              <div className={`side-item ${view === "library" ? "active" : ""}`} onClick={() => setView("library")}>
+                <span className="ico" style={{ color: "var(--tts)" }}><Icon name="folder" style={{ width: 14, height: 14 }} /></span>
+                <span>Character Library</span>
+              </div>
               <div className="side-section">Cast · {characters.length}</div>
               {characters.map((c) => (
                 <div key={c.id} className="side-item" onClick={() => setView("characters")}>
@@ -656,6 +662,7 @@ export default function App() {
         )}
         {view === "bible"      && <StoryBibleView />}
         {view === "characters" && <CharacterDesignerView />}
+        {view === "library"    && <LibraryView />}
 
         {/* Scenes workspace: all 4 sub-views stay mounted at once and toggle
             via display, so flipping Compose/Voice/Sound/Score is instant

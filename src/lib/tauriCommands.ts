@@ -581,3 +581,15 @@ export const importCharacterFromLibrary = (args: {
 
 export const deleteLibraryCharacter = (libraryId: string): Promise<void> =>
   invoke("delete_library_character", { libraryId });
+
+export const getLibraryCharacter = (libraryId: string): Promise<Character> =>
+  invoke("get_library_character", { libraryId });
+
+/**
+ * Create or update a library character directly (no project context).
+ * If `character.library_id` is null/undefined, the backend allocates a new
+ * UUID. Always returns the saved Character with `library_id` + `library_version`
+ * set and paths absolutized.
+ */
+export const saveLibraryCharacter = (character: Character): Promise<Character> =>
+  invoke("save_library_character", { character });
