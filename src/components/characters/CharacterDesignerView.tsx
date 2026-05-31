@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useMemo, useRef } from "react";
-import { PeaksWave, Wave } from "../shared/atoms";
+import { Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import { RecordTakePanel } from "./RecordTakePanel";
@@ -12,12 +12,31 @@ import {
   listGeneratedAudioAssets,
   listPaletteTakes,
   submitTtsVoiceDesign,
-  submitTtsVoiceClone,
   listLibraryCharacters,
   importCharacterFromLibrary,
   saveCharacterToLibrary,
   pullCharacterFromLibrary,
 } from "../../lib/tauriCommands";
+
+// ── Voice badge derivation ─────────────────────────────────────────────────
+//
+// The legacy `model` enum mixed "how the ref was made" with "what runs at
+// production time". We now derive a UI badge purely from data shape so the
+// field can be dropped in a future cleanup without UI changes.
+
+function deriveVoiceBadge(c: Character): { label: string; tone: "tts" | "fg" } {
+  const va = c.voice_assignment;
+  const hasRvc = va.rvc?.model_path != null && va.production_pipeline === "chatterbox+rvc";
+  const hasPalette = (va.emotional_palette ?? []).some((e) => e.qa_status === "approved");
+  const hasRef = !!va.ref_audio_path;
+  const hasDesign = (va.base_voice_description ?? "").trim().length > 0;
+
+  if (hasRvc) return { label: "Chatterbox + RVC", tone: "tts" };
+  if (hasPalette) return { label: "Chatterbox", tone: "tts" };
+  if (hasRef) return { label: "Reference", tone: "tts" };
+  if (hasDesign) return { label: "Voice Design", tone: "tts" };
+  return { label: "Empty", tone: "fg" };
+}
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { usePeaksStore } from "../../store/peaksStore";
 import type { Character, GeneratedAudioAsset, LibraryCharacterSummary, PaletteEntry, VoicePipelineStage } from "../../lib/types";
@@ -30,23 +49,10 @@ const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
 const charSceneSlug    = (charId: string) => `__char__${charId}`;
 const paletteSceneSlug = (charId: string, emotion: string) => `__palette__${charId}__${emotion}`;
 const DESIGN_ROW = 0;
-const CLONE_ROW  = 1;
 const PALETTE_ROW = 0; // one row per palette scene slug
 
 function newCharId() {
   return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
-function basename(path: string): string {
-  return path.split(/[\\/]/).pop() ?? path;
-}
-
-function formatDuration(ms: number | null): string {
-  if (!ms) return "--:--";
-  const total = Math.round(ms / 1000);
-  const m = Math.floor(total / 60).toString().padStart(2, "0");
-  const s = (total % 60).toString().padStart(2, "0");
-  return `${m}:${s}`;
 }
 
 // ── File picker ────────────────────────────────────────────────────────────
@@ -66,14 +72,16 @@ async function pickAudioFile(): Promise<string | null> {
 
 // ── Main component ─────────────────────────────────────────────────────────
 
-// "corpus" and "model" map to pipeline stages 3 and 4
-type DesignTab = "design" | "palette" | "clone" | "corpus" | "model";
+// Each DesignTab maps 1:1 to a VoicePipelineStage. The legacy "clone" sub-tab
+// was removed in Pharaoh-pr1 — reference upload now lives inline under the
+// design tab.
+type DesignTab = "design" | "palette" | "corpus" | "model";
 
 function tabToStage(t: DesignTab): VoicePipelineStage {
   if (t === "palette") return 2;
   if (t === "corpus")  return 3;
   if (t === "model")   return 4;
-  return 1;  // "design" | "clone"
+  return 1;
 }
 
 function stageToTab(s: VoicePipelineStage): DesignTab {
@@ -147,8 +155,12 @@ export const CharacterDesignerView: React.FC = () => {
     setGenError(null);
     setPaletteGenError(null);
     setAddingEmotion(false);
-    const model = char.voice_assignment.model;
-    setTab(model === "Clone" ? "clone" : model === "Chatterbox" ? "palette" : "design");
+    // Default to Palette tab once at least one palette ref is approved; otherwise
+    // the user is still designing the base voice. Replaces the legacy `model`-
+    // enum-driven branching now that the Clone tab is gone.
+    const hasApprovedPalette = (char.voice_assignment.emotional_palette ?? [])
+      .some((e) => e.qa_status === "approved");
+    setTab(hasApprovedPalette ? "palette" : "design");
   }, [char?.id]);
 
   // ── Jobs ──
@@ -161,15 +173,7 @@ export const CharacterDesignerView: React.FC = () => {
     [jobs, slug]
   );
 
-  const cloneJobs = useMemo(() =>
-    [...jobs]
-      .filter((j) => j.scene_slug === slug && j.row_index === CLONE_ROW && j.status === "complete" && j.output_path)
-      .reverse(),
-    [jobs, slug]
-  );
-
   const runningDesign = submitting === "design" || jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
-  const runningClone  = submitting === "clone"  || jobs.some((j) => j.scene_slug === slug && j.row_index === CLONE_ROW  && (j.status === "running" || j.status === "pending"));
 
   useEffect(() => {
     if (!realProjectId) {
@@ -407,41 +411,12 @@ export const CharacterDesignerView: React.FC = () => {
     }
   };
 
-  const handleGenerateClone = async () => {
-    if (!char || generating) return;
-    const refPath = char.voice_assignment.ref_audio_path;
-    if (!refPath) { setGenError("Set a reference audio first."); return; }
-    setGenerating(true); setSubmitting("clone"); setGenError(null);
-    try {
-      const jobId = await submitTtsVoiceClone({
-        projectId: realProjectId ?? "demo",
-        sceneSlug: slug, rowIndex: CLONE_ROW,
-        params: {
-          text: testLine || DEFAULT_TEST_LINE,
-          ref_audio_path: refPath,
-          ref_transcript: refTranscript,
-          language: "en", icl_mode: false,
-          seed: Math.floor(Math.random() * 9999),
-          temperature: 0.7, top_p: 0.9,
-          max_new_tokens: 1024,
-          output_path: outputPath("clone"),
-        },
-      });
-      pushJob(jobId, CLONE_ROW, `Clone test · ${char.name}`);
-    } catch (e: unknown) {
-      setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
-    } finally {
-      setSubmitting(null);
-      setGenerating(false);
-    }
-  };
-
   // ── File upload ──
 
   const handlePickFile = async () => {
     const path = await pickAudioFile();
     if (path) {
-      saveVoice({ ref_audio_path: path, model: "Clone" });
+      saveVoice({ ref_audio_path: path });
     } else {
       // Fallback: trigger hidden file input (browser/demo mode)
       fileInputRef.current?.click();
@@ -453,7 +428,7 @@ export const CharacterDesignerView: React.FC = () => {
     if (!file) return;
     // In browser mode we only get a fake path; store the name as a placeholder
     const fakePath = `/uploads/${file.name}`;
-    saveVoice({ ref_audio_path: fakePath, model: "Clone" });
+    saveVoice({ ref_audio_path: fakePath });
     e.target.value = "";
   };
 
@@ -610,10 +585,7 @@ export const CharacterDesignerView: React.FC = () => {
         {characters.map((c) => {
           const active = c.id === char.id;
           const hue = CHAR_HUE(c.id);
-          const modelLabel = c.voice_assignment.model === "Clone" ? "clone"
-            : c.voice_assignment.model === "VoiceDesign" ? "design"
-            : c.voice_assignment.model === "Chatterbox" ? "chatterbox"
-            : "custom";
+          const modelLabel = deriveVoiceBadge(c).label.toLowerCase();
           const driftDot = hasDrift(c);
           const libraryLinked = !!c.library_id;
           return (
@@ -721,10 +693,7 @@ export const CharacterDesignerView: React.FC = () => {
               background: "color-mix(in oklch, var(--tts) 12%, var(--bg-2))",
               padding: "2px 6px", borderRadius: 3, flexShrink: 0,
             }}>
-              {char.voice_assignment.model === "Clone" ? "Clone"
-                : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
-                : char.voice_assignment.model === "Chatterbox" ? "Chatterbox"
-                : "Custom"}
+              {deriveVoiceBadge(char).label}
             </span>
             {char.library_id && (
               <span
@@ -877,35 +846,6 @@ export const CharacterDesignerView: React.FC = () => {
           );
         })()}
 
-        {/* Stage 1 sub-tabs: Voice Design | Clone (legacy) */}
-        {(tab === "design" || tab === "clone") && (
-          <div style={{
-            display: "flex", gap: 0,
-            borderBottom: "1px solid var(--line-1)",
-            background: "var(--bg-1)", flexShrink: 0,
-            paddingLeft: 20,
-          }}>
-            {(["design", "clone"] as DesignTab[]).map((t) => {
-              const label = t === "design" ? "Voice Design" : "Clone (legacy)";
-              const active = tab === t;
-              return (
-                <button key={t} onClick={() => setTab(t)} style={{
-                  padding: "6px 14px",
-                  fontFamily: "var(--font-mono)", fontSize: 9.5,
-                  letterSpacing: "0.07em", textTransform: "uppercase",
-                  color: active ? "var(--tts)" : "var(--fg-4)",
-                  borderBottom: active ? "2px solid var(--tts)" : "2px solid transparent",
-                  marginBottom: -1,
-                  background: "transparent", border: "none", cursor: "pointer",
-                  borderLeft: "none", borderRight: "none", borderTop: "none",
-                }}>
-                  {label}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
         {/* Tab body */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
 
@@ -978,10 +918,8 @@ export const CharacterDesignerView: React.FC = () => {
                           ref_audio_path: job.output_path,
                           ref_transcript: transcript,
                           base_voice_description: voiceDesc,
-                          model: "Clone",
                         });
                         setRefTranscript(transcript);
-                        setTab("clone");
                       }}
                       onQa={(s) => setQaStatus(job.id, s)}
                     />
@@ -992,6 +930,70 @@ export const CharacterDesignerView: React.FC = () => {
               {designJobs.length === 0 && !runningDesign && (
                 <EmptyTakes label="No takes yet — write a description and generate above." />
               )}
+
+              {/* ── Character reference audio (folded in from legacy Clone tab) ── */}
+              <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line-1)" }}>
+                <label style={labelStyle}>Character reference audio</label>
+                <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
+                  Single-ref fallback used when no palette is approved.
+                  Approved Voice Design takes save here automatically; you can
+                  also upload an external clip.
+                </p>
+                {refPath ? (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 12px", marginBottom: 10,
+                    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
+                    borderRadius: "var(--r)", border: "1px solid var(--line-2)",
+                  }}>
+                    <PlayButton path={refPath} size={12} />
+                    <Wave width={90} height={16} seed={char.id.charCodeAt(0)} count={26} color="var(--tts)" opacity={0.7} />
+                    <span style={{
+                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
+                      color: "var(--fg-3)", overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {refPath.split("/").pop()}
+                    </span>
+                    <button className="btn btn-sm" onClick={handlePickFile}>replace</button>
+                    <button
+                      className="btn btn-sm"
+                      style={{ color: "var(--sfx)" }}
+                      onClick={() => saveVoice({ ref_audio_path: null })}
+                    >clear</button>
+                  </div>
+                ) : (
+                  <button className="btn btn-sm" onClick={handlePickFile} style={{ marginBottom: 10 }}>
+                    Upload audio file…
+                  </button>
+                )}
+
+                <label style={labelStyle}>
+                  Reference transcript{" "}
+                  <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    — optional, helps ICL mode
+                  </span>
+                </label>
+                <input
+                  className="input"
+                  value={refTranscript}
+                  onChange={(e) => setRefTranscript(e.target.value)}
+                  onBlur={() => saveVoice({ ref_transcript: refTranscript })}
+                  style={{ width: "100%", fontSize: 12, marginBottom: 12 }}
+                  placeholder="What is spoken in the reference audio…"
+                />
+
+                <label style={labelStyle}>Voice instructions</label>
+                <textarea
+                  className="input"
+                  value={instruct}
+                  onChange={(e) => setInstruct(e.target.value)}
+                  onBlur={() => saveVoice({ instruct_default: instruct })}
+                  rows={2}
+                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                  placeholder="Directorial notes pre-filled in the TTS panel for every line…"
+                />
+              </div>
             </div>
           )}
 
@@ -1286,192 +1288,6 @@ export const CharacterDesignerView: React.FC = () => {
             </div>
           )}
 
-          {/* ── CLONE ────────────────────────────────────────────────────── */}
-          {tab === "clone" && (
-            <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
-                Clone uses a reference audio clip as a vocal fingerprint.
-                Upload any WAV or generate one from Voice Design — every production line
-                for this character will match that timbre.
-              </p>
-
-              {/* Reference audio */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={labelStyle}>Reference audio</label>
-                {refPath ? (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "10px 12px",
-                    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                    borderRadius: "var(--r)", border: "1px solid var(--line-2)",
-                  }}>
-                    <PlayButton path={refPath} size={12} />
-                    <Wave width={110} height={18} seed={char.id.charCodeAt(0)} count={28} color="var(--tts)" opacity={0.7} />
-                    <span style={{
-                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
-                      color: "var(--fg-3)", overflow: "hidden",
-                      textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {refPath.split("/").pop()}
-                    </span>
-                    <button className="btn btn-sm" onClick={handlePickFile}>replace</button>
-                    <button
-                      className="btn btn-sm"
-                      style={{ color: "var(--sfx)" }}
-                      onClick={() => saveVoice({ ref_audio_path: null })}
-                    >clear</button>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: "16px 14px",
-                    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                    display: "flex", flexDirection: "column", gap: 8,
-                  }}>
-                    <div style={{ fontSize: 11, color: "var(--fg-4)", lineHeight: 1.6 }}>
-                      No reference audio. Upload a clip or{" "}
-                      <button
-                        className="btn btn-sm"
-                        onClick={() => setTab("design")}
-                        style={{ display: "inline", padding: "1px 6px" }}
-                      >
-                        generate one in Voice Design →
-                      </button>
-                    </div>
-                    <button
-                      className="btn btn-sm"
-                      onClick={handlePickFile}
-                      style={{ alignSelf: "flex-start" }}
-                    >
-                      Upload audio file…
-                    </button>
-                  </div>
-                )}
-              </div>
-
-              {referenceAssets.length > 0 && (
-                <div style={{ marginBottom: 18 }}>
-                  <label style={labelStyle}>Clip Studio references</label>
-                  <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 190, overflowY: "auto" }}>
-                    {referenceAssets.slice(0, 24).map((asset) => {
-                      const active = refPath === asset.audio_path;
-                      return (
-                        <button
-                          key={asset.audio_path}
-                          onClick={() => saveVoice({ ref_audio_path: asset.audio_path, model: "Clone" })}
-                          style={{
-                            display: "grid",
-                            gridTemplateColumns: "74px 1fr auto",
-                            alignItems: "center",
-                            gap: 8,
-                            width: "100%",
-                            textAlign: "left",
-                            padding: "7px 8px",
-                            border: `1px solid ${active ? "var(--tts)" : "var(--line-1)"}`,
-                            borderRadius: "var(--r)",
-                            background: active ? "color-mix(in oklch, var(--tts) 12%, var(--bg-1))" : "var(--bg-1)",
-                            color: "var(--fg-1)",
-                            cursor: "pointer",
-                          }}
-                        >
-                          {referencePeaks[asset.audio_path] ? (
-                            <PeaksWave peaks={referencePeaks[asset.audio_path]} width={74} height={18} color="var(--tts)" opacity={0.75} />
-                          ) : (
-                            <Wave width={74} height={18} seed={asset.name.charCodeAt(0)} count={22} color="var(--tts)" opacity={0.55} />
-                          )}
-                          <span style={{ minWidth: 0 }}>
-                            <span style={{ display: "block", fontSize: 11, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                              {basename(asset.audio_path)}
-                            </span>
-                            <span style={{ display: "block", fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)", marginTop: 2 }}>
-                              {asset.scene_slug} · {asset.model} · {formatDuration(asset.duration_ms)}
-                            </span>
-                          </span>
-                          <PlayButton path={asset.audio_path} size={10} />
-                        </button>
-                      );
-                    })}
-                  </div>
-                  <div style={{ fontSize: 10.5, color: "var(--fg-4)", lineHeight: 1.5, marginTop: 7 }}>
-                    Long recordings imported and cropped in Clip Studio appear here as clone-ready references.
-                  </div>
-                </div>
-              )}
-
-              {/* ref_transcript */}
-              <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
-                  Reference transcript{" "}
-                  <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                    — optional, helps ICL mode
-                  </span>
-                </label>
-                <input
-                  className="input"
-                  value={refTranscript}
-                  onChange={(e) => setRefTranscript(e.target.value)}
-                  onBlur={() => saveVoice({ ref_transcript: refTranscript })}
-                  style={{ width: "100%", fontSize: 12 }}
-                  placeholder="What is spoken in the reference audio…"
-                />
-              </div>
-
-              {/* instruct */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={labelStyle}>Voice instructions</label>
-                <textarea
-                  className="input"
-                  value={instruct}
-                  onChange={(e) => setInstruct(e.target.value)}
-                  onBlur={() => saveVoice({ instruct_default: instruct })}
-                  rows={2}
-                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="Directorial notes pre-filled in the TTS panel for every line…"
-                />
-              </div>
-
-              {/* Test clone */}
-              <div style={{ marginBottom: 16 }}>
-                <label style={labelStyle}>Test clone</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input"
-                    value={testLine}
-                    onChange={(e) => setTestLine(e.target.value)}
-                    style={{ flex: 1, fontSize: 12 }}
-                    placeholder="Line to clone…"
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleGenerateClone}
-                    disabled={generating || !refPath}
-                    style={{
-                      background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
-                      opacity: !refPath ? 0.4 : 1, flexShrink: 0,
-                    }}
-                  >
-                    {generating ? "Generating…" : "Generate"}
-                  </button>
-                </div>
-                {genError && <div style={errorStyle}>{genError}</div>}
-              </div>
-
-              {runningClone && <RunningBadge label="Cloning voice…" />}
-
-              {cloneJobs.length > 0 && (
-                <TakeList label={`Clone takes · ${cloneJobs.length}`}>
-                  {cloneJobs.map((job, i) => (
-                    <TakeRow
-                      key={job.id} job={job} index={i}
-                      saveLabel="Save as new reference"
-                      isSaved={refPath === job.output_path}
-                      onSave={() => saveVoice({ ref_audio_path: job.output_path })}
-                      onQa={(s) => setQaStatus(job.id, s)}
-                    />
-                  ))}
-                </TakeList>
-              )}
-            </div>
-          )}
 
           {/* ── CORPUS BUILDER (Stage 3) ──────────────────────────────────── */}
           {tab === "corpus" && (
@@ -1514,10 +1330,7 @@ export const CharacterDesignerView: React.FC = () => {
       }}>
         <MetaSection label="Mode">
           <div style={{ color: "var(--tts)", fontWeight: 500 }}>
-            {char.voice_assignment.model === "Clone" ? "Voice Clone"
-              : char.voice_assignment.model === "VoiceDesign" ? "Voice Design"
-              : char.voice_assignment.model === "Chatterbox" ? "Chatterbox"
-              : "Custom"}
+            {deriveVoiceBadge(char).label}
           </div>
           {refPath
             ? <div style={{ color: "var(--st-rendered)", fontSize: 10, marginTop: 4 }}>✓ Reference set</div>
@@ -1551,7 +1364,6 @@ export const CharacterDesignerView: React.FC = () => {
         <MetaSection label="Takes">
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
             <span style={{ color: "var(--fg-3)" }}>Design: <strong style={{ color: "var(--fg-1)" }}>{designJobs.length}</strong></span>
-            <span style={{ color: "var(--fg-3)" }}>Clone: <strong style={{ color: "var(--fg-1)" }}>{cloneJobs.length}</strong></span>
           </div>
         </MetaSection>
       </div>

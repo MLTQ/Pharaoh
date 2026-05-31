@@ -5,15 +5,15 @@ Cast and voice-design workspace for creating characters, testing generated voice
 
 ## Components
 
-### `handleGenerateDesign`, `handleGenerateClone`
-- **Does**: Submit voice design and clone test jobs, then add returned jobs to the frontend queue.
-- **Interacts with**: `submitTtsVoiceDesign`, `submitTtsVoiceClone` in `tauriCommands.ts`, `jobStore.ts`.
-- **Rationale**: Uses a synthetic `__char__{id}` scene slug so character takes do not collide with scene generation takes.
+### `handleGenerateDesign`
+- **Does**: Submits a Voice Design job (Qwen3 from a text prompt) and pushes the returned job into the frontend queue.
+- **Interacts with**: `submitTtsVoiceDesign` in `tauriCommands.ts`, `jobStore.ts`.
+- **Rationale**: Uses a synthetic `__char__{id}` scene slug so character takes do not collide with scene generation takes. The legacy "Clone" tab and its `handleGenerateClone` test-clone button were removed in Pharaoh-pr1 — the Voice Design output is the single Stage-1 generator; single-ref upload is folded in below as a fallback.
 
-### Clip Studio reference selection
-- **Does**: Lists sidecar-indexed TTS/reference assets so cropped long-recording clips can become clone references.
-- **Interacts with**: `listGeneratedAudioAssets`, `getWaveformPeaks`, `ClipStudioView.tsx`.
-- **Rationale**: Voice references should be reusable after import/cropping rather than requiring path re-entry.
+### `deriveVoiceBadge`
+- **Does**: Pure derivation of the UI mode badge ("Chatterbox + RVC" / "Chatterbox" / "Reference" / "Voice Design" / "Empty") from data shape, replacing the overloaded legacy `model` enum.
+- **Interacts with**: sidebar chip, detail header chip, right-meta "Mode" section.
+- **Rationale**: The `VoiceAssignment.model` field is retained for back-compat reads but no longer drives the UI — `production_pipeline`, palette state, and ref presence are the real source. Lets us delete the enum cleanly when MCP no longer writes it.
 
 ### `submitting`
 - **Does**: Tracks the gap between button click and returned job id so the page shows work-in-progress even before normal job events arrive.
