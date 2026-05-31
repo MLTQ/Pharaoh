@@ -831,6 +831,7 @@ export const CharacterDesignerView: React.FC = () => {
           const corpusTarget = 50;
           const modelTrained = (char.voice_assignment.rvc?.model_path ?? null) !== null;
           const rvcEnabled = char.voice_assignment.rvc?.enabled ?? false;
+          const rvcPipelineActive = char.voice_assignment.production_pipeline === "chatterbox+rvc";
           return (
             <CharacterPipeline
               stage1Done={stage1Done}
@@ -840,6 +841,21 @@ export const CharacterDesignerView: React.FC = () => {
               corpusDurationMs={corpusDurationMs}
               modelTrained={modelTrained}
               rvcEnabled={rvcEnabled}
+              rvcPipelineActive={rvcPipelineActive}
+              onToggleRvcPipeline={(active) => {
+                // Persist the toggle as production_pipeline; mirror it to
+                // rvc.enabled for back-compat with any code still reading the
+                // legacy nested flag.
+                const next = active ? "chatterbox+rvc" : "chatterbox";
+                const rvc = char.voice_assignment.rvc
+                  ? { ...char.voice_assignment.rvc, enabled: active }
+                  : (active ? { model_path: null, index_path: null, pitch_shift: 0, index_rate: 0.5, protect: 0.33, enabled: true, corpus_count: 0, corpus_duration_ms: 0 } : null);
+                saveVoice({ production_pipeline: next, rvc });
+                // If the user was on a now-hidden tab, bounce back to Palette.
+                if (!active && (tab === "corpus" || tab === "model")) {
+                  setTab("palette");
+                }
+              }}
               activeStage={tabToStage(tab)}
               onSelectStage={(s) => setTab(stageToTab(s))}
             />

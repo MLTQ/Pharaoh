@@ -26,6 +26,15 @@ export interface CharacterPipelineProps {
   corpusDurationMs: number; // total corpus audio duration
   modelTrained: boolean;    // rvc .pth file exists
   rvcEnabled: boolean;      // whether RVC is toggled on for production
+  /**
+   * Whether the RVC half of the pipeline (Corpus + Model stages) is opted in
+   * for this character — true when `voice_assignment.production_pipeline ===
+   * "chatterbox+rvc"`. When false, stages 3 and 4 are hidden entirely and an
+   * "+ RVC pipeline" toggle is shown in their place. (Pharaoh-9sx)
+   */
+  rvcPipelineActive: boolean;
+  /** Called when the user toggles RVC opt-in. */
+  onToggleRvcPipeline: (active: boolean) => void;
   activeStage: 1 | 2 | 3 | 4;
   onSelectStage: (stage: 1 | 2 | 3 | 4) => void;
 }
@@ -232,6 +241,8 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
   corpusDurationMs,
   modelTrained,
   rvcEnabled,
+  rvcPipelineActive,
+  onToggleRvcPipeline,
   activeStage,
   onSelectStage,
 }) => {
@@ -302,18 +313,50 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
         status={s2Status} isActive={activeStage === 2}
         onClick={() => onSelectStage(2)}
       />
-      <Connector dim={stage3Locked} />
-      <StageChip
-        stageNum={3} label="Corpus" statusLine={s3StatusLine}
-        status={s3Status} isActive={activeStage === 3}
-        onClick={() => onSelectStage(3)}
-      />
-      <Connector dim={stage4Locked} />
-      <StageChip
-        stageNum={4} label="Model" statusLine={s4StatusLine}
-        status={s4Status} isActive={activeStage === 4}
-        onClick={() => onSelectStage(4)}
-      />
+      {rvcPipelineActive ? (
+        <>
+          <Connector dim={stage3Locked} />
+          <StageChip
+            stageNum={3} label="Corpus" statusLine={s3StatusLine}
+            status={s3Status} isActive={activeStage === 3}
+            onClick={() => onSelectStage(3)}
+          />
+          <Connector dim={stage4Locked} />
+          <StageChip
+            stageNum={4} label="Model" statusLine={s4StatusLine}
+            status={s4Status} isActive={activeStage === 4}
+            onClick={() => onSelectStage(4)}
+          />
+          <button
+            onClick={() => onToggleRvcPipeline(false)}
+            title="Remove RVC pipeline (keeps any trained model on disk, just hides the stages)"
+            style={{
+              marginLeft: 8,
+              padding: "4px 8px",
+              fontSize: 10, color: "var(--fg-4)",
+              background: "transparent", border: "1px dashed var(--line-2)",
+              borderRadius: "var(--r)", cursor: "pointer",
+            }}
+          >
+            − RVC
+          </button>
+        </>
+      ) : (
+        <button
+          onClick={() => onToggleRvcPipeline(true)}
+          title="Opt in to the Corpus + Model RVC pipeline for this character"
+          style={{
+            marginLeft: 8,
+            padding: "6px 12px",
+            fontSize: 10, color: "var(--fg-3)",
+            background: "var(--bg-2)", border: "1px dashed var(--line-2)",
+            borderRadius: "var(--r)", cursor: "pointer",
+            fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
+          }}
+        >
+          + RVC pipeline
+        </button>
+      )}
     </div>
   );
 };

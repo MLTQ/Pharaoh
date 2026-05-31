@@ -15,6 +15,11 @@ Cast and voice-design workspace for creating characters, testing generated voice
 - **Interacts with**: sidebar chip, detail header chip, right-meta "Mode" section.
 - **Rationale**: The `VoiceAssignment.model` field is retained for back-compat reads but no longer drives the UI — `production_pipeline`, palette state, and ref presence are the real source. Lets us delete the enum cleanly when MCP no longer writes it.
 
+### Pipeline RVC gate (`rvcPipelineActive`, `onToggleRvcPipeline`)
+- **Does**: Computes `rvcPipelineActive` from `voice_assignment.production_pipeline === "chatterbox+rvc"` and passes it to `CharacterPipeline`. When false, Corpus + Model chips are hidden; an "+ RVC pipeline" toggle replaces them.
+- **Interacts with**: `CharacterPipeline.tsx`, `saveVoice` (writes both `production_pipeline` and mirrors to `rvc.enabled` for back-compat).
+- **Rationale**: Pharaoh-9sx — RVC is now opt-in per character. The default Chatterbox-only pipeline is cleaner and the optional Corpus/Model stages don't clutter the editor for characters that don't need consistency-locking. If the user is sitting on a hidden tab (corpus/model) when the toggle flips off, the active tab bounces back to Palette.
+
 ### `submitting`
 - **Does**: Tracks the gap between button click and returned job id so the page shows work-in-progress even before normal job events arrive.
 - **Interacts with**: `RunningBadge` in `TakeList.tsx`.
