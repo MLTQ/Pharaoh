@@ -123,6 +123,8 @@ async fn end_to_end_render_pipeline() {
                 rvc_enabled: false,
             },
             schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
+            library_id: None,
+            library_version: None,
         }],
         llm_config: LlmConfig {
             provider: "anthropic".into(),

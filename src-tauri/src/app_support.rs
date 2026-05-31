@@ -74,11 +74,6 @@ pub fn character_dir(projects_dir: &Path, project_id: &str, character_id: &str) 
 /// Resolve a character-bundle asset path to an absolute filesystem path.
 /// - If `path` is absolute, returned as-is (external Clip Studio refs etc.).
 /// - If `path` is relative, joined onto `bundle_dir`.
-///
-/// Currently unused; future issue Pharaoh-vor (library import/export) and a
-/// follow-up sweep will switch in-bundle path storage to relative and call this
-/// at every job-submit site.
-#[allow(dead_code)]
 pub fn resolve_character_asset(bundle_dir: &Path, path: &str) -> PathBuf {
     let p = PathBuf::from(path);
     if p.is_absolute() {
@@ -91,8 +86,7 @@ pub fn resolve_character_asset(bundle_dir: &Path, path: &str) -> PathBuf {
 /// If `abs_path` lies inside `bundle_dir`, return the path relative to the bundle.
 /// Returns None for paths outside the bundle (e.g. external references).
 ///
-/// Paired with [`resolve_character_asset`]; see that doc for context.
-#[allow(dead_code)]
+/// Paired with [`resolve_character_asset`].
 pub fn relativize_character_asset(bundle_dir: &Path, abs_path: &str) -> Option<String> {
     let p = PathBuf::from(abs_path);
     if !p.is_absolute() {
@@ -101,6 +95,122 @@ pub fn relativize_character_asset(bundle_dir: &Path, abs_path: &str) -> Option<S
     p.strip_prefix(bundle_dir)
         .ok()
         .map(|rel| rel.to_string_lossy().into_owned())
+}
+
+// ── Library bundle helpers ──────────────────────────────────────────────────
+//
+// The library lives sibling to projects at `<projects_dir>/_library/characters/`.
+// Each library character is a self-contained bundle directory whose name is the
+// library_id (UUID). Layout mirrors an in-project character bundle exactly:
+//   <projects_dir>/_library/characters/<library_id>/
+//     ├── character.json    canonical Character record (paths inside relative)
+//     ├── palette/*.wav
+//     ├── rvc/*.pth + *.index
+//     └── rvc_corpus/*.wav
+//
+// Import is a copy from library bundle → project bundle (paths rewritten
+// absolute on the way in so the rest of the codebase works unchanged).
+// Save is the reverse: project bundle → library bundle, paths relativized.
+
+pub const LIBRARY_DIR_NAME: &str = "_library";
+pub const LIBRARY_CHARACTERS_SUBDIR: &str = "characters";
+
+pub fn library_root_dir(projects_dir: &Path) -> PathBuf {
+    projects_dir.join(LIBRARY_DIR_NAME).join(LIBRARY_CHARACTERS_SUBDIR)
+}
+
+pub fn library_character_dir(projects_dir: &Path, library_id: &str) -> PathBuf {
+    library_root_dir(projects_dir).join(library_id)
+}
+
+/// Recursively copy `src` into `dst`. Creates `dst` if missing.
+/// Skips entries whose names begin with `.` (e.g. macOS `.DS_Store`).
+pub fn copy_dir_recursive(src: &Path, dst: &Path) -> Result<()> {
+    if !src.exists() {
+        return Err(Error::Other(format!(
+            "source directory does not exist: {}",
+            src.display()
+        )));
+    }
+    std::fs::create_dir_all(dst)?;
+    for entry in std::fs::read_dir(src)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        if name.to_string_lossy().starts_with('.') {
+            continue;
+        }
+        let src_path = entry.path();
+        let dst_path = dst.join(&name);
+        let ty = entry.file_type()?;
+        if ty.is_dir() {
+            copy_dir_recursive(&src_path, &dst_path)?;
+        } else if ty.is_file() {
+            std::fs::copy(&src_path, &dst_path)?;
+        }
+        // Symlinks and other types intentionally skipped — bundles should
+        // be plain file content.
+    }
+    Ok(())
+}
+
+/// Rewrite every voice path inside `va` that points into `bundle_dir` to a
+/// path relative to that bundle. Paths outside the bundle (external Clip
+/// Studio refs etc.) are left untouched.
+///
+/// Use before writing a Character to library/character.json so the saved
+/// bundle is fully portable.
+pub fn relativize_voice_paths(va: &mut crate::models::VoiceAssignment, bundle_dir: &Path) {
+    if let Some(p) = va.ref_audio_path.as_deref() {
+        if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+            va.ref_audio_path = Some(rel);
+        }
+    }
+    for entry in va.emotional_palette.iter_mut() {
+        if let Some(p) = entry.ref_audio_path.as_deref() {
+            if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+                entry.ref_audio_path = Some(rel);
+            }
+        }
+    }
+    if let Some(rvc) = va.rvc.as_mut() {
+        if let Some(p) = rvc.model_path.as_deref() {
+            if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+                rvc.model_path = Some(rel);
+            }
+        }
+        if let Some(p) = rvc.index_path.as_deref() {
+            if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+                rvc.index_path = Some(rel);
+            }
+        }
+    }
+}
+
+/// Reverse of [`relativize_voice_paths`]: turn relative paths into absolute
+/// paths anchored at `bundle_dir`. Use after reading a library character.json
+/// and before handing it to the rest of the codebase (which still expects
+/// absolute paths until Pharaoh-1qp).
+pub fn absolutize_voice_paths(va: &mut crate::models::VoiceAssignment, bundle_dir: &Path) {
+    if let Some(p) = va.ref_audio_path.as_deref() {
+        let resolved = resolve_character_asset(bundle_dir, p);
+        va.ref_audio_path = Some(resolved.to_string_lossy().into_owned());
+    }
+    for entry in va.emotional_palette.iter_mut() {
+        if let Some(p) = entry.ref_audio_path.as_deref() {
+            let resolved = resolve_character_asset(bundle_dir, p);
+            entry.ref_audio_path = Some(resolved.to_string_lossy().into_owned());
+        }
+    }
+    if let Some(rvc) = va.rvc.as_mut() {
+        if let Some(p) = rvc.model_path.as_deref() {
+            let resolved = resolve_character_asset(bundle_dir, p);
+            rvc.model_path = Some(resolved.to_string_lossy().into_owned());
+        }
+        if let Some(p) = rvc.index_path.as_deref() {
+            let resolved = resolve_character_asset(bundle_dir, p);
+            rvc.index_path = Some(resolved.to_string_lossy().into_owned());
+        }
+    }
 }
 
 /// Scan a `rvc_corpus/` directory: count `.wav` files and sum `duration_ms`

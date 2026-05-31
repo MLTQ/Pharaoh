@@ -1,5 +1,14 @@
 import { invoke } from "@tauri-apps/api/core";
-import type { Project, Scene, ScriptRow, AppConfig, AllServerHealth, GeneratedAudioAsset } from "./types";
+import type {
+  Project,
+  Scene,
+  ScriptRow,
+  AppConfig,
+  AllServerHealth,
+  GeneratedAudioAsset,
+  Character,
+  LibraryCharacterSummary,
+} from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
 
@@ -544,3 +553,31 @@ export const upscaleAudioAsset = (args: {
   guidanceScale: number;
   seed: number;
 }): Promise<string> => invoke("upscale_audio_asset", args);
+
+// ── Character library ───────────────────────────────────────────────────────
+//
+// Library lives at <projects_dir>/_library/characters/<library_id>/ and uses
+// the same bundle layout as in-project characters. Fork-and-pull sync model:
+// import = copy library → project, save = copy project → library. Each project
+// character carries library_id + library_version so a future drift indicator
+// (Pharaoh-wpk) can flag divergence.
+
+export const listLibraryCharacters = (): Promise<LibraryCharacterSummary[]> =>
+  invoke("list_library_characters");
+
+export const saveCharacterToLibrary = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<LibraryCharacterSummary> =>
+  invoke("save_character_to_library", args);
+
+export const importCharacterFromLibrary = (args: {
+  projectId: string;
+  libraryId: string;
+  /** Optional override for the project-local character name (e.g. "Alex (Younger)"). */
+  newName?: string;
+}): Promise<Character> =>
+  invoke("import_character_from_library", args);
+
+export const deleteLibraryCharacter = (libraryId: string): Promise<void> =>
+  invoke("delete_library_character", { libraryId });

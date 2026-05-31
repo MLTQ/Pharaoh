@@ -20,8 +20,22 @@ Shared filesystem and config helpers for both Tauri commands and the headless CL
 
 ### `character_dir`, `resolve_character_asset`, `relativize_character_asset`
 - **Does**: Path helpers for character bundles — the directory holding all artifacts for one character (`palette/`, `rvc/`, `rvc_corpus/`).
-- **Interacts with**: `project.rs` (migration on load), future library import/export commands.
-- **Rationale**: The bundle is the unit of portability for the planned character library. `resolve_character_asset` and `relativize_character_asset` accept either absolute or relative paths so callers can be switched to relative-by-default in a follow-up sweep without breaking existing data.
+- **Interacts with**: `project.rs` (migration on load), `character.rs` (library import/export).
+- **Rationale**: The bundle is the unit of portability for the character library. `resolve_character_asset` and `relativize_character_asset` accept either absolute or relative paths so callers can be switched to relative-by-default in a follow-up sweep without breaking existing data.
+
+### `library_root_dir`, `library_character_dir`
+- **Does**: Path builders for the library at `<projects_dir>/_library/characters/<library_id>/`.
+- **Interacts with**: `commands/character.rs`.
+- **Rationale**: Underscore-prefixed `_library` deliberately falls outside `list_projects`'s `project.json` scan.
+
+### `copy_dir_recursive`
+- **Does**: Recursive directory copy used to move bundles between project and library locations. Skips dotfiles (e.g. `.DS_Store`).
+- **Interacts with**: `commands/character.rs`.
+
+### `relativize_voice_paths`, `absolutize_voice_paths`
+- **Does**: Walk every path field inside a `VoiceAssignment` (ref_audio_path, palette refs, rvc.model_path, rvc.index_path) and rewrite them relative ↔ absolute against a given bundle directory.
+- **Interacts with**: `commands/character.rs` (library save uses relativize; import uses absolutize).
+- **Rationale**: Library bundles store paths relative to the bundle root so they're portable; the rest of the codebase still works in absolute paths. These functions are the only place that knows the full set of path fields.
 
 ### `scan_rvc_corpus_dir`
 - **Does**: Counts `.wav` files in a corpus directory and sums duration_ms from adjacent `<name>.wav.meta.json` sidecars.

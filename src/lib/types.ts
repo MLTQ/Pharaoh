@@ -163,6 +163,32 @@ export interface Character {
    * Absent in pre-migration project.json — defaults to 1.
    */
   schema_version: number;
+  /**
+   * UUID of the library entry this character was imported from, or null for
+   * project-only characters that have never been pushed to the library.
+   */
+  library_id?: string | null;
+  /**
+   * ISO-8601 timestamp from the library entry at the time of import or push.
+   * Used by the drift indicator (Pharaoh-wpk) to flag project ↔ library divergence.
+   */
+  library_version?: string | null;
+}
+
+/**
+ * Compact summary of a library character, returned by `listLibraryCharacters`.
+ * Avoids loading the full Character + scanning RVC corpus for each list entry.
+ */
+export interface LibraryCharacterSummary {
+  library_id: string;
+  name: string;
+  description: string;
+  /** Number of palette entries with an approved reference. */
+  palette_count: number;
+  /** True if a trained RVC `.pth` model file exists in the bundle. */
+  has_rvc_model: boolean;
+  /** ISO-8601 timestamp of the library entry's last save. */
+  library_version: string;
 }
 
 export interface LlmConfig {

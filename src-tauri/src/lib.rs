@@ -107,6 +107,11 @@ pub fn run() {
             commands::rvc::submit_rvc_train,
             commands::rvc::get_rvc_job,
             commands::rvc::get_corpus_status,
+            // Character library
+            commands::character::list_library_characters,
+            commands::character::save_character_to_library,
+            commands::character::import_character_from_library,
+            commands::character::delete_library_character,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

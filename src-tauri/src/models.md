@@ -9,10 +9,10 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 - **Does**: Represent the persistent story and composition data model on disk.
 - **Interacts with**: `project.rs`, `script.rs`, `cli.rs`.
 
-### `Character`, `VoiceAssignment`, `RvcConfig`, `PaletteEntry`
-- **Does**: Per-character cast and voice configuration. `RvcConfig` is the nested home for all RVC fields (model path, index path, pitch shift, index rate, protect, enabled, transient corpus stats). `VoiceAssignment.production_pipeline` is the single source of truth for which generation chain runs per line.
-- **Interacts with**: `commands/project.rs` (migration), `commands/rvc.rs`, `CharacterDesignerView.tsx`.
-- **Rationale**: The legacy `model` enum mixed "how the ref was made" with "what runs at production time"; `production_pipeline` isolates the latter. The flat `rvc_*` fields are kept for back-compat reads only (`#[serde(skip_serializing)]`) and lifted into nested `RvcConfig` by `VoiceAssignment::consolidate_legacy_rvc`. `Character::schema_version` is bumped by `CURRENT_CHARACTER_SCHEMA` so future shape changes have a versioned migration story.
+### `Character`, `VoiceAssignment`, `RvcConfig`, `PaletteEntry`, `LibraryCharacterSummary`
+- **Does**: Per-character cast and voice configuration. `RvcConfig` is the nested home for all RVC fields (model path, index path, pitch shift, index rate, protect, enabled, transient corpus stats). `VoiceAssignment.production_pipeline` is the single source of truth for which generation chain runs per line. `Character::library_id` + `library_version` link a project character back to its library origin (fork-and-pull sync). `LibraryCharacterSummary` is the lightweight list payload returned by `list_library_characters`.
+- **Interacts with**: `commands/project.rs` (migration), `commands/rvc.rs`, `commands/character.rs` (library), `CharacterDesignerView.tsx`.
+- **Rationale**: The legacy `model` enum mixed "how the ref was made" with "what runs at production time"; `production_pipeline` isolates the latter. The flat `rvc_*` fields are kept for back-compat reads only (`#[serde(skip_serializing)]`) and lifted into nested `RvcConfig` by `VoiceAssignment::consolidate_legacy_rvc`. `Character::schema_version` is bumped by `CURRENT_CHARACTER_SCHEMA` so future shape changes have a versioned migration story. `library_id`/`library_version` are optional — null for project-only characters.
 
 ### `AppConfig`, `ServerConfig`, `AppState`
 - **Does**: Hold runtime configuration and shared clients/locks for the native app, including TTS/SFX/music/Post server URLs.

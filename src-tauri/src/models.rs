@@ -162,6 +162,32 @@ pub struct Character {
     /// Absent in legacy project.json — defaults to 1.
     #[serde(default = "default_character_schema_version")]
     pub schema_version: u32,
+    /// If this character was imported from the library, the originating
+    /// library entry's UUID. None for project-only characters that have
+    /// never been promoted to the library.
+    #[serde(default)]
+    pub library_id: Option<String>,
+    /// ISO-8601 timestamp of the library entry at the time of the last
+    /// import or push. Used by the future drift indicator (Pharaoh-wpk)
+    /// to decide whether the project version diverges from the library.
+    #[serde(default)]
+    pub library_version: Option<String>,
+}
+
+/// Lightweight summary of a library character used by `list_library_characters`.
+/// Avoids loading the full Character + scanning RVC corpus for every entry.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LibraryCharacterSummary {
+    /// Library-scoped UUID (also the bundle directory name).
+    pub library_id: String,
+    pub name: String,
+    pub description: String,
+    /// Number of palette entries with an approved reference.
+    pub palette_count: u32,
+    /// True if a trained RVC model file exists in the bundle.
+    pub has_rvc_model: bool,
+    /// ISO-8601 timestamp of the library entry's last save.
+    pub library_version: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

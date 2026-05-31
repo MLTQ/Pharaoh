@@ -1220,6 +1220,8 @@ async fn script_import(
                 rvc_enabled: false,
             },
             schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
+            library_id: None,
+            library_version: None,
         });
     }
 
@@ -1517,6 +1519,8 @@ async fn character_create(
             rvc_enabled: false,
         },
         schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
+        library_id: None,
+        library_version: None,
     };
     project.characters.push(character.clone());
     save_project(config, project)?;

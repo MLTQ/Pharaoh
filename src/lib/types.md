@@ -14,9 +14,9 @@ Shared TypeScript contracts for project data, script rows, jobs, server health, 
 - **Does**: Keep frontend data structures aligned with Rust models and CSV parsing; `ModelKind` includes `post` for Post server jobs such as AudioSR.
 - **Interacts with**: `csvParser.ts`, stores, timeline, asset browser.
 
-### `Character`, `VoiceAssignment`, `RvcConfig`, `PaletteEntry`
-- **Does**: Mirror the Rust character/voice/RVC shape. `production_pipeline` is the production-time switch ("chatterbox" vs "chatterbox+rvc"); the legacy `model` enum is kept for back-compat but new UI code should derive the badge from data instead.
-- **Interacts with**: `CharacterDesignerView.tsx`, `projectStore.ts`, `commands/project.rs` (backend migration).
+### `Character`, `VoiceAssignment`, `RvcConfig`, `PaletteEntry`, `LibraryCharacterSummary`
+- **Does**: Mirror the Rust character/voice/RVC shape. `production_pipeline` is the production-time switch ("chatterbox" vs "chatterbox+rvc"); the legacy `model` enum is kept for back-compat but new UI code should derive the badge from data instead. `Character.library_id` + `library_version` are the link to a library entry (null for project-only characters). `LibraryCharacterSummary` is the lightweight list payload returned by `listLibraryCharacters`.
+- **Interacts with**: `CharacterDesignerView.tsx`, `projectStore.ts`, `commands/project.rs`, `commands/character.rs`.
 - **Rationale**: `Character.schema_version` is informational only — migration always runs server-side in `migrate_project_in_place`. `RvcConfig.corpus_count` and `corpus_duration_ms` are recomputed by the backend on every `get_project`, so the UI never needs an extra request to keep stats fresh.
 
 ### `GeneratedAudioAsset`
