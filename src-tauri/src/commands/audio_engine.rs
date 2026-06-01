@@ -1,4 +1,5 @@
 use crate::app_support::{app_projects_dir, read_script_rows, scene_dir};
+use crate::commands::audio_spatial::{prerender_spatialized_clip, row_needs_spatial};
 use crate::commands::sidecar::{read_sidecar, write_sidecar};
 use crate::error::{Error, Result};
 use crate::models::{ScriptRow, SidecarMeta};
@@ -511,12 +512,40 @@ pub async fn render_scene_with_projects_dir(
         ));
     }
 
+    // ── Spatial prerender pass ────────────────────────────────────────────
+    //
+    // Each row with `spatial_azimuth` or `spatial_path` set is rendered to a
+    // self-contained binaural stereo WAV under `<scene>/.spatial/<i>.wav`.
+    // The main filter graph reads those files as inputs instead of the
+    // originals, and skips its own `pan` filter for those rows (since the
+    // audio is already binaural). See `audio_spatial.rs` for the details.
+    let spatial_dir = scene_root.join(".spatial");
+    let mut effective_files: Vec<String> = Vec::with_capacity(placed.len());
+    let mut spatial_flags: Vec<bool> = Vec::with_capacity(placed.len());
+    for (i, row) in placed.iter().enumerate() {
+        if row_needs_spatial(&row.spatial_azimuth, &row.spatial_path) {
+            let out_path = spatial_dir.join(format!("{}.wav", i));
+            prerender_spatialized_clip(
+                Path::new(&row.file),
+                &out_path,
+                &row.spatial_azimuth,
+                &row.spatial_elevation,
+                &row.spatial_path,
+            )?;
+            effective_files.push(out_path.to_string_lossy().to_string());
+            spatial_flags.push(true);
+        } else {
+            effective_files.push(row.file.clone());
+            spatial_flags.push(false);
+        }
+    }
+
     // ── Build ffmpeg command ──────────────────────────────────────────────
     let mut cmd = tokio::process::Command::new("ffmpeg");
     cmd.arg("-y");
 
-    for row in &placed {
-        cmd.args(["-i", &row.file]);
+    for file in &effective_files {
+        cmd.args(["-i", file]);
     }
 
     // ── Per-clip processing ───────────────────────────────────────────────
@@ -584,7 +613,12 @@ pub async fn render_scene_with_projects_dir(
 
         // Equal-power pan. pan ∈ [-1, 1]: -1 = full left, 0 = center, +1 = full right.
         // L = cos((pan+1)·π/4), R = sin((pan+1)·π/4)
-        if pan.abs() > 1e-3 {
+        //
+        // Skipped entirely for spatialized clips: the prerender pass above
+        // already wrote a binaural stereo file, and re-panning that would
+        // smear the HRTF placement. The legacy `pan` column is treated as
+        // mutually exclusive with `spatial_azimuth` in the UI as well.
+        if !spatial_flags[i] && pan.abs() > 1e-3 {
             let theta = (pan + 1.0) * std::f32::consts::FRAC_PI_4;
             let lg = theta.cos();
             let rg = theta.sin();

@@ -501,6 +501,86 @@ def update_script_row(
 
 
 @mcp.tool()
+def spatialize_row(
+    project_id: str,
+    scene_slug: str,
+    row_index: int,
+    azimuth: float | None = None,
+    elevation: float | None = None,
+    path: list | None = None,
+    clear: bool = False,
+) -> str:
+    """
+    Place a single script row in 3D binaural space around the listener.
+
+    Pharaoh's scene renderer reads three columns: spatial_azimuth (0–360°,
+    0 = front, 90 = right, 180 = back, 270 = left), spatial_elevation
+    (-90..+90°, 0 = ear level), and spatial_path (waypoint JSON for moving
+    sources). When any of those columns are set, the renderer prerenders
+    the clip through ffmpeg's sofalizer HRTF filter (or a pure-ffmpeg
+    binaural approximation if no SOFA file is installed) before mixing.
+
+    Arguments:
+      azimuth   — optional fixed azimuth in degrees [0, 360). Wraps.
+      elevation — optional fixed elevation in degrees [-90, +90]. Clamped.
+      path      — optional list of waypoints for a moving source, e.g.
+                  [{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]
+                  for a left→right sweep across the full clip duration.
+                  Each waypoint needs t_frac (0–1), az (degrees), el (degrees).
+      clear     — if True, wipes all three spatial columns and the row
+                  reverts to legacy L/R amplitude panning. Cannot be combined
+                  with other args.
+
+    Returns: {"ok": true, "updated_row": {...}}
+    """
+    rows = _script_rows(project_id, scene_slug)
+    if row_index < 0 or row_index >= len(rows):
+        return json.dumps({"error": f"row_index {row_index} out of range (0–{len(rows)-1})"})
+
+    updates: dict = {}
+    if clear:
+        if azimuth is not None or elevation is not None or path is not None:
+            return json.dumps({"error": "clear=True cannot be combined with other spatial args"})
+        updates["spatial_azimuth"] = ""
+        updates["spatial_elevation"] = ""
+        updates["spatial_path"] = ""
+    else:
+        if azimuth is not None:
+            updates["spatial_azimuth"] = f"{azimuth % 360:.2f}"
+        if elevation is not None:
+            el = max(-90.0, min(90.0, float(elevation)))
+            updates["spatial_elevation"] = f"{el:.2f}"
+        if path is not None:
+            # Validate waypoint shape: list of dicts each with numeric t_frac/az/el.
+            if not isinstance(path, list):
+                return json.dumps({"error": "path must be a list of waypoints"})
+            cleaned = []
+            for i, w in enumerate(path):
+                if not isinstance(w, dict):
+                    return json.dumps({"error": f"path[{i}] must be an object"})
+                try:
+                    t = float(w["t_frac"])
+                    az = float(w["az"])
+                    el = float(w["el"])
+                except (KeyError, TypeError, ValueError) as e:
+                    return json.dumps({"error": f"path[{i}] needs numeric t_frac/az/el ({e})"})
+                cleaned.append({
+                    "t_frac": max(0.0, min(1.0, t)),
+                    "az": az % 360,
+                    "el": max(-90.0, min(90.0, el)),
+                })
+            cleaned.sort(key=lambda w: w["t_frac"])
+            updates["spatial_path"] = json.dumps(cleaned)
+
+    if not updates:
+        return json.dumps({"error": "no spatial args given; pass azimuth, elevation, path, or clear=True"})
+
+    rows[row_index].update(updates)
+    _write_script_rows(project_id, scene_slug, rows)
+    return json.dumps({"ok": True, "updated_row": rows[row_index]})
+
+
+@mcp.tool()
 def create_project(
     title: str,
     logline: str = "",

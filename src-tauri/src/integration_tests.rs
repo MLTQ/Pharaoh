@@ -10,6 +10,7 @@
 // scene and an episode end-to-end.
 
 use crate::commands::audio_engine::{render_episode_with_projects_dir, render_scene_with_projects_dir};
+use crate::commands::audio_spatial::prerender_spatialized_clip;
 use crate::models::{Character, LlmConfig, Project, Scene, SceneStatus, ScriptRow, Storyboard, VoiceAssignment};
 use crate::fountain::{parse_document, blocks_to_rows};
 use chrono::Utc;
@@ -65,6 +66,9 @@ fn make_blank_row() -> ScriptRow {
         emotion: String::new(),
         notes: String::new(),
         gain_envelope: String::new(),
+        spatial_azimuth: String::new(),
+        spatial_elevation: String::new(),
+        spatial_path: String::new(),
     }
 }
 
@@ -289,4 +293,85 @@ async fn end_to_end_render_pipeline() {
 
     // Cleanup
     std::fs::remove_dir_all(&projects_dir).ok();
+}
+
+// ── Spatial prerender smoke ───────────────────────────────────────────────
+//
+// Verifies that the spatial prerender produces a binaural stereo file with
+// measurable left/right asymmetry. We don't assume a SOFA file is installed
+// — the approximation path also produces ILD/ITD-driven asymmetry, so this
+// test runs unmodified whether or not assets/sofa/ is populated.
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn spatial_prerender_produces_binaural_asymmetry() {
+    if !ffmpeg_available() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+
+    let scratch = unique_temp_dir();
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    // A 1-second mono-equivalent sine wave (will be split per ear by the spatial chain).
+    let input = scratch.join("sine.wav");
+    write_sine_wav(&input, 440, 1);
+
+    // Static case: az=90 (full right). Expect right RMS > left RMS.
+    let static_out = scratch.join("static_right.wav");
+    prerender_spatialized_clip(&input, &static_out, "90", "0", "")
+        .unwrap_or_else(|e| panic!("spatial prerender failed: {e}"));
+    assert!(static_out.exists(), "static prerender should write output");
+
+    let (l_rms, r_rms) = stereo_rms(&static_out);
+    assert!(
+        r_rms > l_rms,
+        "az=90 should make right louder than left, got L={l_rms:.4} R={r_rms:.4}"
+    );
+
+    // Trajectory case: sweep az from 270 → 90 across the clip. Mean energy
+    // over the whole clip should be roughly balanced, but the file must
+    // still be a valid stereo render of the right duration.
+    let traj_out = scratch.join("sweep.wav");
+    let path_json = r#"[{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]"#;
+    prerender_spatialized_clip(&input, &traj_out, "0", "0", path_json)
+        .unwrap_or_else(|e| panic!("trajectory prerender failed: {e}"));
+    assert!(traj_out.exists(), "trajectory prerender should write output");
+
+    let reader = hound::WavReader::open(&traj_out).unwrap();
+    let spec = reader.spec();
+    assert_eq!(spec.channels, 2, "spatial prerender must emit stereo");
+    assert_eq!(spec.sample_rate, 48000, "spatial prerender must emit 48 kHz");
+    let frames = reader.duration() as u64;
+    let dur_ms = frames * 1000 / spec.sample_rate as u64;
+    assert!(
+        dur_ms >= 900 && dur_ms <= 1200,
+        "trajectory render should be ~1s, got {dur_ms}ms"
+    );
+
+    std::fs::remove_dir_all(&scratch).ok();
+}
+
+/// Compute (left_rms, right_rms) of a 24-bit stereo WAV. Used by the
+/// spatial test to confirm channel asymmetry.
+fn stereo_rms(path: &Path) -> (f64, f64) {
+    let mut reader = hound::WavReader::open(path).unwrap();
+    let spec = reader.spec();
+    assert_eq!(spec.channels, 2);
+    let scale = (1u64 << (spec.bits_per_sample - 1)) as f64;
+    let mut l_sum: f64 = 0.0;
+    let mut r_sum: f64 = 0.0;
+    let mut n: u64 = 0;
+    let mut left = true;
+    for s in reader.samples::<i32>() {
+        let v = s.unwrap() as f64 / scale;
+        if left {
+            l_sum += v * v;
+        } else {
+            r_sum += v * v;
+            n += 1;
+        }
+        left = !left;
+    }
+    let nf = n.max(1) as f64;
+    ((l_sum / nf).sqrt(), (r_sum / nf).sqrt())
 }

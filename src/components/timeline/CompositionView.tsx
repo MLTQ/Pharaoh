@@ -4,6 +4,8 @@ import { PlayButton } from "../shared/PlayButton";
 import { ScriptCanvas } from "./ScriptCanvas";
 import { FountainEditor } from "./FountainEditor";
 import { TakesPopover } from "./TakesPopover";
+import { ClipContextMenu } from "./ClipContextMenu";
+import { SpatializeModal } from "./SpatializeModal";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
@@ -75,6 +77,9 @@ function blankScriptRow(sceneNo: string, asset: DraggedAsset, track: string, sta
     emotion: "",
     notes: "",
     gain_envelope: "",
+    spatial_azimuth: "",
+    spatial_elevation: "",
+    spatial_path: "",
   };
 }
 
@@ -194,6 +199,46 @@ const GainLane: React.FC<GainLaneProps> = ({ width, gainDb, points, onChange }) 
   );
 };
 
+// ── Spatial indicator glyph ──────────────────────────────────────────────────
+//
+// Tiny compass-rose on spatialized clips. The dot's position around the ring
+// shows the static azimuth at a glance; the ring itself is a subtle marker
+// that the clip is bound to a binaural placement. Rendered inside the clip's
+// top-right corner via absolute positioning so it doesn't push the wave or
+// label around.
+
+const SpatialIndicator: React.FC<{ azimuth: number; elevation: number; hasPath: boolean }> = ({
+  azimuth, elevation, hasPath,
+}) => {
+  const size = 14;
+  const cx = size / 2;
+  const cy = size / 2;
+  const r  = (size / 2) - 2;
+  const rad = (azimuth * Math.PI) / 180;
+  const dx = cx + r * Math.sin(rad);
+  const dy = cy - r * Math.cos(rad);
+  // Elevation tints the dot — above ear-level = warmer, below = cooler. Subtle.
+  const tint = elevation > 5 ? "#f7c97a" : elevation < -5 ? "#7ad0f7" : "currentColor";
+  return (
+    <svg
+      width={size}
+      height={size}
+      viewBox={`0 0 ${size} ${size}`}
+      style={{
+        position: "absolute",
+        top: 2,
+        right: 8,
+        pointerEvents: "none",
+        opacity: 0.85,
+      }}
+      aria-label={hasPath ? `Spatial trajectory starting ~${Math.round(azimuth)}°` : `Spatial ${Math.round(azimuth)}° el ${Math.round(elevation)}°`}
+    >
+      <circle cx={cx} cy={cy} r={r} fill="none" stroke="currentColor" strokeWidth={1} opacity={0.6} />
+      <circle cx={dx} cy={dy} r={2} fill={tint} />
+    </svg>
+  );
+};
+
 // ── Draggable clip ───────────────────────────────────────────────────────────
 
 interface DraggableClipProps {
@@ -210,14 +255,14 @@ interface DraggableClipProps {
   onSelect: () => void;
   onMove: (trackIdx: number, clipIdx: number, newStartSec: number) => void;
   onTrim: (trackIdx: number, clipIdx: number, newDurationSec: number) => void;
-  onRequestTakes: (rowIndex: number, x: number, y: number) => void;
+  onContextMenuOpen: (rowIndex: number, x: number, y: number) => void;
   onGainChange: (points: EnvelopePoint[]) => void;
 }
 
 const DraggableClip: React.FC<DraggableClipProps> = ({
   clip, startSec, trackIdx, clipIdx, trackKind, isSelected, pxPerSec,
   audioPath, gainDb, gainEnvelope,
-  onSelect, onMove, onTrim, onRequestTakes, onGainChange,
+  onSelect, onMove, onTrim, onContextMenuOpen, onGainChange,
 }) => {
   const pointerStartX = useRef(0);
   const trimStartLen = useRef(0);
@@ -318,15 +363,23 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
       onPointerMove={handlePointerMove}
       onPointerUp={handlePointerUp}
       onContextMenu={(e) => {
-        // Right-click → open Takes popover for this clip's source row.
+        // Right-click → open the clip context menu at the cursor. The menu's
+        // items dispatch to TakesPopover / SpatializeModal / future actions.
         // Only meaningful for clips derived from a real script row.
         if (clip.row_index == null) return;
         e.preventDefault();
         e.stopPropagation();
-        onRequestTakes(clip.row_index, e.clientX, e.clientY);
+        onContextMenuOpen(clip.row_index, e.clientX, e.clientY);
       }}
-      title="Drag body to move · drag right edge to trim · right-click for takes"
+      title="Drag body to move · drag right edge to trim · right-click for actions"
     >
+      {clip.hasSpatial && (
+        <SpatialIndicator
+          azimuth={clip.spatialAz ?? 0}
+          elevation={clip.spatialEl ?? 0}
+          hasPath={false /* indicator is direction-only; path-vs-static read via tooltip */}
+        />
+      )}
       <div className="clip-label">{clip.label}</div>
       <GainLane
         width={Math.max(1, effectiveWidth)}
@@ -405,6 +458,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [targetLufs, setTargetLufs] = useState<number>(-16);
   // Take family popover anchor — set on right-click of a timeline clip
   const [takesPopover, setTakesPopover] = useState<{ rowIndex: number; x: number; y: number } | null>(null);
+  // Right-click context menu — opens first; menu items dispatch to popover/modal
+  const [clipMenu, setClipMenu] = useState<{ rowIndex: number; x: number; y: number } | null>(null);
+  // Spatial-placement modal (per-row binaural position editor)
+  const [spatializeRow, setSpatializeRow] = useState<number | null>(null);
   // Per-row pending writes — keyed by row index so concurrent edits across rows
   // can't clobber each other. flushAllPendingWrites() drains the map immediately.
   const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
@@ -534,12 +591,18 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           try { return row.gain_envelope ? JSON.parse(row.gain_envelope) : []; }
           catch { return []; }
         })();
+        const hasSpatial = !!(row.spatial_azimuth || row.spatial_path);
+        const spatialAz = hasSpatial ? (parseFloat(row.spatial_azimuth) || 0) : undefined;
+        const spatialEl = hasSpatial ? (parseFloat(row.spatial_elevation) || 0) : undefined;
         map.get(row.track)!.clips.push({
           start: startSec, len: durSec, label, take: 1,
           row_index: rowIndex,
           audioPath: row.file || undefined,
           gainDb,
           gainEnvelope,
+          hasSpatial,
+          spatialAz,
+          spatialEl,
         });
       }
     });
@@ -1233,7 +1296,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
                       onSelect={() => setSelected(`${ti}-${ci}`)}
                       onMove={handleClipMove}
                       onTrim={handleClipTrim}
-                      onRequestTakes={(rowIndex, x, y) => setTakesPopover({ rowIndex, x, y })}
+                      onContextMenuOpen={(rowIndex, x, y) => setClipMenu({ rowIndex, x, y })}
                       onGainChange={(pts) => handleGainEnvelopeChange(ti, ci, pts)}
                     />
                   ))}
@@ -1248,7 +1311,26 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
 
       </div>
 
-      {/* Takes popover — anchored to the right-clicked clip */}
+      {/* Clip context menu — opens on right-click, dispatches to popover/modal */}
+      {clipMenu && (
+        <ClipContextMenu
+          x={clipMenu.x}
+          y={clipMenu.y}
+          hasSpatial={!!(
+            scriptRows[clipMenu.rowIndex]?.spatial_azimuth ||
+            scriptRows[clipMenu.rowIndex]?.spatial_path
+          )}
+          onClose={() => setClipMenu(null)}
+          onShowTakes={() => setTakesPopover({
+            rowIndex: clipMenu.rowIndex,
+            x: clipMenu.x,
+            y: clipMenu.y,
+          })}
+          onSpatialize={() => setSpatializeRow(clipMenu.rowIndex)}
+        />
+      )}
+
+      {/* Takes popover — opened from the context menu's "Show takes" item */}
       {takesPopover && (
         <TakesPopover
           projectId={realProjectId}
@@ -1263,6 +1345,31 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           }}
         />
       )}
+
+      {/* Spatialize modal — opened from the context menu's "Spatialize…" item */}
+      {spatializeRow != null && scriptRows[spatializeRow] && (
+        <SpatializeModal
+          row={scriptRows[spatializeRow]}
+          rowLabel={scriptRowLabel(scriptRows[spatializeRow])}
+          onClose={() => setSpatializeRow(null)}
+          onSave={(azimuth, elevation, path) => {
+            handleUpdateRow(spatializeRow, {
+              spatial_azimuth: azimuth,
+              spatial_elevation: elevation,
+              spatial_path: path,
+            });
+            setSpatializeRow(null);
+          }}
+        />
+      )}
     </div>
   );
 };
+
+// Compose a short human label for the modal header — track + first words of
+// prompt is enough to disambiguate which clip the user is editing.
+function scriptRowLabel(row: ScriptRow): string {
+  const head = row.character || row.track || row.type;
+  const promptHead = (row.prompt ?? "").trim().slice(0, 40);
+  return promptHead ? `${head}: "${promptHead}${row.prompt.length > 40 ? "…" : ""}"` : head;
+}

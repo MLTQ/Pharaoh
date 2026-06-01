@@ -616,4 +616,21 @@ pub struct ScriptRow {
     pub notes: String,
     #[serde(default)]
     pub gain_envelope: String,
+    /// Spatial azimuth in degrees [0, 360). 0 = directly in front of the listener,
+    /// 90 = right, 180 = behind, 270 = left. Empty string = no spatialization
+    /// (clip uses the legacy `pan` field for L/R amplitude panning instead).
+    #[serde(default)]
+    pub spatial_azimuth: String,
+    /// Spatial elevation in degrees [-90, +90]. 0 = ear level, +90 = directly
+    /// above, -90 = directly below. Only meaningful when `spatial_azimuth` is set.
+    #[serde(default)]
+    pub spatial_elevation: String,
+    /// JSON-encoded waypoint trajectory for moving sources, shape:
+    /// `[{t_frac: 0.0, az: 0, el: 0}, {t_frac: 1.0, az: 360, el: 0}, ...]`.
+    /// Empty string = static position (use spatial_azimuth/elevation as the
+    /// fixed point). When non-empty, the render path segments the clip into
+    /// ~100ms chunks, renders each at the interpolated (az, el), and
+    /// acrossfade-concats them back together for a continuous moving source.
+    #[serde(default)]
+    pub spatial_path: String,
 }

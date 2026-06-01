@@ -405,6 +405,9 @@ pub fn blocks_to_rows(
                 emotion: String::new(),
                 notes: format!("id:{}", b.id),
                 gain_envelope: String::new(),
+                spatial_azimuth: String::new(),
+                spatial_elevation: String::new(),
+                spatial_path: String::new(),
             }
         })
         .collect()

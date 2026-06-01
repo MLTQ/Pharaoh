@@ -90,6 +90,14 @@ pub async fn run(args: Vec<String>) -> Result<()> {
                 .map_err(|_| Error::Other(format!("invalid row index: {}", row_index)))?;
             script_update_row(&config, project_id, scene_slug, row_index, rest).await
         }
+        [group, action, project_id, scene_slug, row_index, rest @ ..]
+            if group == "script" && action == "spatialize" =>
+        {
+            let row_index = row_index
+                .parse::<usize>()
+                .map_err(|_| Error::Other(format!("invalid row index: {}", row_index)))?;
+            script_spatialize(&config, project_id, scene_slug, row_index, rest).await
+        }
         [group, action, project_id, fountain_path, rest @ ..]
             if group == "script" && action == "import" =>
         {
@@ -263,6 +271,7 @@ fn usage() -> &'static str {
   pharaoh script fountain-read <project_id> <scene_slug>
   pharaoh script fountain-write <project_id> <scene_slug> <script.fountain|-> [--compile true|false]
   pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
+  pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--clear]
   pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
   pharaoh character list <project_id>
   pharaoh character create <project_id> --name <name> [--description <text>]
@@ -1123,6 +1132,60 @@ async fn script_update_row(
     rest: &[String],
 ) -> Result<()> {
     let fields = parse_flags(rest)?;
+    let projects_dir = PathBuf::from(&config.projects_dir);
+    let row = update_script_row_fields(
+        &script_path(&projects_dir, project_id, scene_slug),
+        row_index,
+        fields,
+    )?;
+    print_json(&row)
+}
+
+/// Set or clear spatial placement on a script row.
+///
+/// Usage:
+///   pharaoh script spatialize <project> <scene> <row> \
+///     [--azimuth 90] [--elevation 0] \
+///     [--path '[{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]'] \
+///     [--clear]
+///
+/// `--clear` blanks all three spatial columns (reverts to legacy `pan`).
+/// Otherwise unspecified flags are left untouched on the row.
+async fn script_spatialize(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    scene_slug: &str,
+    row_index: usize,
+    rest: &[String],
+) -> Result<()> {
+    let clear = rest.iter().any(|a| a == "--clear");
+    let filtered: Vec<String> = rest.iter().filter(|a| a.as_str() != "--clear").cloned().collect();
+    let raw_flags = parse_flags(&filtered)?;
+
+    // Map ergonomic flag names → ScriptRow columns.
+    let mut fields: HashMap<String, String> = HashMap::new();
+    if clear {
+        fields.insert("spatial_azimuth".into(), String::new());
+        fields.insert("spatial_elevation".into(), String::new());
+        fields.insert("spatial_path".into(), String::new());
+    }
+    for (k, v) in raw_flags {
+        match k.as_str() {
+            "azimuth"   | "az" | "spatial_azimuth"   => { fields.insert("spatial_azimuth".into(), v); }
+            "elevation" | "el" | "spatial_elevation" => { fields.insert("spatial_elevation".into(), v); }
+            "path"      | "spatial_path"             => { fields.insert("spatial_path".into(), v); }
+            other => return Err(Error::Other(format!(
+                "unknown flag --{}; expected --azimuth, --elevation, --path, or --clear",
+                other
+            ))),
+        }
+    }
+    if fields.is_empty() {
+        return Err(Error::Other(
+            "no spatial flags given; pass --azimuth, --elevation, --path, or --clear".into(),
+        ));
+    }
+
     let projects_dir = PathBuf::from(&config.projects_dir);
     let row = update_script_row_fields(
         &script_path(&projects_dir, project_id, scene_slug),

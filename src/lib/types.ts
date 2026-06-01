@@ -301,6 +301,30 @@ export interface ScriptRow {
   emotion: string;
   notes: string;
   gain_envelope: string;  // JSON-encoded EnvelopePoint[], empty string = no envelope
+  /**
+   * Spatial azimuth in degrees [0, 360). 0 = directly in front of the listener,
+   * 90 = right, 180 = behind, 270 = left. Empty string = no spatialization
+   * (clip uses the legacy `pan` field for L/R amplitude panning instead).
+   */
+  spatial_azimuth: string;
+  /**
+   * Spatial elevation in degrees [-90, +90]. 0 = ear level, +90 = directly
+   * above, -90 = directly below. Only meaningful when spatial_azimuth is set.
+   */
+  spatial_elevation: string;
+  /**
+   * JSON-encoded waypoint trajectory for moving sources:
+   * `[{t_frac: 0.0, az: 0, el: 0}, {t_frac: 1.0, az: 360, el: 0}, ...]`.
+   * Empty string = static position (use spatial_azimuth/elevation).
+   */
+  spatial_path: string;
+}
+
+/** A single waypoint on a spatial trajectory. */
+export interface SpatialWaypoint {
+  t_frac: number;  // 0..1
+  az: number;      // degrees, 0..360
+  el: number;      // degrees, -90..+90
 }
 
 // ── Asset sidecar ───────────────────────────────────────────────────────────
@@ -450,6 +474,13 @@ export interface MockTrackClip {
   audioPath?: string;   // absolute path to audio file for waveform peaks
   gainDb: number;               // parsed from row.gain_db, default 0
   gainEnvelope: EnvelopePoint[]; // parsed from row.gain_envelope, default []
+  /** True when the source row has spatial_azimuth or spatial_path set —
+   *  used by the timeline clip to render a small compass-rose glyph. */
+  hasSpatial?: boolean;
+  /** Snapshot of the static spatial position so the glyph can show the
+   *  current placement direction without re-reading the row. */
+  spatialAz?: number;
+  spatialEl?: number;
 }
 
 export interface MockTrack {

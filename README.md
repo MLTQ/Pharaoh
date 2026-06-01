@@ -35,6 +35,7 @@ The GUI can run locally while the Python servers run on another machine, as long
 - Audio Upscale page for running AudioSR against already-generated assets through the Post server.
 - Clip Studio for importing long recordings, zooming/cropping, previewing from the crop start, applying gain/filter/normalization, drawing fade envelopes, saving child assets, and sending clips to scene rows.
 - Scene rendering through ffmpeg with script-row placement, gain, fades, pan, and render output.
+- Spatial (binaural) audio placement: right-click any timeline clip → Spatialize… to place it in 3D space around the listener with azimuth + elevation dials, arbitrary waypoint trajectories for moving sources (plane flyby, circling character), and Web Audio HRTF preview. Renders through ffmpeg `sofalizer` with the MIT KEMAR HRTF set (run `./inference/download_sofa.sh` to install) or a pure-ffmpeg ITD+ILD approximation if no SOFA file is present.
 - Headless CLI coverage for project/scene/script/character/asset/generation/composition/post/setup workflows.
 
 ## Prerequisites
@@ -216,9 +217,12 @@ Each scene's `script.csv` uses these columns:
 | `duration_ms` | Clip duration |
 | `gain_db` | Gain adjustment |
 | `fade_in_ms` / `fade_out_ms` | Fade durations |
-| `pan` | Stereo position, `-1.0` to `1.0` |
+| `pan` | Stereo position, `-1.0` to `1.0`. Mutually exclusive with `spatial_azimuth` — when spatial fields are set the renderer ignores `pan`. |
 | `instruct` | Voice direction or generation instruction |
 | `notes` | Stable Fountain block id and notes |
+| `spatial_azimuth` | Binaural azimuth in degrees `[0, 360)`. 0 = front, 90 = right, 180 = back, 270 = left. Empty = no spatial. |
+| `spatial_elevation` | Binaural elevation in degrees `[-90, +90]`. 0 = ear level. |
+| `spatial_path` | JSON waypoint trajectory for moving sources: `[{"t_frac":0,"az":270,"el":0},…]`. Empty = static position. |
 
 `DIRECTION` rows are skipped during generation and rendering.
 
@@ -250,6 +254,9 @@ pharaoh script read <project_id> <scene_slug>
 pharaoh script fountain-read <project_id> <scene_slug>
 pharaoh script fountain-write <project_id> <scene_slug> ./scene.fountain
 pharaoh script update-row <project_id> <scene_slug> 3 --prompt "new line" --instruct "low, afraid"
+pharaoh script spatialize <project_id> <scene_slug> 3 --azimuth 90 --elevation 0
+pharaoh script spatialize <project_id> <scene_slug> 3 --path '[{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]'
+pharaoh script spatialize <project_id> <scene_slug> 3 --clear
 pharaoh script import <project_id> ./episode.fountain --dry-run
 
 # Agent writing/review
@@ -341,6 +348,7 @@ The `pipeline` resource is the agent's primary situational-awareness tool — re
 | `project_status` | Per-scene completion matrix (same as pipeline resource, as a tool) |
 | `read_script` | Script rows as structured JSON |
 | `update_script_row` | Patch a row in `script.csv` |
+| `spatialize_row` | Place a row in 3D binaural space (azimuth/elevation + optional waypoint trajectory) |
 | `generate_tts` | Submit TTS job → `job_id` |
 | `generate_sfx` | Submit SFX job → `job_id` |
 | `generate_music` | Submit music job; `batch_size > 1` fans out multiple seeds for take comparison |

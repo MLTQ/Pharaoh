@@ -337,6 +337,7 @@ const AddRowForm: React.FC<AddRowFormProps> = ({ sceneNo, characters, onAdd, onC
       file: "", start_ms: "", duration_ms: "", loop: "",
       pan: "", gain_db: "", instruct: "", fade_in_ms: "",
       fade_out_ms: "", reverb_send: "", emotion: "", notes: "", gain_envelope: "",
+      spatial_azimuth: "", spatial_elevation: "", spatial_path: "",
     });
   };
 

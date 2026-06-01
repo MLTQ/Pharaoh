@@ -224,6 +224,9 @@ export function blockToRow(
     emotion:        existing?.emotion        ?? "",
     notes:          existing?.notes          ?? "",
     gain_envelope:  existing?.gain_envelope  ?? "",
+    spatial_azimuth:    existing?.spatial_azimuth    ?? "",
+    spatial_elevation:  existing?.spatial_elevation  ?? "",
+    spatial_path:       existing?.spatial_path       ?? "",
   };
 }
 
