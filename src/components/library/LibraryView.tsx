@@ -24,8 +24,12 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
+import { Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList";
+import { CharacterPipeline } from "../characters/CharacterPipeline";
+import { CorpusBuilder } from "../characters/CorpusBuilder";
+import { RvcModelStage } from "../characters/RvcModelStage";
 import {
   listLibraryCharacters,
   getLibraryCharacter,
@@ -37,17 +41,44 @@ import {
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
-import type { Character, LibraryCharacterSummary, PaletteEntry, QaJobStatus } from "../../lib/types";
+import type {
+  Character,
+  LibraryCharacterSummary,
+  PaletteEntry,
+  QaJobStatus,
+  VoicePipelineStage,
+} from "../../lib/types";
 
 // Synthetic "project id" used at every backend path-resolution site so the
 // existing tts/sidecar/corpus commands route to <projects_dir>/_library/
 // instead of an actual project dir. Matches the library bundle layout.
 const LIBRARY_PROJECT_ID = "_library";
 const LIBRARY_PALETTE_ROW = 0;
+const LIBRARY_DESIGN_ROW = 0;
 const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
 
 function libraryPaletteSlug(libraryId: string, emotion: string): string {
   return `__library_palette__${libraryId}__${emotion}`;
+}
+
+function libraryDesignSlug(libraryId: string): string {
+  return `__library_design__${libraryId}`;
+}
+
+type LibraryTab = "voice" | "palette" | "corpus" | "model";
+
+function tabToStage(t: LibraryTab): VoicePipelineStage {
+  if (t === "palette") return 2;
+  if (t === "corpus") return 3;
+  if (t === "model") return 4;
+  return 1;
+}
+
+function stageToTab(s: VoicePipelineStage): LibraryTab {
+  if (s === 2) return "palette";
+  if (s === 3) return "corpus";
+  if (s === 4) return "model";
+  return "voice";
 }
 
 // ── Helpers ────────────────────────────────────────────────────────────────
@@ -98,6 +129,14 @@ export const LibraryView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+
+  // Tab state — full 4-stage pipeline (Pharaoh-37l)
+  const [tab, setTab] = useState<LibraryTab>("voice");
+
+  // Voice Design generation state
+  const [voiceDesignTestLine, setVoiceDesignTestLine] = useState(DEFAULT_TEST_LINE);
+  const [generatingDesign, setGeneratingDesign] = useState(false);
+  const [designGenError, setDesignGenError] = useState<string | null>(null);
 
   // Palette take generation state (Pharaoh-g8z)
   const [paletteTestLine, setPaletteTestLine] = useState(DEFAULT_TEST_LINE);
@@ -335,6 +374,90 @@ export const LibraryView: React.FC = () => {
     }
   };
 
+  // ── Voice Design generation (moved from CharacterDesignerView, library-scoped) ──
+
+  const handleGenerateDesign = async () => {
+    if (!character?.library_id || !projectsDir) return;
+    if (dirty) {
+      setDesignGenError("Save your changes first — generation uses the saved character state.");
+      return;
+    }
+    const desc = character.voice_assignment.base_voice_description?.trim() ?? "";
+    if (!desc) {
+      setDesignGenError("Add a base voice description first.");
+      return;
+    }
+    setGeneratingDesign(true);
+    setDesignGenError(null);
+
+    const slug = libraryDesignSlug(character.library_id);
+    const ts = Date.now();
+    const designDir = `${projectsDir}/_library/characters/${character.library_id}/design`;
+    const outputPath = `${designDir}/voice_${ts}.wav`;
+
+    try {
+      const jobId = await submitTtsVoiceDesign({
+        projectId: LIBRARY_PROJECT_ID,
+        sceneSlug: slug,
+        rowIndex: LIBRARY_DESIGN_ROW,
+        params: {
+          text: voiceDesignTestLine || DEFAULT_TEST_LINE,
+          voice_description: desc,
+          language: "en",
+          seed: Math.floor(Math.random() * 9999),
+          temperature: 0.7,
+          top_p: 0.9,
+          max_new_tokens: 2048,
+          output_path: outputPath,
+        },
+      });
+      addJob({
+        id: jobId,
+        model: "tts",
+        description: `Library voice design · ${character.name}`,
+        status: "pending",
+        progress: 0,
+        eta: "…",
+        started_at: new Date().toISOString(),
+        scene_id: null,
+        scene_slug: slug,
+        row_index: LIBRARY_DESIGN_ROW,
+        output_path: null,
+        peaks: null,
+        qa_status: "unreviewed",
+        error: null,
+      });
+    } catch (e) {
+      setDesignGenError(e instanceof Error ? e.message : "Generation failed");
+    } finally {
+      setGeneratingDesign(false);
+    }
+  };
+
+  const handleSaveDesignAsReference = async (audioPath: string) => {
+    if (!character) return;
+    const transcript = (voiceDesignTestLine || DEFAULT_TEST_LINE).trim();
+    const updated: Character = {
+      ...character,
+      voice_assignment: {
+        ...character.voice_assignment,
+        ref_audio_path: audioPath,
+        ref_transcript: transcript,
+      },
+    };
+    setCharacter(updated);
+    setSaving(true);
+    try {
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleApprovePaletteTake = async (emotion: string, audioPath: string) => {
     if (!character) return;
     const updated: Character = {
@@ -529,8 +652,53 @@ export const LibraryView: React.FC = () => {
               </div>
             )}
 
+            {/* Pipeline stage header — Pharaoh-37l */}
+            {(() => {
+              const approvedPalette = (character.voice_assignment.emotional_palette ?? [])
+                .filter((e) => e.qa_status === "approved");
+              const stage1Done = (character.voice_assignment.base_voice_description ?? "").trim().length > 0;
+              const stage2Done = approvedPalette.length >= 2;
+              const corpusCount = character.voice_assignment.rvc?.corpus_count ?? 0;
+              const corpusDurationMs = character.voice_assignment.rvc?.corpus_duration_ms ?? 0;
+              const corpusTarget = 50;
+              const modelTrained = (character.voice_assignment.rvc?.model_path ?? null) !== null;
+              const rvcEnabled = character.voice_assignment.rvc?.enabled ?? false;
+              const rvcPipelineActive = character.voice_assignment.production_pipeline === "chatterbox+rvc";
+              return (
+                <CharacterPipeline
+                  stage1Done={stage1Done}
+                  stage2Done={stage2Done}
+                  corpusCount={corpusCount}
+                  corpusTarget={corpusTarget}
+                  corpusDurationMs={corpusDurationMs}
+                  modelTrained={modelTrained}
+                  rvcEnabled={rvcEnabled}
+                  rvcPipelineActive={rvcPipelineActive}
+                  onToggleRvcPipeline={(active) => {
+                    const next = active ? "chatterbox+rvc" : "chatterbox";
+                    const rvc = character.voice_assignment.rvc
+                      ? { ...character.voice_assignment.rvc, enabled: active }
+                      : (active ? { model_path: null, index_path: null, pitch_shift: 0, index_rate: 0.5, protect: 0.33, enabled: true, corpus_count: 0, corpus_duration_ms: 0 } : null);
+                    patch((c) => ({
+                      ...c,
+                      voice_assignment: { ...c.voice_assignment, production_pipeline: next, rvc },
+                    }));
+                    if (!active && (tab === "corpus" || tab === "model")) {
+                      setTab("palette");
+                    }
+                  }}
+                  activeStage={tabToStage(tab)}
+                  onSelectStage={(s) => setTab(stageToTab(s))}
+                />
+              );
+            })()}
+
             {/* Body */}
             <div style={{ flex: 1, overflowY: "auto", padding: "20px 24px" }}>
+
+            {/* ── VOICE tab ────────────────────────────────────────────── */}
+            {tab === "voice" && (
+              <>
               {/* Metadata row */}
               <div style={{ marginBottom: 18 }}>
                 <label style={labelStyle}>Description</label>
@@ -567,6 +735,138 @@ export const LibraryView: React.FC = () => {
                 </div>
               </div>
 
+              {/* Voice Design generation */}
+              <div style={{ marginBottom: 18 }}>
+                <label style={labelStyle}>Test line</label>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <input
+                    className="input"
+                    value={voiceDesignTestLine}
+                    onChange={(e) => setVoiceDesignTestLine(e.target.value)}
+                    style={{ flex: 1, fontSize: 12 }}
+                    placeholder="Line to synthesize…"
+                  />
+                  <button
+                    className="btn btn-primary"
+                    onClick={handleGenerateDesign}
+                    disabled={generatingDesign || !character.library_id}
+                    style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
+                  >
+                    {generatingDesign ? "Generating…" : "Generate"}
+                  </button>
+                </div>
+                {designGenError && (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{designGenError}</div>
+                )}
+              </div>
+
+              {(() => {
+                if (!character.library_id) return null;
+                const slug = libraryDesignSlug(character.library_id);
+                const designJobs = [...jobs]
+                  .filter((j) => j.scene_slug === slug && j.row_index === LIBRARY_DESIGN_ROW && j.status === "complete" && j.output_path)
+                  .reverse();
+                const runningDesign = jobs.some((j) => j.scene_slug === slug && (j.status === "running" || j.status === "pending"));
+                return (
+                  <>
+                    {runningDesign && <RunningBadge label="Synthesising voice…" />}
+                    {designJobs.length === 0 && !runningDesign && (
+                      <EmptyTakes label="No takes yet — write a description and generate above." />
+                    )}
+                    {designJobs.length > 0 && (
+                      <TakeList label={`Design takes · ${designJobs.length}`}>
+                        {designJobs.map((job, i) => (
+                          <TakeRow
+                            key={job.id} job={job} index={i}
+                            saveLabel="Save as character voice"
+                            isSaved={character.voice_assignment.ref_audio_path === job.output_path}
+                            onSave={() => job.output_path && handleSaveDesignAsReference(job.output_path)}
+                            onQa={(s) => setQaStatus(job.id, s)}
+                          />
+                        ))}
+                      </TakeList>
+                    )}
+                  </>
+                );
+              })()}
+
+              {/* Reference audio (single-ref fallback) */}
+              <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line-1)" }}>
+                <label style={labelStyle}>Character reference audio</label>
+                <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
+                  Single-ref fallback used when no palette is approved. Approved Voice Design takes save here automatically.
+                </p>
+                {character.voice_assignment.ref_audio_path ? (
+                  <div style={{
+                    display: "flex", alignItems: "center", gap: 10,
+                    padding: "8px 12px", marginBottom: 10,
+                    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
+                    borderRadius: "var(--r)", border: "1px solid var(--line-2)",
+                  }}>
+                    <PlayButton path={character.voice_assignment.ref_audio_path} size={12} />
+                    <Wave width={90} height={16} seed={(character.library_id ?? "x").charCodeAt(0)} count={26} color="var(--tts)" opacity={0.7} />
+                    <span style={{
+                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
+                      color: "var(--fg-3)", overflow: "hidden",
+                      textOverflow: "ellipsis", whiteSpace: "nowrap",
+                    }}>
+                      {character.voice_assignment.ref_audio_path.split("/").pop()}
+                    </span>
+                    <button
+                      className="btn btn-sm"
+                      style={{ color: "var(--sfx)" }}
+                      onClick={() => patch((c) => ({
+                        ...c,
+                        voice_assignment: { ...c.voice_assignment, ref_audio_path: null },
+                      }))}
+                    >clear</button>
+                  </div>
+                ) : (
+                  <div style={{
+                    padding: "10px 12px", marginBottom: 10,
+                    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+                    color: "var(--fg-4)", fontSize: 11, lineHeight: 1.6,
+                  }}>
+                    No reference audio yet. Generate one above, or import a take from another tool.
+                  </div>
+                )}
+
+                <label style={labelStyle}>
+                  Reference transcript{" "}
+                  <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
+                    — optional, helps ICL mode
+                  </span>
+                </label>
+                <input
+                  className="input"
+                  value={character.voice_assignment.ref_transcript ?? ""}
+                  onChange={(e) => patch((c) => ({
+                    ...c,
+                    voice_assignment: { ...c.voice_assignment, ref_transcript: e.target.value },
+                  }))}
+                  style={{ width: "100%", fontSize: 12, marginBottom: 12 }}
+                  placeholder="What is spoken in the reference audio…"
+                />
+
+                <label style={labelStyle}>Voice instructions</label>
+                <textarea
+                  className="input"
+                  value={character.voice_assignment.instruct_default ?? ""}
+                  onChange={(e) => patch((c) => ({
+                    ...c,
+                    voice_assignment: { ...c.voice_assignment, instruct_default: e.target.value },
+                  }))}
+                  rows={2}
+                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
+                  placeholder="Directorial notes pre-filled in the TTS panel for every line…"
+                />
+              </div>
+              </>
+            )}
+
+            {/* ── PALETTE tab ──────────────────────────────────────────── */}
+            {tab === "palette" && (
+              <>
               {/* Palette */}
               <div style={{ marginBottom: 18 }}>
                 <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", marginBottom: 8 }}>
@@ -725,37 +1025,44 @@ export const LibraryView: React.FC = () => {
                   </div>
                 )}
               </div>
+              </>
+            )}
 
-              {/* RVC status (read-only summary) */}
-              <div style={{ marginBottom: 18 }}>
-                <label style={labelStyle}>
-                  RVC model {character.voice_assignment.rvc?.model_path ? "· trained" : "· none"}
-                </label>
-                {character.voice_assignment.rvc?.model_path ? (
-                  <div style={{
-                    padding: "10px 12px",
-                    background: "color-mix(in oklch, var(--st-rendered) 8%, var(--bg-2))",
-                    border: "1px solid color-mix(in oklch, var(--st-rendered) 30%, var(--line-1))",
-                    borderRadius: "var(--r)",
-                    fontSize: 11, color: "var(--fg-3)", lineHeight: 1.6,
-                  }}>
-                    {character.voice_assignment.rvc.model_path.split("/").pop()}
-                    {character.voice_assignment.rvc.index_path && (
-                      <span style={{ color: "var(--fg-4)", marginLeft: 8 }}>+ index</span>
-                    )}
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: "12px 14px",
-                    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                    color: "var(--fg-4)", fontSize: 11.5, lineHeight: 1.6,
-                  }}>
-                    No RVC model. Train one in a project after importing this character.
-                  </div>
-                )}
-              </div>
+            {/* ── CORPUS tab (Pharaoh-37l) ─────────────────────────────── */}
+            {tab === "corpus" && character.library_id && projectsDir && (
+              <CorpusBuilder
+                projectId={LIBRARY_PROJECT_ID}
+                character={character}
+                projectsDir={projectsDir}
+                corpusCount={character.voice_assignment.rvc?.corpus_count ?? 0}
+                corpusDurationMs={character.voice_assignment.rvc?.corpus_duration_ms ?? 0}
+                corpusTarget={50}
+                onCorpusUpdated={() => {
+                  // CorpusBuilder polls its own status internally; nothing
+                  // to refresh in our local state.
+                }}
+              />
+            )}
 
-              {/* Meta footer */}
+            {/* ── MODEL tab (Pharaoh-37l) ──────────────────────────────── */}
+            {tab === "model" && character.library_id && projectsDir && (
+              <RvcModelStage
+                projectId={LIBRARY_PROJECT_ID}
+                character={character}
+                projectsDir={projectsDir}
+                corpusReady={(character.voice_assignment.rvc?.corpus_duration_ms ?? 0) >= 5 * 60 * 1000}
+                onModelTrained={() => {
+                  // Re-fetch the library character so the trained model path
+                  // appears immediately (RvcModelStage finishes training but
+                  // doesn't mutate our local state).
+                  if (selectedId) {
+                    getLibraryCharacter(selectedId).then(setCharacter).catch(() => {});
+                  }
+                }}
+              />
+            )}
+
+            {/* Meta footer */}
               {selectedSummary && (
                 <div style={{
                   marginTop: 24, paddingTop: 12,

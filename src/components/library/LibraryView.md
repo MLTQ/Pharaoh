@@ -1,14 +1,27 @@
 # LibraryView.tsx
 
 ## Purpose
-Character Library — project-independent browser/editor for library characters (Pharaoh-z21). Library bundles live at `<projects_dir>/_library/characters/<library_id>/` and are reusable across episodes via fork-and-pull sync. This view is the home for managing the master copies; in-project edits happen in [CharacterDesignerView](../characters/CharacterDesignerView.md) and flow back via "Save to library".
+Character Library — the **canonical character creation suite** (Pharaoh-37l). Library bundles live at `<projects_dir>/_library/characters/<library_id>/` and are reusable across episodes via fork-and-pull sync. All voice design, palette construction, corpus building, and RVC training happens here; [CharacterDesignerView](../characters/CharacterDesignerView.md) is a read-only per-episode manifest that imports library characters and shows their assigned lines.
 
 ## Components
 
 ### `LibraryView`
-- **Does**: Lists library characters in a left sidebar (driven by `listLibraryCharacters`) and opens a full editor on the right when one is selected. Supports creating empty characters, editing name / description / base voice description, adding palette emotions, generating palette take audio directly into the library bundle (Pharaoh-g8z), approving takes as references, and deleting.
-- **Interacts with**: `tauriCommands::listLibraryCharacters`, `getLibraryCharacter`, `saveLibraryCharacter`, `deleteLibraryCharacter`, `listPaletteTakes`, `submitTtsVoiceDesign`, `useJobStore`, `useProjectStore`.
-- **Rationale**: Library characters are real first-class artifacts now — you can design and refine a character entirely in the library without ever creating a project. Corpus building + RVC training are still deferred — those workflows are infrequent and fit cleanly behind import-to-project + push-back.
+- **Does**: Lists library characters in a left sidebar and opens a full 4-stage pipeline editor on the right when one is selected. Tabs map to the same `VoicePipelineStage` enum the project view uses (Voice / Palette / Corpus / Model) so users see one consistent pipeline shape regardless of where they're editing.
+- **Interacts with**: `CharacterPipeline`, `CorpusBuilder`, `RvcModelStage`, `tauriCommands::listLibraryCharacters` / `getLibraryCharacter` / `saveLibraryCharacter` / `deleteLibraryCharacter` / `listPaletteTakes` / `submitTtsVoiceDesign`, `useJobStore`, `useProjectStore`.
+- **Rationale**: Resolves the two-editors-for-same-data confusion in the original Cast+Library split. One editor, one place to learn the pipeline, one place where audio generation happens.
+
+### Voice tab (stage 1)
+- **Does**: Description + base voice description + Voice Design take generation + single-ref upload + reference transcript + voice instructions.
+- **Rationale**: Subsumes the editor surface that used to live in CharacterDesignerView's "Voice Design" tab.
+
+### Palette tab (stage 2)
+- **Does**: Add emotions + generate per-emotion palette takes + approve as reference. Unchanged from Pharaoh-g8z.
+
+### Corpus tab (stage 3)
+- **Does**: Drops in `CorpusBuilder` with `projectId="_library"`. The component is project-store-independent — it takes `projectId + character + projectsDir + onCorpusUpdated` as props and routes all backend calls through the synthetic library project id.
+
+### Model tab (stage 4)
+- **Does**: Drops in `RvcModelStage` similarly. Re-fetches the library character via `getLibraryCharacter` after training completes so the trained model path appears in the UI immediately.
 
 ### Synthetic `LIBRARY_PROJECT_ID = "_library"`
 - **Does**: Routes every backend path-resolution site (`<projects_dir>/<project_id>/characters/<character_id>/...`) into the library bundle (`<projects_dir>/_library/characters/<library_id>/...`) without modifying any existing command.
