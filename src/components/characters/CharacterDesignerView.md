@@ -1,24 +1,23 @@
 # CharacterDesignerView.tsx
 
 ## Purpose
-Cast and voice-design workspace for creating characters, testing generated voices, and saving clone references. It owns character-level TTS probes that are separate from scene `script.csv` rows.
+Per-episode **Cast manifest** (Pharaoh-8xu) — a read-only browser of who's in this episode and what they say. The full character editor (Voice / Palette / Corpus / Model) lives in [LibraryView](../library/LibraryView.md); this view is for project-scoped concerns: roster, library linkage / drift, and the per-character line list across scenes.
 
 ## Components
-
-### `handleGenerateDesign`
-- **Does**: Submits a Voice Design job (Qwen3 from a text prompt) and pushes the returned job into the frontend queue.
-- **Interacts with**: `submitTtsVoiceDesign` in `tauriCommands.ts`, `jobStore.ts`.
-- **Rationale**: Uses a synthetic `__char__{id}` scene slug so character takes do not collide with scene generation takes. The legacy "Clone" tab and its `handleGenerateClone` test-clone button were removed in Pharaoh-pr1 — the Voice Design output is the single Stage-1 generator; single-ref upload is folded in below as a fallback.
 
 ### `deriveVoiceBadge`
 - **Does**: Pure derivation of the UI mode badge ("Chatterbox + RVC" / "Chatterbox" / "Reference" / "Voice Design" / "Empty") from data shape, replacing the overloaded legacy `model` enum.
 - **Interacts with**: sidebar chip, detail header chip, right-meta "Mode" section.
 - **Rationale**: The `VoiceAssignment.model` field is retained for back-compat reads but no longer drives the UI — `production_pipeline`, palette state, and ref presence are the real source. Lets us delete the enum cleanly when MCP no longer writes it.
 
-### Pipeline RVC gate (`rvcPipelineActive`, `onToggleRvcPipeline`)
-- **Does**: Computes `rvcPipelineActive` from `voice_assignment.production_pipeline === "chatterbox+rvc"` and passes it to `CharacterPipeline`. When false, Corpus + Model chips are hidden; an "+ RVC pipeline" toggle replaces them.
-- **Interacts with**: `CharacterPipeline.tsx`, `saveVoice` (writes both `production_pipeline` and mirrors to `rvc.enabled` for back-compat).
-- **Rationale**: Pharaoh-9sx — RVC is now opt-in per character. The default Chatterbox-only pipeline is cleaner and the optional Corpus/Model stages don't clutter the editor for characters that don't need consistency-locking. If the user is sitting on a hidden tab (corpus/model) when the toggle flips off, the active tab bounces back to Palette.
+### Lines manifest (Pharaoh-8xu)
+- **Does**: For the active character, loads every scene's `script.csv` via `readScript`, filters rows whose `character` column matches the character's id or name, groups by scene, renders a list with prompt + emotion + render-state dot + play button when rendered.
+- **Interacts with**: `tauriCommands::readScript`, `realScenes` from `projectStore`, `PlayButton`.
+- **Rationale**: Cast is now answering "who's in this episode and what do they say?" — not "how is this character designed?" The line list makes that role explicit and gives the user a quick scan of unresolved vs rendered dialogue per character.
+
+### Open-in-Library CTA (`setView("library")`)
+- **Does**: Sidebar/header button on every character that switches the active view to the Character Library. Labelled "Open in Library →" for library-linked characters or "Design voice in Library →" for project-only ones.
+- **Rationale**: All voice editing happens in the Library now. The CTA is the discoverable bridge.
 
 ### `submitting`
 - **Does**: Tracks the gap between button click and returned job id so the page shows work-in-progress even before normal job events arrive.

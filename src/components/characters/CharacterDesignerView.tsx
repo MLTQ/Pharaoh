@@ -1,22 +1,38 @@
-import React, { useState, useEffect, useMemo, useRef } from "react";
-import { Wave } from "../shared/atoms";
+import React, { useState, useEffect, useMemo } from "react";
 import { PlayButton } from "../shared/PlayButton";
-import { TakeRow, TakeList, RunningBadge, EmptyTakes } from "../shared/TakeList";
-import { RecordTakePanel } from "./RecordTakePanel";
-import { CharacterPipeline } from "./CharacterPipeline";
-import { CorpusBuilder } from "./CorpusBuilder";
-import { RvcModelStage } from "./RvcModelStage";
 import { useProjectStore } from "../../store/projectStore";
-import { useJobStore } from "../../store/jobStore";
+import { useUiStore } from "../../store/uiStore";
 import {
-  listGeneratedAudioAssets,
-  listPaletteTakes,
-  submitTtsVoiceDesign,
   listLibraryCharacters,
   importCharacterFromLibrary,
   saveCharacterToLibrary,
   pullCharacterFromLibrary,
+  readScript,
 } from "../../lib/tauriCommands";
+import type { Character, LibraryCharacterSummary, ScriptRow } from "../../lib/types";
+
+// ── Cast manifest types (Pharaoh-8xu) ──────────────────────────────────────
+//
+// The Cast view is a per-episode manifest: read-only character summary plus
+// the lines this character speaks across all scenes. Voice/Palette/Corpus/
+// Model editing all happens in the Character Library.
+
+interface LineEntry {
+  sceneSlug: string;
+  sceneTitle: string;
+  sceneIndex: number;
+  rowIndex: number;
+  prompt: string;
+  emotion: string;
+  file: string;
+  durationMs: string;
+}
+
+const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
+
+function newCharId() {
+  return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
+}
 
 // ── Voice badge derivation ─────────────────────────────────────────────────
 //
@@ -37,173 +53,43 @@ function deriveVoiceBadge(c: Character): { label: string; tone: "tts" | "fg" } {
   if (hasDesign) return { label: "Voice Design", tone: "tts" };
   return { label: "Empty", tone: "fg" };
 }
-import type { PaletteTakeFile } from "../../lib/tauriCommands";
-import { usePeaksStore } from "../../store/peaksStore";
-import type { Character, GeneratedAudioAsset, LibraryCharacterSummary, PaletteEntry, VoicePipelineStage } from "../../lib/types";
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const CHAR_HUE = (id: string) => (id.charCodeAt(0) * 13) % 360;
-const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
-
-const charSceneSlug    = (charId: string) => `__char__${charId}`;
-const paletteSceneSlug = (charId: string, emotion: string) => `__palette__${charId}__${emotion}`;
-const DESIGN_ROW = 0;
-const PALETTE_ROW = 0; // one row per palette scene slug
-
-function newCharId() {
-  return "CHAR_" + Math.random().toString(36).slice(2, 8).toUpperCase();
-}
-
-// ── File picker ────────────────────────────────────────────────────────────
-
-async function pickAudioFile(): Promise<string | null> {
-  try {
-    const { open } = await import("@tauri-apps/plugin-dialog");
-    const result = await open({
-      multiple: false,
-      filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac"] }],
-    });
-    return typeof result === "string" ? result : null;
-  } catch {
-    return null; // browser / no dialog plugin — caller falls back to file input
-  }
-}
-
-// ── Main component ─────────────────────────────────────────────────────────
-
-// Each DesignTab maps 1:1 to a VoicePipelineStage. The legacy "clone" sub-tab
-// was removed in Pharaoh-pr1 — reference upload now lives inline under the
-// design tab.
-type DesignTab = "design" | "palette" | "corpus" | "model";
-
-function tabToStage(t: DesignTab): VoicePipelineStage {
-  if (t === "palette") return 2;
-  if (t === "corpus")  return 3;
-  if (t === "model")   return 4;
-  return 1;
-}
-
-function stageToTab(s: VoicePipelineStage): DesignTab {
-  if (s === 2) return "palette";
-  if (s === 3) return "corpus";
-  if (s === 4) return "model";
-  return "design";
-}
 
 export const CharacterDesignerView: React.FC = () => {
   const {
     characters, selectedCharId,
     setSelectedChar, addCharacter, removeCharacter,
-    updateCharacter, updateVoiceAssignment,
-    realProjectId, projectsDir,
+    updateCharacter,
+    realProjectId,
     reloadProjectFromDisk,
+    realScenes,
   } = useProjectStore();
-  const { jobs, addJob, setQaStatus } = useJobStore();
+  const setView = useUiStore((s) => s.setView);
 
   const char = characters.find((c) => c.id === selectedCharId) ?? characters[0];
 
-  const [tab, setTab] = useState<DesignTab>("design");
-  const [localName, setLocalName]         = useState(char?.name ?? "");
-  const [localDesc, setLocalDesc]         = useState(char?.description ?? "");
-  // base_voice_description: the full VoiceDesign identity prompt, shared across all palette takes
-  const [voiceDesc, setVoiceDesc]         = useState(char?.voice_assignment.base_voice_description ?? "");
-  const [testLine, setTestLine]           = useState(DEFAULT_TEST_LINE);
-  const [instruct, setInstruct]           = useState(char?.voice_assignment.instruct_default ?? "");
-  const [refTranscript, setRefTranscript] = useState(char?.voice_assignment.ref_transcript ?? "");
-  const [generating, setGenerating]       = useState(false);
-  const [submitting, setSubmitting]       = useState<DesignTab | null>(null);
-  const [genError, setGenError]           = useState<string | null>(null);
-  const [newName, setNewName]             = useState("");
-  // Cast + button now opens a modal that offers two paths: import from library
-  // or new project-only character.
+  const [localName, setLocalName] = useState(char?.name ?? "");
+  const [localDesc, setLocalDesc] = useState(char?.description ?? "");
+  const [newName, setNewName] = useState("");
+  // Cast + button opens a modal: import from library or new project-only character.
   const [castModalOpen, setCastModalOpen] = useState(false);
   const [castModalMode, setCastModalMode] = useState<"choose" | "import" | "new">("choose");
   const [librarySummaries, setLibrarySummaries] = useState<LibraryCharacterSummary[]>([]);
   const [libraryLoading, setLibraryLoading] = useState(false);
-  const [importing, setImporting]         = useState<string | null>(null);
+  const [importing, setImporting] = useState<string | null>(null);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [pullingFromLibrary, setPullingFromLibrary] = useState(false);
-  const [referenceAssets, setReferenceAssets] = useState<GeneratedAudioAsset[]>([]);
-  const [referencePeaks, setReferencePeaks] = useState<Record<string, number[]>>({});
-  const fileInputRef = useRef<HTMLInputElement>(null);
 
-  // ── Palette state ──
-  const [paletteEntries, setPaletteEntries] = useState<PaletteEntry[]>(
-    char?.voice_assignment.emotional_palette ?? []
-  );
-  const [addingEmotion, setAddingEmotion]         = useState(false);
-  const [newEmotionKey, setNewEmotionKey]         = useState("");
-  const [newEmotionLabel, setNewEmotionLabel]     = useState("");
-  const [newEmotionDirection, setNewEmotionDirection] = useState("");
-  const [paletteTestLine, setPaletteTestLine]     = useState(DEFAULT_TEST_LINE);
-  const [expandedEmotion, setExpandedEmotion]     = useState<string | null>(null);
-  const [paletteGenError, setPaletteGenError]     = useState<string | null>(null);
-  // Which emotion slot (if any) has the RecordTakePanel open
-  const [recordingForEmotion, setRecordingForEmotion] = useState<string | null>(null);
-  // Disk-scanned palette takes (generated by MCP or other tools outside the job store)
-  const [paletteDiskTakes, setPaletteDiskTakes]   = useState<Record<string, PaletteTakeFile[]>>({});
+  // Lines manifest: rows from every scene's script.csv where this character speaks.
+  const [lines, setLines] = useState<LineEntry[]>([]);
 
+  // Sync header inputs when the active character switches.
   useEffect(() => {
     if (!char) return;
     setLocalName(char.name);
     setLocalDesc(char.description);
-    setVoiceDesc(char.voice_assignment.base_voice_description ?? "");
-    setInstruct(char.voice_assignment.instruct_default ?? "");
-    setRefTranscript(char.voice_assignment.ref_transcript ?? "");
-    setPaletteEntries(char.voice_assignment.emotional_palette ?? []);
-    setGenError(null);
-    setPaletteGenError(null);
-    setAddingEmotion(false);
-    // Default to Palette tab once at least one palette ref is approved; otherwise
-    // the user is still designing the base voice. Replaces the legacy `model`-
-    // enum-driven branching now that the Clone tab is gone.
-    const hasApprovedPalette = (char.voice_assignment.emotional_palette ?? [])
-      .some((e) => e.qa_status === "approved");
-    setTab(hasApprovedPalette ? "palette" : "design");
   }, [char?.id]);
 
-  // ── Jobs ──
-  const slug = char ? charSceneSlug(char.id) : "";
-
-  const designJobs = useMemo(() =>
-    [...jobs]
-      .filter((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && j.status === "complete" && j.output_path)
-      .reverse(),
-    [jobs, slug]
-  );
-
-  const runningDesign = submitting === "design" || jobs.some((j) => j.scene_slug === slug && j.row_index === DESIGN_ROW && (j.status === "running" || j.status === "pending"));
-
-  useEffect(() => {
-    if (!realProjectId) {
-      setReferenceAssets([]);
-      return;
-    }
-    listGeneratedAudioAssets(realProjectId)
-      .then((assets) => setReferenceAssets(assets.filter((asset) => {
-        const model = asset.model.toLowerCase();
-        return asset.kind === "tts" || model.includes("reference");
-      })))
-      .catch(() => setReferenceAssets([]));
-  }, [realProjectId, jobs]);
-
-  const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
-  useEffect(() => {
-    for (const asset of referenceAssets.slice(0, 12)) {
-      if (referencePeaks[asset.audio_path]) continue;
-      fetchPeaks(asset.audio_path, 80)
-        .then((peaks) => setReferencePeaks((prev) => ({ ...prev, [asset.audio_path]: peaks })))
-        .catch(() => {});
-    }
-  }, [referenceAssets, referencePeaks, fetchPeaks]);
-
-  // Fetch library summaries so we can:
-  //   - show drift dots on sidebar character chips when project version <
-  //     library version
-  //   - populate the "import from library" modal without an extra fetch
-  // Refreshed on mount and whenever the character list changes (a save-to-library
-  // bumps the library_version of the saved entry, and we want the dot to clear).
+  // Library summaries — used for both drift detection and the import modal.
   const refreshLibrary = React.useCallback(async () => {
     setLibraryLoading(true);
     try {
@@ -217,7 +103,6 @@ export const CharacterDesignerView: React.FC = () => {
   }, []);
   useEffect(() => { refreshLibrary(); }, [refreshLibrary, characters.length]);
 
-  // library_id → current library_version. Used for drift detection.
   const libraryVersionMap = useMemo(() => {
     const m = new Map<string, string>();
     for (const s of librarySummaries) m.set(s.library_id, s.library_version);
@@ -231,205 +116,62 @@ export const CharacterDesignerView: React.FC = () => {
     return remote !== c.library_version;
   };
 
-  // Refresh disk-scanned takes for all palette entries whenever the palette tab is
-  // visible or when a new emotion is expanded. Catches MCP-generated takes that
-  // bypass the in-memory job store.
-  useEffect(() => {
-    if (tab !== "palette" || !char || !realProjectId) return;
-    const entries = char.voice_assignment.emotional_palette ?? [];
-    Promise.all(
-      entries.map((e) =>
-        listPaletteTakes({ projectId: realProjectId, characterId: char.id, emotion: e.emotion })
-          .then((files) => ({ emotion: e.emotion, files }))
-          .catch(() => ({ emotion: e.emotion, files: [] as PaletteTakeFile[] }))
-      )
-    ).then((results) => {
-      const map: Record<string, PaletteTakeFile[]> = {};
-      for (const { emotion, files } of results) map[emotion] = files;
-      setPaletteDiskTakes(map);
-    });
-  }, [tab, char?.id, realProjectId, paletteEntries.length]);
+  // ── Lines manifest (Pharaoh-8xu) ──────────────────────────────────────────
+  //
+  // Reads every scene's script.csv and filters by character. Refreshes on
+  // active character change.
 
-  // ── Helpers ──
+  useEffect(() => {
+    if (!char || !realProjectId || !realScenes || realScenes.length === 0) {
+      setLines([]);
+      return;
+    }
+    const charNameUpper = char.name.toUpperCase();
+    let cancelled = false;
+    Promise.all(
+      realScenes.map((scene) =>
+        readScript({ projectId: realProjectId, sceneSlug: scene.slug })
+          .then((rows) =>
+            rows
+              .map((row, rowIndex) => ({ row, rowIndex }))
+              .filter(({ row }) => {
+                if (row.type !== "DIALOGUE") return false;
+                const speaker = (row.character ?? "").trim();
+                return speaker === char.id || speaker.toUpperCase() === charNameUpper;
+              })
+              .map(({ row, rowIndex }): LineEntry => ({
+                sceneSlug: scene.slug,
+                sceneTitle: scene.title,
+                sceneIndex: scene.index,
+                rowIndex,
+                prompt: row.prompt,
+                emotion: (row as ScriptRow & { emotion?: string }).emotion ?? "",
+                file: row.file,
+                durationMs: row.duration_ms,
+              }))
+          )
+          .catch(() => [] as LineEntry[])
+      )
+    ).then((perScene) => {
+      if (!cancelled) {
+        const flat = perScene
+          .flat()
+          .sort((a, b) =>
+            a.sceneIndex === b.sceneIndex
+              ? a.rowIndex - b.rowIndex
+              : a.sceneIndex - b.sceneIndex,
+          );
+        setLines(flat);
+      }
+    });
+    return () => { cancelled = true; };
+  }, [char?.id, char?.name, realProjectId, realScenes]);
+
+  // ── Header sync ──
 
   const saveCharMeta = () => {
     if (!char) return;
     updateCharacter(char.id, { name: localName, description: localDesc });
-  };
-
-  const saveVoice = (patch: Partial<Character["voice_assignment"]>) => {
-    if (!char) return;
-    updateVoiceAssignment(char.id, patch);
-  };
-
-  const outputPath = (suffix: string) => {
-    const ts = Date.now();
-    return realProjectId && projectsDir
-      ? `${projectsDir}/${realProjectId}/characters/${char!.id}/${suffix}_${ts}.wav`
-      : `/tmp/pharaoh_${char!.id}_${suffix}_${ts}.wav`;
-  };
-
-  const pushJob = (jobId: string, rowIndex: number, description: string) => {
-    addJob({
-      id: jobId, model: "tts", description, status: "pending",
-      progress: 0, eta: "…", started_at: new Date().toISOString(),
-      scene_id: null, scene_slug: slug, row_index: rowIndex,
-      output_path: null, peaks: null, qa_status: "unreviewed", error: null,
-    });
-  };
-
-  // ── Palette helpers ──
-
-  const savePalette = (entries: PaletteEntry[]) => {
-    setPaletteEntries(entries);
-    saveVoice({ emotional_palette: entries });
-  };
-
-  const handleAddEmotion = () => {
-    const key = newEmotionKey.trim().toLowerCase().replace(/\s+/g, "_");
-    if (!key) return;
-    if (paletteEntries.some((e) => e.emotion === key)) {
-      setPaletteGenError(`Emotion "${key}" already exists.`);
-      return;
-    }
-    const entry: PaletteEntry = {
-      emotion: key,
-      label: newEmotionLabel.trim() || key.charAt(0).toUpperCase() + key.slice(1),
-      direction: newEmotionDirection.trim(),
-      ref_audio_path: null,
-      ref_transcript: null,
-      qa_status: "unreviewed",
-    };
-    const next = [...paletteEntries, entry];
-    savePalette(next);
-    setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDirection("");
-    setAddingEmotion(false);
-    setExpandedEmotion(key);
-    setPaletteGenError(null);
-  };
-
-  const handleRemoveEmotion = (emotion: string) => {
-    if (!window.confirm(`Remove "${emotion}" from the palette?`)) return;
-    savePalette(paletteEntries.filter((e) => e.emotion !== emotion));
-  };
-
-  const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
-    if (!char) return;
-    const baseDesc = (char.voice_assignment.base_voice_description ?? "").trim();
-    if (!baseDesc) {
-      setPaletteGenError("Set the character's base voice description in the Voice Design tab first.");
-      return;
-    }
-    // Combine base identity + emotional direction into one VoiceDesign instruct
-    const fullInstruct = entry.direction.trim()
-      ? `${baseDesc} ${entry.direction.trim()}`
-      : baseDesc;
-    setPaletteGenError(null);
-    const emotionSlug = paletteSceneSlug(char.id, entry.emotion);
-    const seed = Math.floor(Math.random() * 9999);
-    const ts = Date.now();
-    const palDir = realProjectId && projectsDir
-      ? `${projectsDir}/${realProjectId}/characters/${char.id}/palette`
-      : "/tmp";
-    const out = `${palDir}/${entry.emotion}_${seed}_${ts}.wav`;
-    try {
-      const jobId = await submitTtsVoiceDesign({
-        projectId: realProjectId ?? "demo",
-        sceneSlug: emotionSlug,
-        rowIndex: PALETTE_ROW,
-        params: {
-          text: paletteTestLine || DEFAULT_TEST_LINE,
-          voice_description: fullInstruct,
-          language: "en", seed,
-          temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
-          output_path: out,
-        },
-      });
-      addJob({
-        id: jobId, model: "tts",
-        description: `Palette · ${char.name} · ${entry.label}`,
-        status: "pending", progress: 0, eta: "…",
-        started_at: new Date().toISOString(),
-        scene_id: null, scene_slug: emotionSlug, row_index: PALETTE_ROW,
-        output_path: null, peaks: null, qa_status: "unreviewed", error: null,
-      });
-    } catch (e: unknown) {
-      setPaletteGenError(e instanceof Error ? e.message : "Generation failed");
-    }
-  };
-
-  // Called when RecordTakePanel finishes recording.  The WAV is already at
-  // outputPath; trigger a disk-take rescan so it appears in the TakeList.
-  const handleRecordDone = (emotion: string, _outputPath: string, _durationMs: number) => {
-    setRecordingForEmotion(null);
-    // Force a rescan of disk takes for this emotion
-    if (!char || !realProjectId) return;
-    listPaletteTakes({ projectId: realProjectId, characterId: char.id, emotion })
-      .then((files) => setPaletteDiskTakes((prev) => ({ ...prev, [emotion]: files })))
-      .catch(() => {});
-  };
-
-  const handlePromotePaletteTake = (emotion: string, audioPath: string) => {
-    const next = paletteEntries.map((e) =>
-      e.emotion === emotion
-        ? { ...e, ref_audio_path: audioPath, qa_status: "approved" as const }
-        : e
-    );
-    savePalette(next);
-    // Promote model to Chatterbox once first reference is approved
-    saveVoice({ model: "Chatterbox", emotional_palette: next });
-  };
-
-  // ── Generation ──
-
-  const handleGenerateDesign = async () => {
-    if (!char || generating || !voiceDesc.trim()) {
-      if (!voiceDesc.trim()) setGenError("Add a base voice description first.");
-      return;
-    }
-    // Persist the description before generating so it's available for palette takes
-    saveVoice({ base_voice_description: voiceDesc });
-    setGenerating(true); setSubmitting("design"); setGenError(null);
-    try {
-      const jobId = await submitTtsVoiceDesign({
-        projectId: realProjectId ?? "demo",
-        sceneSlug: slug, rowIndex: DESIGN_ROW,
-        params: {
-          text: testLine || DEFAULT_TEST_LINE,
-          voice_description: voiceDesc.trim(),
-          language: "en", seed: Math.floor(Math.random() * 9999),
-          temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
-          output_path: outputPath("design"),
-        },
-      });
-      pushJob(jobId, DESIGN_ROW, `Voice design · ${char.name}`);
-    } catch (e: unknown) {
-      setGenError(e instanceof Error ? e.message : "Generation failed — is the TTS server running?");
-    } finally {
-      setSubmitting(null);
-      setGenerating(false);
-    }
-  };
-
-  // ── File upload ──
-
-  const handlePickFile = async () => {
-    const path = await pickAudioFile();
-    if (path) {
-      saveVoice({ ref_audio_path: path });
-    } else {
-      // Fallback: trigger hidden file input (browser/demo mode)
-      fileInputRef.current?.click();
-    }
-  };
-
-  const handleFileInputChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    // In browser mode we only get a fake path; store the name as a placeholder
-    const fakePath = `/uploads/${file.name}`;
-    saveVoice({ ref_audio_path: fakePath });
-    e.target.value = "";
   };
 
   // ── Character CRUD ──
@@ -546,15 +288,6 @@ export const CharacterDesignerView: React.FC = () => {
 
   return (
     <div style={{ display: "flex", height: "100%", overflow: "hidden" }}>
-
-      {/* hidden file input fallback */}
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept=".wav,.mp3,.aac,.ogg,.flac"
-        style={{ display: "none" }}
-        onChange={handleFileInputChange}
-      />
 
       {/* ── Character list ──────────────────────────────────────────────── */}
       <div style={{
@@ -821,520 +554,175 @@ export const CharacterDesignerView: React.FC = () => {
           </div>
         )}
 
-        {/* Pipeline stage header — replaces flat tab bar */}
-        {(() => {
-          const approvedPalette = paletteEntries.filter((e) => e.qa_status === "approved");
-          const stage1Done = (char.voice_assignment.base_voice_description ?? "").trim().length > 0;
-          const stage2Done = approvedPalette.length >= 2;
-          const corpusCount = char.voice_assignment.rvc?.corpus_count ?? 0;
-          const corpusDurationMs = char.voice_assignment.rvc?.corpus_duration_ms ?? 0;
-          const corpusTarget = 50;
-          const modelTrained = (char.voice_assignment.rvc?.model_path ?? null) !== null;
-          const rvcEnabled = char.voice_assignment.rvc?.enabled ?? false;
-          const rvcPipelineActive = char.voice_assignment.production_pipeline === "chatterbox+rvc";
-          return (
-            <CharacterPipeline
-              stage1Done={stage1Done}
-              stage2Done={stage2Done}
-              corpusCount={corpusCount}
-              corpusTarget={corpusTarget}
-              corpusDurationMs={corpusDurationMs}
-              modelTrained={modelTrained}
-              rvcEnabled={rvcEnabled}
-              rvcPipelineActive={rvcPipelineActive}
-              onToggleRvcPipeline={(active) => {
-                // Persist the toggle as production_pipeline; mirror it to
-                // rvc.enabled for back-compat with any code still reading the
-                // legacy nested flag.
-                const next = active ? "chatterbox+rvc" : "chatterbox";
-                const rvc = char.voice_assignment.rvc
-                  ? { ...char.voice_assignment.rvc, enabled: active }
-                  : (active ? { model_path: null, index_path: null, pitch_shift: 0, index_rate: 0.5, protect: 0.33, enabled: true, corpus_count: 0, corpus_duration_ms: 0 } : null);
-                saveVoice({ production_pipeline: next, rvc });
-                // If the user was on a now-hidden tab, bounce back to Palette.
-                if (!active && (tab === "corpus" || tab === "model")) {
-                  setTab("palette");
-                }
-              }}
-              activeStage={tabToStage(tab)}
-              onSelectStage={(s) => setTab(stageToTab(s))}
-            />
-          );
-        })()}
-
-        {/* Tab body */}
+        {/* ── Character summary + Lines manifest (Pharaoh-8xu) ─────────────────
+            Cast view is now read-only. Voice design / palette / corpus / RVC
+            editing all happens in the Character Library. */}
         <div style={{ flex: 1, padding: "20px 24px", overflowY: "auto" }}>
 
-          {/* ── VOICE DESIGN ─────────────────────────────────────────────── */}
-          {tab === "design" && (
-            <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
-                Describe this character's core vocal identity — timbre, age, accent, pacing. This
-                is saved as the character's foundation and prepended to each emotional direction
-                when generating Emotional Palette takes.
-              </p>
-
-              <div style={{ marginBottom: 14 }}>
-                <label style={labelStyle}>
-                  Base voice description
-                  {paletteEntries.length > 0 && (
-                    <span style={{
-                      color: "var(--tts)", fontWeight: 400,
-                      textTransform: "none", letterSpacing: 0, marginLeft: 6,
-                    }}>
-                      — shared with palette
-                    </span>
-                  )}
-                </label>
-                <textarea
-                  className="input"
-                  value={voiceDesc}
-                  onChange={(e) => setVoiceDesc(e.target.value)}
-                  onBlur={() => saveVoice({ base_voice_description: voiceDesc })}
-                  rows={3}
-                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="e.g. Burnished alto, mid-40s American, slight vocal roughness. Controlled, forensic cadence. Understates emotion."
-                />
-              </div>
-
-              <div style={{ marginBottom: 16 }}>
-                <label style={labelStyle}>Test line</label>
-                <div style={{ display: "flex", gap: 8 }}>
-                  <input
-                    className="input"
-                    value={testLine}
-                    onChange={(e) => setTestLine(e.target.value)}
-                    style={{ flex: 1, fontSize: 12 }}
-                    placeholder="Line to synthesize…"
-                  />
-                  <button
-                    className="btn btn-primary"
-                    onClick={handleGenerateDesign}
-                    disabled={generating}
-                    style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
-                  >
-                    {generating ? "Generating…" : "Generate"}
-                  </button>
-                </div>
-                {genError && <div style={errorStyle}>{genError}</div>}
-              </div>
-
-              {runningDesign && <RunningBadge label="Synthesising voice…" />}
-
-              {designJobs.length > 0 && (
-                <TakeList label={`Design takes · ${designJobs.length}`}>
-                  {designJobs.map((job, i) => (
-                    <TakeRow
-                      key={job.id} job={job} index={i}
-                      saveLabel="Save as character voice"
-                      isSaved={refPath === job.output_path}
-                      onSave={() => {
-                        const transcript = (testLine || DEFAULT_TEST_LINE).trim();
-                        saveVoice({
-                          ref_audio_path: job.output_path,
-                          ref_transcript: transcript,
-                          base_voice_description: voiceDesc,
-                        });
-                        setRefTranscript(transcript);
-                      }}
-                      onQa={(s) => setQaStatus(job.id, s)}
-                    />
-                  ))}
-                </TakeList>
+          {/* Summary card */}
+          <div style={{
+            display: "flex", flexDirection: "column", gap: 10,
+            padding: "12px 14px", marginBottom: 18,
+            background: "var(--bg-1)",
+            border: "1px solid var(--line-1)", borderRadius: "var(--r)",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, fontSize: 11 }}>
+              <span style={{
+                fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em",
+                color: "var(--fg-4)", textTransform: "uppercase",
+              }}>Voice mode</span>
+              <span style={{ color: "var(--tts)", fontWeight: 500 }}>
+                {deriveVoiceBadge(char).label}
+              </span>
+              {char.voice_assignment.ref_audio_path ? (
+                <span style={{ color: "var(--st-rendered)", fontSize: 10 }}>✓ reference set</span>
+              ) : (
+                <span style={{ color: "var(--fg-4)", fontSize: 10 }}>no reference</span>
               )}
-
-              {designJobs.length === 0 && !runningDesign && (
-                <EmptyTakes label="No takes yet — write a description and generate above." />
-              )}
-
-              {/* ── Character reference audio (folded in from legacy Clone tab) ── */}
-              <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line-1)" }}>
-                <label style={labelStyle}>Character reference audio</label>
-                <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
-                  Single-ref fallback used when no palette is approved.
-                  Approved Voice Design takes save here automatically; you can
-                  also upload an external clip.
-                </p>
-                {refPath ? (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "8px 12px", marginBottom: 10,
-                    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                    borderRadius: "var(--r)", border: "1px solid var(--line-2)",
-                  }}>
-                    <PlayButton path={refPath} size={12} />
-                    <Wave width={90} height={16} seed={char.id.charCodeAt(0)} count={26} color="var(--tts)" opacity={0.7} />
-                    <span style={{
-                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
-                      color: "var(--fg-3)", overflow: "hidden",
-                      textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {refPath.split("/").pop()}
-                    </span>
-                    <button className="btn btn-sm" onClick={handlePickFile}>replace</button>
-                    <button
-                      className="btn btn-sm"
-                      style={{ color: "var(--sfx)" }}
-                      onClick={() => saveVoice({ ref_audio_path: null })}
-                    >clear</button>
-                  </div>
-                ) : (
-                  <button className="btn btn-sm" onClick={handlePickFile} style={{ marginBottom: 10 }}>
-                    Upload audio file…
-                  </button>
-                )}
-
-                <label style={labelStyle}>
-                  Reference transcript{" "}
-                  <span style={{ color: "var(--fg-4)", fontWeight: 400, textTransform: "none", letterSpacing: 0 }}>
-                    — optional, helps ICL mode
-                  </span>
-                </label>
-                <input
-                  className="input"
-                  value={refTranscript}
-                  onChange={(e) => setRefTranscript(e.target.value)}
-                  onBlur={() => saveVoice({ ref_transcript: refTranscript })}
-                  style={{ width: "100%", fontSize: 12, marginBottom: 12 }}
-                  placeholder="What is spoken in the reference audio…"
-                />
-
-                <label style={labelStyle}>Voice instructions</label>
-                <textarea
-                  className="input"
-                  value={instruct}
-                  onChange={(e) => setInstruct(e.target.value)}
-                  onBlur={() => saveVoice({ instruct_default: instruct })}
-                  rows={2}
-                  style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                  placeholder="Directorial notes pre-filled in the TTS panel for every line…"
-                />
-              </div>
             </div>
-          )}
-
-          {/* ── EMOTIONAL PALETTE ────────────────────────────────────────── */}
-          {tab === "palette" && (
-            <div>
-              <p style={{ fontSize: 11, color: "var(--fg-4)", marginBottom: 16, lineHeight: 1.6 }}>
-                Define named emotional states for this character. Each state gets a Qwen3 VoiceDesign
-                reference clip — Chatterbox Turbo then 0-shot clones from the matching reference for
-                every production line. Assign emotions in the script's <em>emotion</em> column.
-              </p>
-
-              {/* Add emotion / test line row */}
-              <div style={{ display: "flex", gap: 8, marginBottom: 16, alignItems: "flex-end" }}>
-                <div style={{ flex: 1 }}>
-                  <label style={labelStyle}>Test line for takes</label>
-                  <input
-                    className="input"
-                    value={paletteTestLine}
-                    onChange={(e) => setPaletteTestLine(e.target.value)}
-                    style={{ width: "100%", fontSize: 12 }}
-                    placeholder="Line to synthesise for audition…"
-                  />
-                </div>
-                <button
-                  className="btn btn-primary"
-                  onClick={() => { setAddingEmotion(true); setNewEmotionKey(""); setNewEmotionLabel(""); setNewEmotionDirection(""); setPaletteGenError(null); }}
-                  style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
-                >
-                  + Add Emotion
-                </button>
+            {char.voice_assignment.base_voice_description && (
+              <div style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                {char.voice_assignment.base_voice_description}
               </div>
-
-              {/* Add emotion inline form */}
-              {addingEmotion && (
-                <div style={{
-                  padding: "12px 14px", marginBottom: 14,
-                  border: "1px solid var(--tts)", borderRadius: "var(--r)",
-                  background: "color-mix(in oklch, var(--tts) 6%, var(--bg-1))",
-                  display: "flex", flexDirection: "column", gap: 8,
-                }}>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Emotion key (slug)</label>
-                      <input
-                        className="input" autoFocus
-                        value={newEmotionKey}
-                        onChange={(e) => setNewEmotionKey(e.target.value)}
-                        style={{ width: "100%", fontSize: 12 }}
-                        placeholder="neutral, sardonic, tense…"
-                      />
-                    </div>
-                    <div style={{ flex: 1 }}>
-                      <label style={labelStyle}>Display label</label>
-                      <input
-                        className="input"
-                        value={newEmotionLabel}
-                        onChange={(e) => setNewEmotionLabel(e.target.value)}
-                        style={{ width: "100%", fontSize: 12 }}
-                        placeholder="Neutral (defaults to key)"
-                      />
-                    </div>
+            )}
+            {(() => {
+              const approved = char.voice_assignment.emotional_palette.filter(
+                (e) => e.qa_status === "approved",
+              );
+              if (approved.length === 0) {
+                return (
+                  <div style={{ fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
+                    No approved emotions yet — open in Library to add some.
                   </div>
-                  <div>
-                    <label style={labelStyle}>Emotional direction</label>
-                    <textarea
-                      className="input"
-                      value={newEmotionDirection}
-                      onChange={(e) => setNewEmotionDirection(e.target.value)}
-                      rows={2}
-                      style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                      placeholder="e.g. Slower and more deliberate, each word chosen carefully. Controlled dread just beneath the surface."
-                    />
-                    <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 4 }}>
-                      Appended to the base voice description when generating takes.
-                    </div>
-                  </div>
-                  <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
-                    <button className="btn btn-sm" onClick={() => setAddingEmotion(false)}>Cancel</button>
-                    <button
-                      className="btn btn-sm btn-primary"
-                      onClick={handleAddEmotion}
-                      disabled={!newEmotionKey.trim()}
-                      style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
+                );
+              }
+              return (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {approved.map((e) => (
+                    <span
+                      key={e.emotion}
+                      style={{
+                        fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.04em",
+                        color: "var(--st-rendered)",
+                        background: "color-mix(in oklch, var(--st-rendered) 10%, var(--bg-2))",
+                        border: "1px solid color-mix(in oklch, var(--st-rendered) 30%, var(--line-1))",
+                        padding: "2px 7px", borderRadius: 3,
+                      }}
                     >
-                      Create
-                    </button>
-                  </div>
+                      {e.label}
+                    </span>
+                  ))}
                 </div>
-              )}
+              );
+            })()}
+            <div style={{ display: "flex", gap: 8, marginTop: 4 }}>
+              <button
+                className="btn btn-sm"
+                onClick={() => setView("library")}
+                title="Open this character in the Character Library to edit voice, palette, corpus, or RVC"
+                style={{
+                  background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
+                }}
+              >
+                {char.library_id ? "Open in Library →" : "Design voice in Library →"}
+              </button>
+            </div>
+          </div>
 
-              {paletteGenError && <div style={errorStyle}>{paletteGenError}</div>}
+          {/* Lines manifest */}
+          <div style={{ marginBottom: 8, display: "flex", alignItems: "baseline", gap: 8 }}>
+            <span style={{
+              fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
+              color: "var(--fg-4)", textTransform: "uppercase",
+            }}>
+              Lines in this episode · {lines.length}
+            </span>
+            {lines.length > 0 && (
+              <span style={{ fontSize: 10.5, color: "var(--fg-4)" }}>
+                {lines.filter((l) => l.file.trim()).length} rendered · {lines.filter((l) => !l.file.trim()).length} unresolved
+              </span>
+            )}
+          </div>
 
-              {/* Palette entry cards */}
-              {paletteEntries.length === 0 && !addingEmotion && (
-                <div style={{
-                  padding: "24px 16px", textAlign: "center",
-                  border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                  color: "var(--fg-4)", fontSize: 12,
-                }}>
-                  No emotions yet. Add one above — start with "neutral".
-                </div>
-              )}
-
-              <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                {paletteEntries.map((entry) => {
-                  const emotionSlug = char ? paletteSceneSlug(char.id, entry.emotion) : "";
-                  const entryJobs = [...jobs]
-                    .filter((j) => j.scene_slug === emotionSlug && j.row_index === PALETTE_ROW && j.status === "complete" && j.output_path)
-                    .reverse();
-                  const runningEntry = jobs.some((j) => j.scene_slug === emotionSlug && (j.status === "running" || j.status === "pending"));
-                  const isExpanded = expandedEmotion === entry.emotion;
-
-                  // Disk takes from MCP / external tools, deduped against job-tracked takes
-                  const jobPaths = new Set(entryJobs.map((j) => j.output_path));
-                  const diskTakes = (paletteDiskTakes[entry.emotion] ?? []).filter(
-                    (f) => !jobPaths.has(f.path)
-                  );
-                  // Synthesize Job-like objects so TakeRow can render them
-                  const diskJobs = diskTakes.map((f) => ({
-                    id: `disk::${f.path}`,
-                    model: "tts" as const,
-                    description: f.path.split("/").pop() ?? "",
-                    status: "complete" as const,
-                    progress: 100,
-                    eta: "",
-                    started_at: f.sidecar?.generated_at ?? "",
-                    scene_id: null,
-                    scene_slug: emotionSlug,
-                    row_index: PALETTE_ROW,
-                    output_path: f.path,
-                    peaks: null,
-                    qa_status: (f.sidecar?.qa_status ?? "unreviewed") as import("../../lib/types").QaJobStatus,
-                    error: null,
-                  }));
-                  const allTakes = [...entryJobs, ...diskJobs];
-
+          {lines.length === 0 ? (
+            <div style={{
+              padding: "20px 16px", textAlign: "center",
+              border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+              color: "var(--fg-4)", fontSize: 11.5, lineHeight: 1.6,
+            }}>
+              No dialogue rows reference this character. Assign lines in the
+              Scenes view — every script row whose <em>character</em> column
+              matches <strong style={{ color: "var(--fg-3)" }}>{char.name}</strong>{" "}
+              or <code style={{ fontFamily: "var(--font-mono)", color: "var(--fg-3)" }}>{char.id}</code>{" "}
+              will appear here.
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: 0 }}>
+              {(() => {
+                const grouped = new Map<string, LineEntry[]>();
+                for (const ln of lines) {
+                  const key = `${ln.sceneIndex}__${ln.sceneSlug}`;
+                  if (!grouped.has(key)) grouped.set(key, []);
+                  grouped.get(key)!.push(ln);
+                }
+                return Array.from(grouped.entries()).map(([key, sceneLines]) => {
+                  const head = sceneLines[0];
                   return (
-                    <div key={entry.emotion} style={{
-                      border: `1px solid ${entry.qa_status === "approved" ? "var(--st-rendered)" : "var(--line-1)"}`,
-                      borderRadius: "var(--r)",
-                      background: "var(--bg-1)",
-                      overflow: "hidden",
-                    }}>
-                      {/* Card header */}
-                      <div
-                        style={{
-                          display: "flex", alignItems: "center", gap: 8,
-                          padding: "8px 12px", cursor: "pointer",
-                          background: isExpanded ? "color-mix(in oklch, var(--bg-2) 60%, transparent)" : "transparent",
-                        }}
-                        onClick={() => setExpandedEmotion(isExpanded ? null : entry.emotion)}
-                      >
-                        <span style={{
-                          fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.06em",
-                          color: isExpanded ? "var(--fg-1)" : "var(--fg-3)", userSelect: "none",
-                        }}>
-                          {isExpanded ? "▾" : "▸"}
-                        </span>
-                        <span style={{ fontWeight: 500, fontSize: 12, color: "var(--fg-1)", flex: 1 }}>
-                          {entry.label}
-                          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "var(--fg-4)", marginLeft: 6 }}>
-                            {entry.emotion}
-                          </span>
-                        </span>
-                        {entry.qa_status === "approved" ? (
-                          <span style={{ fontSize: 9.5, color: "var(--st-rendered)", fontFamily: "var(--font-mono)" }}>✓ approved</span>
-                        ) : entry.ref_audio_path ? (
-                          <span style={{ fontSize: 9.5, color: "var(--fg-4)", fontFamily: "var(--font-mono)" }}>○ unreviewed</span>
-                        ) : null}
-                        <button
-                          className="btn btn-sm"
-                          style={{ color: "var(--sfx)", borderColor: "transparent", padding: "1px 5px", fontSize: 11 }}
-                          onClick={(e) => { e.stopPropagation(); handleRemoveEmotion(entry.emotion); }}
-                          title="Remove emotion"
-                        >×</button>
+                    <div key={key} style={{ marginBottom: 14 }}>
+                      <div style={{
+                        fontSize: 10, fontFamily: "var(--font-mono)",
+                        letterSpacing: "0.06em", color: "var(--fg-4)",
+                        textTransform: "uppercase",
+                        padding: "4px 0 6px",
+                        borderBottom: "1px solid var(--line-1)",
+                        marginBottom: 6,
+                      }}>
+                        {String(head.sceneIndex).padStart(2, "0")} · {head.sceneTitle}
                       </div>
-
-                      {/* Expanded body */}
-                      {isExpanded && (
-                        <div style={{ padding: "10px 14px 14px", borderTop: "1px solid var(--line-1)" }}>
-                          <div style={{ marginBottom: 10 }}>
-                            <label style={labelStyle}>Emotional direction</label>
-                            <textarea
-                              className="input"
-                              value={entry.direction}
-                              onChange={(e) => {
-                                const next = paletteEntries.map((pe) =>
-                                  pe.emotion === entry.emotion ? { ...pe, direction: e.target.value } : pe
-                                );
-                                savePalette(next);
-                              }}
-                              rows={2}
-                              style={{ width: "100%", resize: "vertical", fontSize: 12 }}
-                              placeholder="e.g. Slower, more deliberate. Controlled dread just beneath the surface."
-                            />
-                            <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 3 }}>
-                              Appended to the base voice description · leave blank to use base voice only
-                            </div>
-                          </div>
-
-                          {/* Reference status */}
-                          {entry.ref_audio_path && (
-                            <div style={{
-                              display: "flex", alignItems: "center", gap: 8, marginBottom: 10,
-                              padding: "7px 10px",
-                              background: "color-mix(in oklch, var(--st-rendered) 8%, var(--bg-2))",
-                              borderRadius: "var(--r)",
-                              border: "1px solid color-mix(in oklch, var(--st-rendered) 30%, var(--line-1))",
-                            }}>
-                              <PlayButton path={entry.ref_audio_path} size={11} />
-                              <span style={{
-                                flex: 1, fontFamily: "var(--font-mono)", fontSize: 9.5,
-                                color: "var(--fg-3)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                              }}>
-                                {entry.ref_audio_path.split("/").pop()}
-                              </span>
-                              <span style={{ fontSize: 9.5, color: "var(--st-rendered)", flexShrink: 0 }}>reference</span>
-                            </div>
+                      {sceneLines.map((ln) => (
+                        <div key={`${ln.sceneSlug}_${ln.rowIndex}`} style={{
+                          display: "grid",
+                          gridTemplateColumns: "auto 1fr auto auto",
+                          alignItems: "center",
+                          gap: 10,
+                          padding: "6px 4px",
+                          borderBottom: "1px solid color-mix(in oklch, var(--line-1) 50%, transparent)",
+                        }}>
+                          <span style={{
+                            fontFamily: "var(--font-mono)", fontSize: 9.5,
+                            color: ln.file.trim() ? "var(--st-rendered)" : "var(--fg-4)",
+                            minWidth: 16,
+                          }}>
+                            {ln.file.trim() ? "●" : "○"}
+                          </span>
+                          <span style={{ fontSize: 12, color: "var(--fg-2)", lineHeight: 1.5, minWidth: 0 }}>
+                            {ln.prompt || <span style={{ color: "var(--fg-4)", fontStyle: "italic" }}>(empty)</span>}
+                          </span>
+                          {ln.emotion ? (
+                            <span style={{
+                              fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.04em",
+                              color: "var(--fg-4)", textTransform: "lowercase",
+                              padding: "1px 6px",
+                              border: "1px solid var(--line-1)", borderRadius: 3,
+                            }}>{ln.emotion}</span>
+                          ) : (
+                            <span />
                           )}
-
-                          {/* Generate + Record buttons */}
-                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
-                            <button
-                              className="btn btn-primary"
-                              onClick={() => handleGeneratePaletteTake(entry)}
-                              disabled={runningEntry || !voiceDesc.trim() || recordingForEmotion === entry.emotion}
-                              style={{
-                                background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
-                                opacity: !voiceDesc.trim() ? 0.4 : 1,
-                              }}
-                            >
-                              {runningEntry ? "Generating…" : "Generate Take"}
-                            </button>
-                            {recordingForEmotion !== entry.emotion && (
-                              <button
-                                className="btn"
-                                onClick={() => setRecordingForEmotion(entry.emotion)}
-                                disabled={runningEntry || recordingForEmotion !== null}
-                                style={{ display: "flex", alignItems: "center", gap: 5 }}
-                                title="Record a take directly from your audio interface"
-                              >
-                                <span style={{
-                                  width: 7, height: 7, borderRadius: "50%",
-                                  background: "color-mix(in oklch, var(--sfx) 70%, var(--fg-3))",
-                                  display: "inline-block", flexShrink: 0,
-                                }} />
-                                Record Take
-                              </button>
-                            )}
-                            {runningEntry && <RunningBadge label="Synthesising…" />}
-                          </div>
-
-                          {/* Inline recorder */}
-                          {recordingForEmotion === entry.emotion && char && realProjectId && projectsDir && (
-                            <div style={{ marginBottom: 10 }}>
-                              <RecordTakePanel
-                                outputPath={(() => {
-                                  const ts = Date.now();
-                                  const palDir = `${projectsDir}/${realProjectId}/characters/${char.id}/palette`;
-                                  return `${palDir}/${entry.emotion}_rec_${ts}.wav`;
-                                })()}
-                                onDone={(path, dur) => handleRecordDone(entry.emotion, path, dur)}
-                                onCancel={() => setRecordingForEmotion(null)}
-                              />
-                            </div>
-                          )}
-
-                          {/* Takes list — job-store takes + disk-scanned MCP takes */}
-                          {allTakes.length > 0 && (
-                            <TakeList label={`Takes · ${allTakes.length}`}>
-                              {allTakes.map((job, i) => (
-                                <TakeRow
-                                  key={job.id} job={job} index={i}
-                                  saveLabel="Approve as reference"
-                                  isSaved={entry.ref_audio_path === job.output_path && entry.qa_status === "approved"}
-                                  onSave={() => handlePromotePaletteTake(entry.emotion, job.output_path!)}
-                                  onQa={(s) => {
-                                    // Disk-synthesized jobs use a fake id; skip job store update
-                                    if (!job.id.startsWith("disk::")) setQaStatus(job.id, s);
-                                  }}
-                                />
-                              ))}
-                            </TakeList>
+                          {ln.file.trim() ? (
+                            <PlayButton path={ln.file} size={11} />
+                          ) : (
+                            <span />
                           )}
                         </div>
-                      )}
+                      ))}
                     </div>
                   );
-                })}
-              </div>
+                });
+              })()}
             </div>
           )}
-
-
-          {/* ── CORPUS BUILDER (Stage 3) ──────────────────────────────────── */}
-          {tab === "corpus" && (
-            <CorpusBuilder
-              projectId={realProjectId ?? "demo"}
-              character={char}
-              projectsDir={projectsDir ?? ""}
-              corpusCount={char.voice_assignment.rvc?.corpus_count ?? 0}
-              corpusDurationMs={char.voice_assignment.rvc?.corpus_duration_ms ?? 0}
-              corpusTarget={50}
-              onCorpusUpdated={() => {
-                // Re-read character from disk (project store handles this via get_project)
-                // For now, a no-op — CorpusBuilder polls internally and updates its own UI.
-                // A full refresh would call loadProject() here.
-              }}
-            />
-          )}
-
-          {/* ── RVC MODEL (Stage 4) ───────────────────────────────────────── */}
-          {tab === "model" && (
-            <RvcModelStage
-              projectId={realProjectId ?? "demo"}
-              character={char}
-              projectsDir={projectsDir ?? ""}
-              corpusReady={(char.voice_assignment.rvc?.corpus_duration_ms ?? 0) >= 5 * 60 * 1000}
-              onModelTrained={() => {
-                // A full model refresh would re-read character; no-op until store exposes refresh.
-              }}
-            />
-          )}
         </div>
+
       </div>
 
       {/* ── Right meta panel ────────────────────────────────────────────── */}
@@ -1353,10 +741,10 @@ export const CharacterDesignerView: React.FC = () => {
             : <div style={{ color: "var(--fg-4)", fontSize: 10, marginTop: 4 }}>No reference</div>}
         </MetaSection>
 
-        {paletteEntries.length > 0 && (
+        {char.voice_assignment.emotional_palette.length > 0 && (
           <MetaSection label="Palette">
             <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-              {paletteEntries.map((e) => (
+              {char.voice_assignment.emotional_palette.map((e) => (
                 <div key={e.emotion} style={{ display: "flex", alignItems: "center", gap: 5 }}>
                   <span style={{
                     width: 6, height: 6, borderRadius: "50%", flexShrink: 0,
@@ -1377,9 +765,10 @@ export const CharacterDesignerView: React.FC = () => {
           </MetaSection>
         )}
 
-        <MetaSection label="Takes">
+        <MetaSection label="Lines">
           <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <span style={{ color: "var(--fg-3)" }}>Design: <strong style={{ color: "var(--fg-1)" }}>{designJobs.length}</strong></span>
+            <span style={{ color: "var(--fg-3)" }}>Total: <strong style={{ color: "var(--fg-1)" }}>{lines.length}</strong></span>
+            <span style={{ color: "var(--fg-3)" }}>Rendered: <strong style={{ color: "var(--fg-1)" }}>{lines.filter((l) => l.file.trim()).length}</strong></span>
           </div>
         </MetaSection>
       </div>
@@ -1581,10 +970,6 @@ export const CharacterDesignerView: React.FC = () => {
 const labelStyle: React.CSSProperties = {
   fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em",
   color: "var(--fg-4)", textTransform: "uppercase", display: "block", marginBottom: 4,
-};
-
-const errorStyle: React.CSSProperties = {
-  marginTop: 6, fontSize: 11, color: "var(--sfx)",
 };
 
 const MetaSection: React.FC<{ label: string; children: React.ReactNode }> = ({ label, children }) => (
