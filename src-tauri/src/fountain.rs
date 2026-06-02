@@ -408,6 +408,7 @@ pub fn blocks_to_rows(
                 spatial_azimuth: String::new(),
                 spatial_elevation: String::new(),
                 spatial_path: String::new(),
+                spatial_space: String::new(),
             }
         })
         .collect()

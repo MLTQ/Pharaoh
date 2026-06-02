@@ -318,6 +318,32 @@ export interface ScriptRow {
    * Empty string = static position (use spatial_azimuth/elevation).
    */
   spatial_path: string;
+  /**
+   * Slug of a room preset from `assets/spaces/spaces.json`, e.g.
+   * "cathedral", "cave", "opera-house". Empty = dry (no reverb).
+   * Independent of position — a clip can have a room without binaural
+   * placement and vice versa. Wet amount = reverb_send if set, else the
+   * manifest's default_wet for the chosen space.
+   */
+  spatial_space: string;
+}
+
+/** Curated room IR preset from spaces.json. */
+export interface SpatialSpace {
+  slug: string;
+  label: string;
+  description: string;
+  /** Filename inside assets/spaces/, or null for the "dry" baseline. */
+  file: string | null;
+  /** "dry" | "stereo" | "binaural" — how the IR is encoded. */
+  type: string;
+  source: string | null;
+  url: string | null;
+  license: string | null;
+  /** Default wet/dry mix in [0, 1] when reverb_send isn't set. */
+  default_wet: number;
+  /** True only when the IR file actually exists on disk (or type === "dry"). */
+  available: boolean;
 }
 
 /** A single waypoint on a spatial trajectory. */
@@ -481,6 +507,9 @@ export interface MockTrackClip {
    *  current placement direction without re-reading the row. */
   spatialAz?: number;
   spatialEl?: number;
+  /** Selected room IR slug, e.g. "cathedral". Used by the timeline clip
+   *  to render a small text tag alongside the spatial glyph. */
+  spaceSlug?: string;
 }
 
 export interface MockTrack {

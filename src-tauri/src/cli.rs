@@ -271,7 +271,7 @@ fn usage() -> &'static str {
   pharaoh script fountain-read <project_id> <scene_slug>
   pharaoh script fountain-write <project_id> <scene_slug> <script.fountain|-> [--compile true|false]
   pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
-  pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--clear]
+  pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--space <slug>] [--wet <0-1>] [--clear]
   pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
   pharaoh character list <project_id>
   pharaoh character create <project_id> --name <name> [--description <text>]
@@ -1168,21 +1168,46 @@ async fn script_spatialize(
         fields.insert("spatial_azimuth".into(), String::new());
         fields.insert("spatial_elevation".into(), String::new());
         fields.insert("spatial_path".into(), String::new());
+        fields.insert("spatial_space".into(), String::new());
+        fields.insert("reverb_send".into(), String::new());
     }
     for (k, v) in raw_flags {
         match k.as_str() {
             "azimuth"   | "az" | "spatial_azimuth"   => { fields.insert("spatial_azimuth".into(), v); }
             "elevation" | "el" | "spatial_elevation" => { fields.insert("spatial_elevation".into(), v); }
             "path"      | "spatial_path"             => { fields.insert("spatial_path".into(), v); }
+            "space"     | "spatial_space"            => {
+                // Validate against the manifest so a typo doesn't silently disable reverb.
+                let known: Vec<String> = crate::commands::audio_spatial::load_spaces_with_availability()
+                    .into_iter()
+                    .map(|s| s.slug)
+                    .collect();
+                if !v.is_empty() && !known.iter().any(|s| s == &v) {
+                    return Err(Error::Other(format!(
+                        "unknown space '{}'; valid slugs: {}",
+                        v, known.join(", ")
+                    )));
+                }
+                fields.insert("spatial_space".into(), v);
+            }
+            "wet"       | "reverb_send"              => {
+                let parsed: f32 = v.parse().map_err(|_| Error::Other(format!(
+                    "--wet must be a number in [0,1], got '{}'", v
+                )))?;
+                if !(0.0..=1.0).contains(&parsed) {
+                    return Err(Error::Other(format!("--wet out of range [0,1]: {}", parsed)));
+                }
+                fields.insert("reverb_send".into(), format!("{:.3}", parsed));
+            }
             other => return Err(Error::Other(format!(
-                "unknown flag --{}; expected --azimuth, --elevation, --path, or --clear",
+                "unknown flag --{}; expected --azimuth, --elevation, --path, --space, --wet, or --clear",
                 other
             ))),
         }
     }
     if fields.is_empty() {
         return Err(Error::Other(
-            "no spatial flags given; pass --azimuth, --elevation, --path, or --clear".into(),
+            "no spatial flags given; pass --azimuth, --elevation, --path, --space, --wet, or --clear".into(),
         ));
     }
 

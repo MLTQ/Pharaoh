@@ -227,6 +227,7 @@ export function blockToRow(
     spatial_azimuth:    existing?.spatial_azimuth    ?? "",
     spatial_elevation:  existing?.spatial_elevation  ?? "",
     spatial_path:       existing?.spatial_path       ?? "",
+    spatial_space:      existing?.spatial_space      ?? "",
   };
 }
 

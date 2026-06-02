@@ -8,6 +8,7 @@ import type {
   GeneratedAudioAsset,
   Character,
   LibraryCharacterSummary,
+  SpatialSpace,
 } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
@@ -607,3 +608,15 @@ export const pullCharacterFromLibrary = (args: {
   characterId: string;
 }): Promise<Character> =>
   invoke("pull_character_from_library", args);
+
+// ── Spatial spaces (room IR catalog) ─────────────────────────────────────────
+
+/**
+ * List the curated room presets from `assets/spaces/spaces.json`, each
+ * stamped with `available` based on whether its IR file is on disk.
+ * Frontend renders this as the SpatializeModal's Space dropdown — entries
+ * with `available=false` show up greyed with a hint to run
+ * `inference/download_spatial_assets.sh`.
+ */
+export const listSpatialSpaces = (): Promise<SpatialSpace[]> =>
+  invoke("list_spatial_spaces");

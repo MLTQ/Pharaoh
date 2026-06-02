@@ -86,6 +86,26 @@ pub fn row_needs_spatial(spatial_azimuth: &str, spatial_path: &str) -> bool {
     !spatial_azimuth.trim().is_empty() || !spatial_path.trim().is_empty()
 }
 
+/// Does this row need a prerender pass (HRTF placement *or* room IR)?
+///
+/// The main scene renderer calls into `prerender_spatialized_clip` whenever
+/// this returns true. A row can have HRTF placement only, a room only, or
+/// both — the prerender handles all three.
+pub fn row_needs_prerender(
+    spatial_azimuth: &str,
+    spatial_path: &str,
+    spatial_space: &str,
+) -> bool {
+    row_needs_spatial(spatial_azimuth, spatial_path) || space_is_set(spatial_space)
+}
+
+/// True if `spatial_space` names a real space (non-empty, not the "dry"/
+/// "anechoic" baseline that is a no-op).
+fn space_is_set(slug: &str) -> bool {
+    let s = slug.trim();
+    !s.is_empty() && s != "anechoic" && s != "dry"
+}
+
 /// Locate a SOFA HRTF file shipped with the app (if any).
 ///
 /// Search order:
@@ -134,6 +154,144 @@ pub fn find_sofa_file() -> Option<PathBuf> {
         }
     }
     None
+}
+
+// ── Spatial spaces: room IR catalog ──────────────────────────────────────────
+
+/// One entry in `assets/spaces/spaces.json`. Frontend-facing — surfaced via
+/// the `list_spatial_spaces` Tauri command and rendered as the modal dropdown.
+#[derive(Debug, Clone, serde::Serialize, Deserialize)]
+pub struct SpaceEntry {
+    pub slug: String,
+    pub label: String,
+    pub description: String,
+    /// Relative WAV filename inside `assets/spaces/`. `None` = the "dry"
+    /// baseline that needs no IR.
+    pub file: Option<String>,
+    /// "dry" | "stereo" | "binaural" — informational, doesn't change rendering.
+    #[serde(rename = "type")]
+    pub kind: String,
+    pub source: Option<String>,
+    pub url: Option<String>,
+    pub license: Option<String>,
+    /// Default wet/dry mix when the row doesn't override via `reverb_send`.
+    pub default_wet: f32,
+    /// True iff the IR file is present on disk (or this is the dry baseline).
+    /// Populated by `load_spaces_with_availability`, never read from JSON.
+    #[serde(default)]
+    pub available: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpacesManifest {
+    spaces: Vec<SpaceEntry>,
+}
+
+/// Locate the `assets/spaces/` directory. Mirrors `find_sofa_file`'s search
+/// order so dev (cwd) and production (exe-dir) both work, with an env-var
+/// override for unusual deployments.
+pub fn find_spaces_dir() -> Option<PathBuf> {
+    if let Ok(override_path) = std::env::var("PHARAOH_SPACES_DIR") {
+        let p = PathBuf::from(&override_path);
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    if let Ok(cwd) = std::env::current_dir() {
+        let p = cwd.join("assets").join("spaces");
+        if p.is_dir() {
+            return Some(p);
+        }
+    }
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            let p1 = dir.join("assets").join("spaces");
+            if p1.is_dir() {
+                return Some(p1);
+            }
+            let p2 = dir.join("..").join("Resources").join("assets").join("spaces");
+            if p2.is_dir() {
+                return Some(p2);
+            }
+        }
+    }
+    None
+}
+
+/// Load `spaces.json` from disk and stamp `available` on each entry based on
+/// whether the referenced file actually exists. Surfaced via the Tauri
+/// command `list_spatial_spaces` so the frontend can grey out missing
+/// presets in the dropdown.
+///
+/// Returns an empty list if the manifest doesn't parse — never errors —
+/// because a broken manifest shouldn't prevent dry rendering. The UI handles
+/// "no spaces installed" gracefully.
+pub fn load_spaces_with_availability() -> Vec<SpaceEntry> {
+    let Some(dir) = find_spaces_dir() else {
+        return vec![];
+    };
+    let manifest_path = dir.join("spaces.json");
+    let bytes = match std::fs::read(&manifest_path) {
+        Ok(b) => b,
+        Err(_) => return vec![],
+    };
+    let manifest: SpacesManifest = match serde_json::from_slice(&bytes) {
+        Ok(m) => m,
+        Err(_) => return vec![],
+    };
+    manifest
+        .spaces
+        .into_iter()
+        .map(|mut sp| {
+            sp.available = match &sp.file {
+                None => sp.kind == "dry",
+                Some(fname) => dir.join(fname).is_file(),
+            };
+            sp
+        })
+        .collect()
+}
+
+/// Resolve a space slug to its (IR path, default_wet) pair. Returns `None`
+/// for the dry/anechoic baseline, for an unknown slug, or when the IR file
+/// is missing on disk (the renderer skips convolution in that case rather
+/// than failing the whole render).
+pub fn find_space_ir(slug: &str) -> Option<(PathBuf, f32)> {
+    if !space_is_set(slug) {
+        return None;
+    }
+    let dir = find_spaces_dir()?;
+    let manifest_path = dir.join("spaces.json");
+    let bytes = std::fs::read(&manifest_path).ok()?;
+    let manifest: SpacesManifest = serde_json::from_slice(&bytes).ok()?;
+    let entry = manifest.spaces.into_iter().find(|s| s.slug == slug)?;
+    let file = entry.file?;
+    let ir_path = dir.join(file);
+    if !ir_path.is_file() {
+        return None;
+    }
+    Some((ir_path, entry.default_wet.clamp(0.0, 1.0)))
+}
+
+/// Tauri command — returns the manifest with `available` stamped on each
+/// entry. The frontend renders this as the SpatializeModal's space dropdown,
+/// greying out entries whose IR file isn't on disk yet.
+#[tauri::command]
+pub fn list_spatial_spaces() -> Vec<SpaceEntry> {
+    load_spaces_with_availability()
+}
+
+/// Parse the `reverb_send` column as the per-clip wet override. Empty or
+/// unparseable falls back to `default_wet` from the manifest.
+pub fn resolve_wet_amount(reverb_send: &str, default_wet: f32) -> f32 {
+    let trimmed = reverb_send.trim();
+    if trimmed.is_empty() {
+        return default_wet.clamp(0.0, 1.0);
+    }
+    trimmed
+        .parse::<f32>()
+        .map(|w| w.clamp(0.0, 1.0))
+        .unwrap_or(default_wet)
 }
 
 fn first_sofa_in_dir(dir: &Path) -> Option<PathBuf> {
@@ -305,22 +463,27 @@ fn spatial_segment(
     )
 }
 
-/// Prerender a single spatialized clip to a temp WAV.
+/// Prerender a single clip with binaural placement and/or room reverb.
 ///
-/// Reads `input_path`, applies HRTF (or the approximation), writes binaural
-/// stereo PCM to `output_path` at 48 kHz / 24-bit so it lines up with the
-/// main renderer's working sample rate.
+/// Pipeline:
+///   1. *Binaural stage* — sofalizer with the HRTF SOFA, or the ITD/ILD
+///      approximation when no SOFA is installed. Trajectories segment the
+///      input into ≤32 chunks rendered at interpolated (az, el) and
+///      concatted. When no spatial position is set this stage is a
+///      passthrough that just normalizes to 48 kHz stereo.
+///   2. *Space stage* — `afir` convolution against the chosen room IR,
+///      mixed wet/dry by `wet`. Skipped when `space_ir` is `None`.
 ///
-/// `spatial_azimuth` / `spatial_elevation` are the static position;
-/// `spatial_path` is the optional waypoint trajectory JSON. When the path
-/// is non-empty we render `segment_count(duration)` trajectory segments
-/// and concat them.
+/// At least one stage must be active — the caller checks `row_needs_prerender`
+/// before invoking. Writes 48 kHz / 24-bit / stereo PCM to `output_path`.
 pub fn prerender_spatialized_clip(
     input_path: &Path,
     output_path: &Path,
     spatial_azimuth: &str,
     spatial_elevation: &str,
     spatial_path: &str,
+    space_ir: Option<&Path>,
+    wet: f32,
 ) -> Result<()> {
     let az_static = spatial_azimuth
         .trim()
@@ -347,23 +510,23 @@ pub fn prerender_spatialized_clip(
         })?;
     }
 
-    let filter_graph = if waypoints.is_empty() || duration_sec <= 0.0 {
-        // Static: single segment at the fixed position.
-        let chain = spatial_segment("s0", "out", az_static, el_static, sofa_ref);
-        format!(
-            "[0:a]aresample=48000[s0];{chain}",
-            chain = chain
-        )
+    let has_spatial = row_needs_spatial(spatial_azimuth, spatial_path);
+
+    // ── Stage 1: binaural → produces label [bin] ──────────────────────────
+    let binaural_graph: String = if !has_spatial {
+        // No HRTF: just normalize to 48 kHz stereo. Used for space-only rows.
+        "[0:a]aresample=48000,aformat=channel_layouts=stereo[bin]".to_string()
+    } else if waypoints.is_empty() || duration_sec <= 0.0 {
+        // Static HRTF: single sofalizer (or approximation) at the fixed position.
+        let chain = spatial_segment("s0", "bin", az_static, el_static, sofa_ref);
+        format!("[0:a]aresample=48000[s0];{}", chain)
     } else {
-        // Trajectory: split the input into N chunks, render each at its
-        // interpolated position, concat back together. Each segment's
-        // (az, el) is sampled at the midpoint of its time window so the
-        // motion stays centred on the actual waypoint curve.
+        // Trajectory: split into N chunks, spatialize each at the interpolated
+        // (az, el), concat. Output label is [bin] for stage-2 chaining.
         let n = segment_count(duration_sec);
         let seg_len = duration_sec / n as f32;
         let mut parts: Vec<String> = Vec::new();
 
-        // 1. Resample once, then split into N parallel copies.
         let split_labels: Vec<String> = (0..n).map(|i| format!("seg{}", i)).collect();
         let split_targets = split_labels
             .iter()
@@ -374,7 +537,6 @@ pub fn prerender_spatialized_clip(
             n, split_targets
         ));
 
-        // 2. For each segment: trim → reset PTS → mono → spatialize.
         let mut concat_inputs = String::new();
         for i in 0..n {
             let t0 = i as f32 * seg_len;
@@ -382,7 +544,7 @@ pub fn prerender_spatialized_clip(
             let t_mid = (t0 + t1) * 0.5 / duration_sec;
             let (az, el) = sample_trajectory(&waypoints, az_static, el_static, t_mid);
             let trim_label = format!("t{}", i);
-            let out_label = format!("c{}", i);
+            let chunk_label = format!("c{}", i);
             parts.push(format!(
                 "[{src}]atrim={t0:.4}:{t1:.4},asetpts=PTS-STARTPTS,aformat=channel_layouts=mono[{tl}]",
                 src = split_labels[i],
@@ -390,26 +552,50 @@ pub fn prerender_spatialized_clip(
                 t1 = t1,
                 tl = trim_label,
             ));
-            parts.push(spatial_segment(&trim_label, &out_label, az, el, sofa_ref));
-            concat_inputs.push_str(&format!("[{}]", out_label));
+            parts.push(spatial_segment(&trim_label, &chunk_label, az, el, sofa_ref));
+            concat_inputs.push_str(&format!("[{}]", chunk_label));
         }
-
-        // 3. Concat all spatialized segments end-to-end.
         parts.push(format!(
-            "{}concat=n={}:v=0:a=1[out]",
+            "{}concat=n={}:v=0:a=1[bin]",
             concat_inputs, n
         ));
-
         parts.join(";")
     };
+
+    // ── Stage 2: space (afir convolution) → produces label [out] ──────────
+    //
+    // When a space IR is supplied, we mix wet/dry with `wet` controlling the
+    // reverb amount. The IR rides in as ffmpeg's second input (`[1:a]`).
+    // `gtype=peak:irgain=1` peak-normalizes the IR so different presets sit
+    // at roughly comparable wet levels.
+    let space_graph: String = if space_ir.is_some() {
+        let wet_clamped = wet.clamp(0.0, 1.0);
+        let dry = (1.0 - wet_clamped).max(0.05); // keep a hint of direct signal at full wet
+        format!(
+            "[bin][1:a]afir=dry={dry:.3}:wet={wet:.3}:gtype=peak:irgain=1[out]",
+            dry = dry,
+            wet = wet_clamped,
+        )
+    } else {
+        // No space: pass [bin] straight through to [out].
+        "[bin]anull[out]".to_string()
+    };
+
+    let filter_graph = format!("{};{}", binaural_graph, space_graph);
 
     let input_str = input_path.to_string_lossy().to_string();
     let output_str = output_path.to_string_lossy().to_string();
 
-    let args: Vec<String> = vec![
+    let mut args: Vec<String> = vec![
         "-y".into(),
         "-i".into(),
         input_str,
+    ];
+    if let Some(ir) = space_ir {
+        args.push("-i".into());
+        args.push(ir.to_string_lossy().to_string());
+    }
+    args.extend([
         "-filter_complex".into(),
         filter_graph,
         "-map".into(),
@@ -422,7 +608,7 @@ pub fn prerender_spatialized_clip(
         "-c:a".into(),
         "pcm_s24le".into(),
         output_str,
-    ];
+    ]);
 
     let out = std::process::Command::new("ffmpeg")
         .args(&args)

@@ -69,6 +69,7 @@ fn make_blank_row() -> ScriptRow {
         spatial_azimuth: String::new(),
         spatial_elevation: String::new(),
         spatial_path: String::new(),
+        spatial_space: String::new(),
     }
 }
 
@@ -318,7 +319,7 @@ async fn spatial_prerender_produces_binaural_asymmetry() {
 
     // Static case: az=90 (full right). Expect right RMS > left RMS.
     let static_out = scratch.join("static_right.wav");
-    prerender_spatialized_clip(&input, &static_out, "90", "0", "")
+    prerender_spatialized_clip(&input, &static_out, "90", "0", "", None, 0.0)
         .unwrap_or_else(|e| panic!("spatial prerender failed: {e}"));
     assert!(static_out.exists(), "static prerender should write output");
 
@@ -333,7 +334,7 @@ async fn spatial_prerender_produces_binaural_asymmetry() {
     // still be a valid stereo render of the right duration.
     let traj_out = scratch.join("sweep.wav");
     let path_json = r#"[{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]"#;
-    prerender_spatialized_clip(&input, &traj_out, "0", "0", path_json)
+    prerender_spatialized_clip(&input, &traj_out, "0", "0", path_json, None, 0.0)
         .unwrap_or_else(|e| panic!("trajectory prerender failed: {e}"));
     assert!(traj_out.exists(), "trajectory prerender should write output");
 
@@ -349,6 +350,99 @@ async fn spatial_prerender_produces_binaural_asymmetry() {
     );
 
     std::fs::remove_dir_all(&scratch).ok();
+}
+
+// ── Space (afir convolution) smoke ───────────────────────────────────────
+//
+// Synthesizes a tiny "room" IR (Dirac + exponential decay tail) on the fly,
+// runs prerender_spatialized_clip with it, and verifies the output is a
+// well-formed stereo WAV. This isolates the afir-chain wiring from the
+// download_spatial_assets.sh path so the test runs against any clone.
+
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn space_prerender_applies_room_ir() {
+    if !ffmpeg_available() {
+        eprintln!("skipping: ffmpeg not available");
+        return;
+    }
+
+    let scratch = unique_temp_dir();
+    std::fs::create_dir_all(&scratch).unwrap();
+
+    // 1-second sine, mono — what a TTS clip looks like to the prerender.
+    let input = scratch.join("sine.wav");
+    write_sine_wav(&input, 440, 1);
+
+    // Tiny synthesized IR: dirac impulse then 200 ms exponential tail.
+    let ir = scratch.join("toy_room.wav");
+    write_synthetic_ir(&ir);
+
+    // No spatial position; space-only.
+    let out = scratch.join("space_only.wav");
+    crate::commands::audio_spatial::prerender_spatialized_clip(
+        &input, &out, "", "0", "", Some(&ir), 0.4,
+    )
+    .unwrap_or_else(|e| panic!("space prerender failed: {e}"));
+
+    assert!(out.exists(), "space prerender should write output");
+    let reader = hound::WavReader::open(&out).unwrap();
+    let spec = reader.spec();
+    assert_eq!(spec.channels, 2, "space prerender must emit stereo");
+    assert_eq!(spec.sample_rate, 48000);
+    let (l_rms, r_rms) = stereo_rms(&out);
+    // Both channels should carry nonzero energy after convolution.
+    assert!(l_rms > 0.0001 && r_rms > 0.0001, "L={l_rms} R={r_rms}");
+
+    // Spatial + space combined: smoke test only. We deliberately don't
+    // assert L/R balance here — afir's behavior with a stereo IR matrix-
+    // multiplies channels in ways that depend on the IR's own L/R balance,
+    // and a synthetic toy IR can dominate the binaural cue. The contract
+    // is "the pipeline ran and produced a valid stereo file".
+    let out_combo = scratch.join("space_plus_spatial.wav");
+    crate::commands::audio_spatial::prerender_spatialized_clip(
+        &input, &out_combo, "90", "0", "", Some(&ir), 0.3,
+    )
+    .unwrap_or_else(|e| panic!("space+spatial prerender failed: {e}"));
+
+    assert!(out_combo.exists());
+    let reader2 = hound::WavReader::open(&out_combo).unwrap();
+    let spec2 = reader2.spec();
+    assert_eq!(spec2.channels, 2);
+    assert_eq!(spec2.sample_rate, 48000);
+    let (l2, r2) = stereo_rms(&out_combo);
+    assert!(l2 + r2 > 0.0001, "combo render produced silence L={l2} R={r2}");
+
+    std::fs::remove_dir_all(&scratch).ok();
+}
+
+/// Write a tiny synthetic impulse response: dirac at t=0 followed by a
+/// 200 ms exponentially-decaying tail. Stereo (decorrelated L/R) so afir
+/// produces a sensible stereo output.
+fn write_synthetic_ir(path: &Path) {
+    let sr: u32 = 48000;
+    let tail_samples = (0.2 * sr as f32) as usize;
+    let total = tail_samples + 1;
+    let spec = hound::WavSpec {
+        channels: 2,
+        sample_rate: sr,
+        bits_per_sample: 16,
+        sample_format: hound::SampleFormat::Int,
+    };
+    let mut writer = hound::WavWriter::create(path, spec).unwrap();
+    for i in 0..total {
+        let t = i as f32 / sr as f32;
+        let env = (-t * 18.0).exp(); // ~50 ms time constant
+        let dirac = if i == 0 { 1.0 } else { 0.0 };
+        // Slightly different L/R seeds so the IR is decorrelated (more
+        // natural sounding when applied via afir).
+        let l = (dirac + env * ((i as f32 * 0.13).sin() * 0.4)) * 0.7;
+        let r = (dirac + env * ((i as f32 * 0.17).cos() * 0.4)) * 0.7;
+        let lsi = (l.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        let rsi = (r.clamp(-1.0, 1.0) * i16::MAX as f32) as i16;
+        writer.write_sample(lsi).unwrap();
+        writer.write_sample(rsi).unwrap();
+    }
+    writer.finalize().unwrap();
 }
 
 /// Compute (left_rms, right_rms) of a 24-bit stereo WAV. Used by the

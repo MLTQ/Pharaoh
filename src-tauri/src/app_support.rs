@@ -329,6 +329,7 @@ pub fn apply_script_row_fields(row: &mut ScriptRow, fields: &HashMap<String, Str
             "spatial_azimuth" => row.spatial_azimuth = val.clone(),
             "spatial_elevation" => row.spatial_elevation = val.clone(),
             "spatial_path" => row.spatial_path = val.clone(),
+            "spatial_space" => row.spatial_space = val.clone(),
             _ => {}
         }
     }

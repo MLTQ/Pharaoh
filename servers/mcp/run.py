@@ -149,6 +149,27 @@ def _write_script_rows(project_id: str, scene_slug: str, rows: list[dict]) -> No
         writer.writerows(rows)
 
 
+def _spatial_space_slugs() -> set[str] | None:
+    """Read spaces.json from the repo's assets/spaces/ and return the set of
+    known slugs. Returns None when the manifest can't be found so the caller
+    can fall through (don't reject the value just because the MCP server is
+    running outside the repo). Used by `spatialize_row` to validate the
+    `space` argument."""
+    # The MCP server runs from servers/mcp/run.py — repo root is two parents up.
+    candidates = [
+        Path(__file__).resolve().parent.parent.parent / "assets" / "spaces" / "spaces.json",
+        Path.cwd() / "assets" / "spaces" / "spaces.json",
+    ]
+    for manifest in candidates:
+        if manifest.is_file():
+            try:
+                data = json.loads(manifest.read_text(encoding="utf-8"))
+                return {sp["slug"] for sp in data.get("spaces", []) if "slug" in sp}
+            except (json.JSONDecodeError, KeyError, TypeError):
+                return None
+    return None
+
+
 def _meta_path(audio_path: str) -> Path:
     p = Path(audio_path)
     return p.parent / (p.name + ".meta.json")
@@ -508,17 +529,25 @@ def spatialize_row(
     azimuth: float | None = None,
     elevation: float | None = None,
     path: list | None = None,
+    space: str | None = None,
+    wet: float | None = None,
     clear: bool = False,
 ) -> str:
     """
-    Place a single script row in 3D binaural space around the listener.
+    Place a single script row in 3D binaural space and/or apply a room reverb.
 
-    Pharaoh's scene renderer reads three columns: spatial_azimuth (0–360°,
-    0 = front, 90 = right, 180 = back, 270 = left), spatial_elevation
-    (-90..+90°, 0 = ear level), and spatial_path (waypoint JSON for moving
-    sources). When any of those columns are set, the renderer prerenders
-    the clip through ffmpeg's sofalizer HRTF filter (or a pure-ffmpeg
-    binaural approximation if no SOFA file is installed) before mixing.
+    Pharaoh's scene renderer reads five columns. The first three control
+    binaural placement (HRTF via ffmpeg sofalizer):
+      - spatial_azimuth   (0–360°, 0 = front, 90 = right, 180 = back, 270 = left)
+      - spatial_elevation (-90..+90°, 0 = ear level)
+      - spatial_path      (waypoint JSON for moving sources)
+    The next two control room acoustics (afir convolution against a curated
+    room IR), independent of placement — a clip can have a cathedral
+    without binaural position, and vice versa:
+      - spatial_space     (slug from assets/spaces/spaces.json — e.g.
+                           "cathedral", "cave", "opera-house", "small-room")
+      - reverb_send       (per-clip wet amount in [0, 1]; empty = use the
+                           preset's default_wet)
 
     Arguments:
       azimuth   — optional fixed azimuth in degrees [0, 360). Wraps.
@@ -527,7 +556,11 @@ def spatialize_row(
                   [{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]
                   for a left→right sweep across the full clip duration.
                   Each waypoint needs t_frac (0–1), az (degrees), el (degrees).
-      clear     — if True, wipes all three spatial columns and the row
+      space     — optional slug from spaces.json. Pass "" or "anechoic" for
+                  dry/no room. Unknown slugs error with the valid list.
+      wet       — optional wet/dry mix override in [0, 1]. Defaults to the
+                  preset's default_wet when omitted.
+      clear     — if True, wipes all five spatial columns and the row
                   reverts to legacy L/R amplitude panning. Cannot be combined
                   with other args.
 
@@ -539,17 +572,35 @@ def spatialize_row(
 
     updates: dict = {}
     if clear:
-        if azimuth is not None or elevation is not None or path is not None:
+        if (azimuth is not None or elevation is not None or path is not None
+                or space is not None or wet is not None):
             return json.dumps({"error": "clear=True cannot be combined with other spatial args"})
         updates["spatial_azimuth"] = ""
         updates["spatial_elevation"] = ""
         updates["spatial_path"] = ""
+        updates["spatial_space"] = ""
+        updates["reverb_send"] = ""
     else:
         if azimuth is not None:
             updates["spatial_azimuth"] = f"{azimuth % 360:.2f}"
         if elevation is not None:
             el = max(-90.0, min(90.0, float(elevation)))
             updates["spatial_elevation"] = f"{el:.2f}"
+        if space is not None:
+            # Validate against the manifest by scanning assets/spaces/spaces.json
+            # so a typo doesn't silently disable reverb. Treat "anechoic"/""
+            # as the dry baseline (no validation needed).
+            slug = space.strip()
+            if slug and slug not in ("anechoic", "dry"):
+                valid = _spatial_space_slugs()
+                if valid is not None and slug not in valid:
+                    return json.dumps({"error": f"unknown space '{slug}'; valid: {sorted(valid)}"})
+            updates["spatial_space"] = slug if slug != "anechoic" else ""
+        if wet is not None:
+            w = float(wet)
+            if not (0.0 <= w <= 1.0):
+                return json.dumps({"error": f"wet must be in [0, 1], got {wet}"})
+            updates["reverb_send"] = f"{w:.3f}"
         if path is not None:
             # Validate waypoint shape: list of dicts each with numeric t_frac/az/el.
             if not isinstance(path, list):

@@ -2,16 +2,24 @@
 
 ## Intent
 
-Turn any script row with a `spatial_azimuth` / `spatial_path` value into a
-prerendered binaural stereo WAV the main scene renderer can drop into its
-filter graph as if it were any other source.
+Turn any script row with a `spatial_azimuth` / `spatial_path` value *or* a
+`spatial_space` slug into a prerendered stereo WAV the main scene renderer
+can drop into its filter graph as if it were any other source. HRTF
+placement and room reverb compose orthogonally:
 
-The render pipeline calls `prerender_spatialized_clip()` once per spatial
-row *before* it builds the scene's `filter_complex`. The output goes into
-`<scene_dir>/.spatial/<row_index>.wav`, the main render replaces `row.file`
-with that path, and the existing pan/gain/fade chain treats it like any
-other clip — except the `pan` filter is skipped, since the audio is already
-binaural.
+- HRTF stage (sofalizer or ITD/ILD approximation) → produces label `[bin]`
+- Space stage (afir convolution against the room IR) → produces label `[out]`
+
+A row can use either, both, or neither. When neither is set the row skips
+the prerender entirely and the main render handles it via the legacy
+pan/gain/fade chain.
+
+The render pipeline calls `prerender_spatialized_clip()` once per row that
+needs *either* stage. The output goes into `<scene_dir>/.spatial/<i>.wav`,
+the main render replaces `row.file` with that path, and the existing
+pan/gain/fade chain treats it like any other clip — except the `pan` filter
+is skipped, since the audio is already positioned (and possibly reverbed)
+in the stereo field.
 
 ## Engine selection
 
@@ -49,12 +57,23 @@ keeps the main render unchanged from today.
 
 - `parse_waypoints(json)` — tolerant of garbage; returns clamped, sorted
   waypoints (or empty on parse failure).
-- `row_needs_spatial(azimuth, path)` — boolean, used by the main renderer
-  to decide whether to call prerender for a row.
+- `row_needs_spatial(azimuth, path)` — boolean, HRTF-only.
+- `row_needs_prerender(azimuth, path, space)` — boolean, used by the main
+  renderer to decide whether to call prerender for a row.
 - `find_sofa_file()` — `Option<PathBuf>`, search order documented in
   rustdoc.
-- `prerender_spatialized_clip(input, output, az, el, path)` — writes a
-  48 kHz / 24-bit / stereo WAV; errors carry ffmpeg stderr.
+- `find_spaces_dir()` — `Option<PathBuf>`, mirrors find_sofa_file with
+  `$PHARAOH_SPACES_DIR` override.
+- `load_spaces_with_availability()` — reads `spaces.json` and stamps
+  `available` on each entry. Errors and missing manifest both return an
+  empty list so the renderer stays robust.
+- `find_space_ir(slug)` — resolves a slug to `(ir_path, default_wet)`;
+  None for dry/missing.
+- `resolve_wet_amount(reverb_send, default_wet)` — parses the row column
+  with manifest fallback.
+- `list_spatial_spaces` (Tauri command) — frontend-facing wrapper.
+- `prerender_spatialized_clip(input, output, az, el, path, space_ir, wet)` —
+  writes 48 kHz / 24-bit / stereo; errors carry ffmpeg stderr.
 - `sample_trajectory(waypoints, fallback_az, fallback_el, t_frac)` —
   public for unit tests and CLI dry-runs.
 

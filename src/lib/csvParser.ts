@@ -5,7 +5,7 @@ export const SCRIPT_HEADERS = [
   "scene", "track", "type", "character", "prompt", "file",
   "start_ms", "duration_ms", "loop", "pan", "gain_db", "instruct",
   "fade_in_ms", "fade_out_ms", "reverb_send", "emotion", "notes", "gain_envelope",
-  "spatial_azimuth", "spatial_elevation", "spatial_path",
+  "spatial_azimuth", "spatial_elevation", "spatial_path", "spatial_space",
 ] as const;
 
 // ── Parse ───────────────────────────────────────────────────────────────────
@@ -38,6 +38,7 @@ export function parseScript(csvText: string): ScriptRow[] {
     spatial_azimuth:    row.spatial_azimuth    ?? "",
     spatial_elevation:  row.spatial_elevation  ?? "",
     spatial_path:       row.spatial_path       ?? "",
+    spatial_space:      row.spatial_space      ?? "",
   }));
 }
 

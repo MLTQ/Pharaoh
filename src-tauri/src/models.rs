@@ -633,4 +633,13 @@ pub struct ScriptRow {
     /// acrossfade-concats them back together for a continuous moving source.
     #[serde(default)]
     pub spatial_path: String,
+    /// Slug of a room preset from `assets/spaces/spaces.json`, e.g.
+    /// `"cathedral"`, `"cave"`, `"opera-house"`. Empty = dry (no room
+    /// reverb). Independent of spatial_azimuth/elevation — a clip can have
+    /// a room without binaural placement, and vice versa. Render chain
+    /// applies the room IR via ffmpeg's `afir` convolution filter after
+    /// the sofalizer step (if any). Wet amount comes from `reverb_send`
+    /// or, if empty, the manifest's `default_wet` for the chosen space.
+    #[serde(default)]
+    pub spatial_space: String,
 }

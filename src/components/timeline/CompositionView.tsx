@@ -80,6 +80,7 @@ function blankScriptRow(sceneNo: string, asset: DraggedAsset, track: string, sta
     spatial_azimuth: "",
     spatial_elevation: "",
     spatial_path: "",
+    spatial_space: "",
   };
 }
 
@@ -207,9 +208,12 @@ const GainLane: React.FC<GainLaneProps> = ({ width, gainDb, points, onChange }) 
 // top-right corner via absolute positioning so it doesn't push the wave or
 // label around.
 
-const SpatialIndicator: React.FC<{ azimuth: number; elevation: number; hasPath: boolean }> = ({
-  azimuth, elevation, hasPath,
-}) => {
+const SpatialIndicator: React.FC<{
+  azimuth: number;
+  elevation: number;
+  hasSpatial: boolean;
+  spaceSlug?: string;
+}> = ({ azimuth, elevation, hasSpatial, spaceSlug }) => {
   const size = 14;
   const cx = size / 2;
   const cy = size / 2;
@@ -219,23 +223,48 @@ const SpatialIndicator: React.FC<{ azimuth: number; elevation: number; hasPath: 
   const dy = cy - r * Math.cos(rad);
   // Elevation tints the dot — above ear-level = warmer, below = cooler. Subtle.
   const tint = elevation > 5 ? "#f7c97a" : elevation < -5 ? "#7ad0f7" : "currentColor";
+  // Space tag formatting: turn "opera-house" into "Opera house". The slug is
+  // already short by convention so we just title-case the first letter.
+  const spaceLabel = spaceSlug
+    ? spaceSlug.replace(/-/g, " ").replace(/^./, (c) => c.toUpperCase())
+    : null;
   return (
-    <svg
-      width={size}
-      height={size}
-      viewBox={`0 0 ${size} ${size}`}
+    <div
       style={{
         position: "absolute",
         top: 2,
         right: 8,
         pointerEvents: "none",
+        display: "flex",
+        alignItems: "center",
+        gap: 4,
         opacity: 0.85,
       }}
-      aria-label={hasPath ? `Spatial trajectory starting ~${Math.round(azimuth)}°` : `Spatial ${Math.round(azimuth)}° el ${Math.round(elevation)}°`}
+      aria-label={hasSpatial
+        ? `Spatial ${Math.round(azimuth)}° el ${Math.round(elevation)}°${spaceSlug ? ` in ${spaceSlug}` : ""}`
+        : `Space: ${spaceSlug}`}
     >
-      <circle cx={cx} cy={cy} r={r} fill="none" stroke="currentColor" strokeWidth={1} opacity={0.6} />
-      <circle cx={dx} cy={dy} r={2} fill={tint} />
-    </svg>
+      {hasSpatial && (
+        <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
+          <circle cx={cx} cy={cy} r={r} fill="none" stroke="currentColor" strokeWidth={1} opacity={0.6} />
+          <circle cx={dx} cy={dy} r={2} fill={tint} />
+        </svg>
+      )}
+      {spaceLabel && (
+        <span style={{
+          fontSize: 9,
+          fontWeight: 500,
+          padding: "1px 4px",
+          background: "color-mix(in oklch, currentColor 18%, transparent)",
+          borderRadius: 2,
+          letterSpacing: 0.2,
+          textTransform: "lowercase",
+          whiteSpace: "nowrap",
+        }}>
+          {spaceLabel}
+        </span>
+      )}
+    </div>
   );
 };
 
@@ -373,11 +402,12 @@ const DraggableClip: React.FC<DraggableClipProps> = ({
       }}
       title="Drag body to move · drag right edge to trim · right-click for actions"
     >
-      {clip.hasSpatial && (
+      {(clip.hasSpatial || clip.spaceSlug) && (
         <SpatialIndicator
           azimuth={clip.spatialAz ?? 0}
           elevation={clip.spatialEl ?? 0}
-          hasPath={false /* indicator is direction-only; path-vs-static read via tooltip */}
+          hasSpatial={!!clip.hasSpatial}
+          spaceSlug={clip.spaceSlug}
         />
       )}
       <div className="clip-label">{clip.label}</div>
@@ -594,6 +624,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         const hasSpatial = !!(row.spatial_azimuth || row.spatial_path);
         const spatialAz = hasSpatial ? (parseFloat(row.spatial_azimuth) || 0) : undefined;
         const spatialEl = hasSpatial ? (parseFloat(row.spatial_elevation) || 0) : undefined;
+        const spaceSlug = row.spatial_space.trim() || undefined;
         map.get(row.track)!.clips.push({
           start: startSec, len: durSec, label, take: 1,
           row_index: rowIndex,
@@ -603,6 +634,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           hasSpatial,
           spatialAz,
           spatialEl,
+          spaceSlug,
         });
       }
     });
@@ -1318,7 +1350,8 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           y={clipMenu.y}
           hasSpatial={!!(
             scriptRows[clipMenu.rowIndex]?.spatial_azimuth ||
-            scriptRows[clipMenu.rowIndex]?.spatial_path
+            scriptRows[clipMenu.rowIndex]?.spatial_path ||
+            scriptRows[clipMenu.rowIndex]?.spatial_space
           )}
           onClose={() => setClipMenu(null)}
           onShowTakes={() => setTakesPopover({
@@ -1352,11 +1385,13 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           row={scriptRows[spatializeRow]}
           rowLabel={scriptRowLabel(scriptRows[spatializeRow])}
           onClose={() => setSpatializeRow(null)}
-          onSave={(azimuth, elevation, path) => {
+          onSave={({ azimuth, elevation, path, space, reverbSend }) => {
             handleUpdateRow(spatializeRow, {
               spatial_azimuth: azimuth,
               spatial_elevation: elevation,
               spatial_path: path,
+              spatial_space: space,
+              reverb_send: reverbSend,
             });
             setSpatializeRow(null);
           }}

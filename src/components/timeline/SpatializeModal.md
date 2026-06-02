@@ -2,10 +2,20 @@
 
 ## Intent
 
-The one place a user (or a future agent surface) sets spatial placement on
-a single timeline clip. Reads/writes three columns on `ScriptRow`:
-`spatial_azimuth`, `spatial_elevation`, `spatial_path`. The render path in
+The one place a user (or a future agent surface) sets spatial placement
+*and* a room space on a single timeline clip. Reads/writes five columns on
+`ScriptRow`: `spatial_azimuth`, `spatial_elevation`, `spatial_path`,
+`spatial_space`, and `reverb_send`. The render path in
 `src-tauri/src/commands/audio_spatial.rs` is the canonical consumer.
+
+## Two orthogonal axes
+
+The modal exposes binaural placement (the dial + waypoint list) and a
+*Space* picker as separate concerns. A clip can be placed at az=90° with
+no room, or sit at the front in a cathedral, or both. The Save logic only
+persists each axis when it differs from the defaults — empty
+`spatial_space` means dry, empty `reverb_send` means "use the manifest's
+default_wet for the chosen space."
 
 ## Behavior
 
@@ -45,6 +55,11 @@ ffmpeg segmented render, just continuous rather than chunked.
 - Path is JSON `[{t_frac, az, el}, ...]`, sorted by t_frac, with az
   wrapped to `[0, 360)` and el clamped to `[-90, 90]`. Empty string when
   in Static mode or trajectory mode without any waypoints.
+- Space is the catalog slug, with `"anechoic"` collapsed to `""` so the
+  CSV doesn't carry a no-op default.
+- ReverbSend (wet amount) is only persisted when the user dragged the
+  slider — otherwise it stays `""` and the renderer applies the manifest
+  default. The slider shows the effective value in either case.
 
 ## Clear spatial
 

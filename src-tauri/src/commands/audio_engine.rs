@@ -1,5 +1,7 @@
 use crate::app_support::{app_projects_dir, read_script_rows, scene_dir};
-use crate::commands::audio_spatial::{prerender_spatialized_clip, row_needs_spatial};
+use crate::commands::audio_spatial::{
+    find_space_ir, prerender_spatialized_clip, resolve_wet_amount, row_needs_prerender,
+};
 use crate::commands::sidecar::{read_sidecar, write_sidecar};
 use crate::error::{Error, Result};
 use crate::models::{ScriptRow, SidecarMeta};
@@ -514,23 +516,36 @@ pub async fn render_scene_with_projects_dir(
 
     // ── Spatial prerender pass ────────────────────────────────────────────
     //
-    // Each row with `spatial_azimuth` or `spatial_path` set is rendered to a
-    // self-contained binaural stereo WAV under `<scene>/.spatial/<i>.wav`.
-    // The main filter graph reads those files as inputs instead of the
+    // Each row that needs a prerender — HRTF placement (spatial_azimuth /
+    // spatial_path) and/or a room IR (spatial_space) — gets rendered to a
+    // self-contained stereo WAV under `<scene>/.spatial/<i>.wav`. The main
+    // filter graph then reads those files as inputs instead of the
     // originals, and skips its own `pan` filter for those rows (since the
-    // audio is already binaural). See `audio_spatial.rs` for the details.
+    // audio is already positioned in the stereo field, with room ambience
+    // baked in when a space is selected). See `audio_spatial.rs`.
     let spatial_dir = scene_root.join(".spatial");
     let mut effective_files: Vec<String> = Vec::with_capacity(placed.len());
     let mut spatial_flags: Vec<bool> = Vec::with_capacity(placed.len());
     for (i, row) in placed.iter().enumerate() {
-        if row_needs_spatial(&row.spatial_azimuth, &row.spatial_path) {
+        if row_needs_prerender(&row.spatial_azimuth, &row.spatial_path, &row.spatial_space) {
             let out_path = spatial_dir.join(format!("{}.wav", i));
+            // Resolve the room IR (if any) and the wet/dry amount. Missing IR
+            // files are tolerated: find_space_ir returns None so the prerender
+            // just does the binaural step. That way an unfinished
+            // download_spatial_assets.sh run still produces good renders for
+            // every row whose preset *did* download.
+            let (space_ir, wet) = match find_space_ir(&row.spatial_space) {
+                Some((path, default_wet)) => (Some(path), resolve_wet_amount(&row.reverb_send, default_wet)),
+                None => (None, 0.0),
+            };
             prerender_spatialized_clip(
                 Path::new(&row.file),
                 &out_path,
                 &row.spatial_azimuth,
                 &row.spatial_elevation,
                 &row.spatial_path,
+                space_ir.as_deref(),
+                wet,
             )?;
             effective_files.push(out_path.to_string_lossy().to_string());
             spatial_flags.push(true);

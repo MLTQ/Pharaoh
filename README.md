@@ -35,7 +35,8 @@ The GUI can run locally while the Python servers run on another machine, as long
 - Audio Upscale page for running AudioSR against already-generated assets through the Post server.
 - Clip Studio for importing long recordings, zooming/cropping, previewing from the crop start, applying gain/filter/normalization, drawing fade envelopes, saving child assets, and sending clips to scene rows.
 - Scene rendering through ffmpeg with script-row placement, gain, fades, pan, and render output.
-- Spatial (binaural) audio placement: right-click any timeline clip → Spatialize… to place it in 3D space around the listener with azimuth + elevation dials, arbitrary waypoint trajectories for moving sources (plane flyby, circling character), and Web Audio HRTF preview. Renders through ffmpeg `sofalizer` with the MIT KEMAR HRTF set (run `./inference/download_sofa.sh` to install) or a pure-ffmpeg ITD+ILD approximation if no SOFA file is present.
+- Spatial (binaural) audio placement: right-click any timeline clip → Spatialize… to place it in 3D space around the listener with azimuth + elevation dials, arbitrary waypoint trajectories for moving sources (plane flyby, circling character), and Web Audio HRTF preview. Renders through ffmpeg `sofalizer` with the MIT KEMAR HRTF set or a pure-ffmpeg ITD+ILD approximation as a fallback.
+- Spatial spaces: a curated catalog of FOSS room impulse responses (vocal booth, bedroom, office, stairwell, hallway, small hall, concert hall, opera house, church, cathedral, mausoleum, cave, forest) drawn from the OpenAir Library + Aachen AIR database. Pick one per clip in the Spatialize modal; the renderer applies it via ffmpeg `afir` convolution. Run `./inference/download_spatial_assets.sh` to fetch the HRTF SOFA + the IR starter pack.
 - Headless CLI coverage for project/scene/script/character/asset/generation/composition/post/setup workflows.
 
 ## Prerequisites
@@ -223,6 +224,8 @@ Each scene's `script.csv` uses these columns:
 | `spatial_azimuth` | Binaural azimuth in degrees `[0, 360)`. 0 = front, 90 = right, 180 = back, 270 = left. Empty = no spatial. |
 | `spatial_elevation` | Binaural elevation in degrees `[-90, +90]`. 0 = ear level. |
 | `spatial_path` | JSON waypoint trajectory for moving sources: `[{"t_frac":0,"az":270,"el":0},…]`. Empty = static position. |
+| `spatial_space` | Slug of a room preset from `assets/spaces/spaces.json` (e.g. `cathedral`, `cave`, `opera-house`). Empty = dry. Renderer applies via ffmpeg `afir`. |
+| `reverb_send` | Per-clip wet/dry mix in `[0, 1]` for the chosen space. Empty = use the preset's `default_wet`. Ignored when `spatial_space` is empty. |
 
 `DIRECTION` rows are skipped during generation and rendering.
 
@@ -256,6 +259,7 @@ pharaoh script fountain-write <project_id> <scene_slug> ./scene.fountain
 pharaoh script update-row <project_id> <scene_slug> 3 --prompt "new line" --instruct "low, afraid"
 pharaoh script spatialize <project_id> <scene_slug> 3 --azimuth 90 --elevation 0
 pharaoh script spatialize <project_id> <scene_slug> 3 --path '[{"t_frac":0,"az":270,"el":0},{"t_frac":1,"az":90,"el":0}]'
+pharaoh script spatialize <project_id> <scene_slug> 3 --space cathedral --wet 0.4
 pharaoh script spatialize <project_id> <scene_slug> 3 --clear
 pharaoh script import <project_id> ./episode.fountain --dry-run
 
@@ -348,7 +352,7 @@ The `pipeline` resource is the agent's primary situational-awareness tool — re
 | `project_status` | Per-scene completion matrix (same as pipeline resource, as a tool) |
 | `read_script` | Script rows as structured JSON |
 | `update_script_row` | Patch a row in `script.csv` |
-| `spatialize_row` | Place a row in 3D binaural space (azimuth/elevation + optional waypoint trajectory) |
+| `spatialize_row` | Place a row in 3D binaural space (azimuth/elevation + optional waypoint trajectory) and/or apply a room preset (cathedral, cave, opera house, etc.) via afir convolution |
 | `generate_tts` | Submit TTS job → `job_id` |
 | `generate_sfx` | Submit SFX job → `job_id` |
 | `generate_music` | Submit music job; `batch_size > 1` fans out multiple seeds for take comparison |

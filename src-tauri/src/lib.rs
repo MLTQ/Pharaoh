@@ -89,6 +89,8 @@ pub fn run() {
             commands::setup_check::check_setup,
             // Project archive
             commands::archive::archive_project,
+            // Spatial audio (HRTF + room IR catalog)
+            commands::audio_spatial::list_spatial_spaces,
             // Audio engine (ffmpeg)
             commands::audio_engine::import_audio_asset,
             commands::audio_engine::normalize_clip,

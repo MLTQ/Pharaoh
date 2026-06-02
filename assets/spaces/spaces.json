@@ -1,0 +1,160 @@
+{
+  "version": 1,
+  "_comment": "Curated FOSS room impulse responses. The render path applies these via ffmpeg's afir convolution filter. Each space entry is independent of HRTF placement — a clip can have a room without binaural position, and vice versa. Run `inference/download_spatial_assets.sh` to fetch the entries that have URLs; drop your own IR WAVs into this directory and add them to spaces[] to extend.",
+  "spaces": [
+    {
+      "slug": "anechoic",
+      "label": "Anechoic / Dry",
+      "description": "No room reverb. Pure HRTF placement. Default for outdoor scenes, close-mic'd dialogue, or any sound you want to sit unmodified in the mix.",
+      "file": null,
+      "type": "dry",
+      "source": null,
+      "url": null,
+      "license": null,
+      "default_wet": 0.0
+    },
+    {
+      "slug": "vocal-booth",
+      "label": "Vocal Booth",
+      "description": "Tight, dead, treated voice-over booth. Tiny room with heavy absorption. Adds a hint of intimacy without any audible tail.",
+      "file": "aachen-air-booth.wav",
+      "type": "stereo",
+      "source": "Aachen Impulse Response (AIR) database — booth",
+      "url": "https://www.iks.rwth-aachen.de/fileadmin/user_upload/downloads/forschung/tools-downloads/air_database_release_1_4.zip",
+      "license": "CC-BY-SA 3.0",
+      "default_wet": 0.15
+    },
+    {
+      "slug": "bedroom",
+      "label": "Small Bedroom",
+      "description": "Small untreated room with furniture absorbing high frequencies. Use for intimate domestic scenes, phone calls, late-night confessions.",
+      "file": "openair-bedroom.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — domestic bedroom",
+      "url": "https://openair.hosted.york.ac.uk/wp-content/uploads/2017/01/bedroom_ir.wav",
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.20
+    },
+    {
+      "slug": "office",
+      "label": "Office",
+      "description": "Generic medium-sized office. Slight presence, short reverb tail, no obvious flutter. Good utility space for workplace scenes.",
+      "file": "aachen-air-office.wav",
+      "type": "stereo",
+      "source": "Aachen AIR — office",
+      "url": "https://www.iks.rwth-aachen.de/fileadmin/user_upload/downloads/forschung/tools-downloads/air_database_release_1_4.zip",
+      "license": "CC-BY-SA 3.0",
+      "default_wet": 0.20
+    },
+    {
+      "slug": "stairwell",
+      "label": "Stairwell",
+      "description": "Concrete fire escape — narrow, hard surfaces, flutter echo and a noticeable tail. Great for tension scenes, footsteps, chase sequences.",
+      "file": "aachen-air-stairway.wav",
+      "type": "stereo",
+      "source": "Aachen AIR — stairway",
+      "url": "https://www.iks.rwth-aachen.de/fileadmin/user_upload/downloads/forschung/tools-downloads/air_database_release_1_4.zip",
+      "license": "CC-BY-SA 3.0",
+      "default_wet": 0.30
+    },
+    {
+      "slug": "hallway",
+      "label": "Long Hallway",
+      "description": "Indoor corridor with slap-back from the far wall. Pinches voice slightly, gives footsteps that institutional feel — hospitals, schools, hotels.",
+      "file": "openair-corridor.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — corridor",
+      "url": "https://openair.hosted.york.ac.uk/wp-content/uploads/2017/02/corridor_ir.wav",
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.25
+    },
+    {
+      "slug": "small-hall",
+      "label": "Small Hall",
+      "description": "Community hall or large rehearsal room. Medium reverb tail (~1.5s), present but not theatrical. Lectures, meetings, small live performances.",
+      "file": "openair-small-hall.wav",
+      "type": "stereo",
+      "source": "OpenAir Library",
+      "url": null,
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.30
+    },
+    {
+      "slug": "concert-hall",
+      "label": "Concert Hall",
+      "description": "Mid-size orchestral hall, ~2s decay with rich early reflections. Use for performance scenes, broadcast booths, anywhere wanting that designed-acoustic feel.",
+      "file": "openair-concert-hall.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — performance space",
+      "url": null,
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.30
+    },
+    {
+      "slug": "opera-house",
+      "label": "Opera House",
+      "description": "Large velvet-and-gilt performance hall. Long, warm decay (~3s) with a clear early-reflection signature. The space of grand drama.",
+      "file": "openair-opera-house.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — opera house",
+      "url": null,
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.35
+    },
+    {
+      "slug": "church",
+      "label": "Stone Church",
+      "description": "Medium-sized stone church. ~4s decay, prominent low-mid coloration. Sermons, weddings, choral scenes, anywhere you want sanctity without going full cathedral.",
+      "file": "openair-st-andrews-church.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — St Andrews Church",
+      "url": "https://openair.hosted.york.ac.uk/wp-content/uploads/2017/01/st-andrews-church.wav",
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.35
+    },
+    {
+      "slug": "cathedral",
+      "label": "Cathedral",
+      "description": "Vast stone cathedral (York Minster vibe). ~6–9s decay, deep modal resonances. The classic 'voice of God' space. Use sparingly; intense.",
+      "file": "openair-york-minster.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — York Minster (Damian Murphy, U. York)",
+      "url": "https://openair.hosted.york.ac.uk/wp-content/uploads/2017/02/yorkminster_ir.wav",
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.40
+    },
+    {
+      "slug": "mausoleum",
+      "label": "Mausoleum",
+      "description": "Hamilton Mausoleum-style chamber. ~15s decay, eerie modal ringing. The signature 'longest reverb in the world' acoustic. Pure dread.",
+      "file": "openair-hamilton-mausoleum.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — Hamilton Mausoleum",
+      "url": "https://openair.hosted.york.ac.uk/wp-content/uploads/2017/02/hamilton_mausoleum_ir.wav",
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.45
+    },
+    {
+      "slug": "cave",
+      "label": "Cave",
+      "description": "Limestone cavern. Complex non-uniform reflections, ~4s irregular tail, audible flutter. Spelunking, underground scenes, anything subterranean.",
+      "file": "openair-koli-cave.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — Koli national park cave",
+      "url": null,
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.40
+    },
+    {
+      "slug": "forest",
+      "label": "Forest",
+      "description": "Wooded outdoor space. Almost dry but with sparse, diffuse reflections from distant trees. Adds ambient depth without sounding 'indoors'.",
+      "file": "openair-forest.wav",
+      "type": "stereo",
+      "source": "OpenAir Library — outdoor woodland",
+      "url": null,
+      "license": "CC-BY-SA 4.0",
+      "default_wet": 0.15
+    }
+  ]
+}

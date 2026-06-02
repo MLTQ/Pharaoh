@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { convertFileSrc } from "@tauri-apps/api/core";
-import type { ScriptRow, SpatialWaypoint } from "../../lib/types";
+import { listSpatialSpaces } from "../../lib/tauriCommands";
+import type { ScriptRow, SpatialSpace, SpatialWaypoint } from "../../lib/types";
 
 /**
  * Spatialize modal — place this clip in 3D space around the listener.
@@ -18,7 +19,13 @@ import type { ScriptRow, SpatialWaypoint } from "../../lib/types";
 export interface SpatializeModalProps {
   row: ScriptRow;
   rowLabel: string;
-  onSave: (azimuth: string, elevation: string, path: string) => void;
+  onSave: (fields: {
+    azimuth: string;
+    elevation: string;
+    path: string;
+    space: string;
+    reverbSend: string;
+  }) => void;
   onClose: () => void;
 }
 
@@ -34,11 +41,44 @@ export const SpatializeModal: React.FC<SpatializeModalProps> = ({
   const initialAz = parseFloat(row.spatial_azimuth) || 0;
   const initialEl = parseFloat(row.spatial_elevation) || 0;
   const initialPath = parseWaypointsTolerant(row.spatial_path);
+  const initialSpace = row.spatial_space || "anechoic";
+  const initialReverbSend = parseFloat(row.reverb_send);
 
   const [azimuth, setAzimuth] = useState(initialAz);
   const [elevation, setElevation] = useState(initialEl);
   const [waypoints, setWaypoints] = useState<SpatialWaypoint[]>(initialPath);
   const [mode, setMode] = useState<Mode>(initialPath.length > 0 ? "trajectory" : "static");
+
+  // ── Space catalog ────────────────────────────────────────────────────────
+  const [spaces, setSpaces] = useState<SpatialSpace[]>([]);
+  const [spaceSlug, setSpaceSlug] = useState<string>(initialSpace);
+  // wetOverride === null → use the manifest's default_wet for the chosen space.
+  // Set when the user moves the slider, persisted via the reverb_send column.
+  const [wetOverride, setWetOverride] = useState<number | null>(
+    Number.isFinite(initialReverbSend) && row.reverb_send.trim() !== "" ? initialReverbSend : null,
+  );
+
+  useEffect(() => {
+    let cancelled = false;
+    listSpatialSpaces().then((list) => {
+      if (cancelled) return;
+      setSpaces(list);
+      // If the row's stored slug isn't in the catalog (corrupt or manifest
+      // changed), fall back to anechoic. We don't quietly drop the value
+      // until Save — preserves data on first read.
+    }).catch((e) => {
+      console.warn("[SpatializeModal] listSpatialSpaces failed:", e);
+    });
+    return () => { cancelled = true; };
+  }, []);
+
+  const selectedSpace: SpatialSpace | null = useMemo(
+    () => spaces.find((s) => s.slug === spaceSlug) ?? null,
+    [spaces, spaceSlug],
+  );
+  const effectiveWet: number = wetOverride != null
+    ? wetOverride
+    : (selectedSpace?.default_wet ?? 0);
 
   // Track which waypoint the dial currently controls when in trajectory mode.
   // The static (az, el) above are also the *fallback* (start point) when no
@@ -72,13 +112,22 @@ export const SpatializeModal: React.FC<SpatializeModalProps> = ({
           el: round1(clamp(w.el, -90, 90)),
         })))
       : "";
-    onSave(azStr, elStr, pathStr);
+    // Persist the space slug, treating "anechoic" as the dry baseline that
+    // gets stored as empty (avoids polluting CSV with a no-op default).
+    const spaceStr = spaceSlug === "anechoic" ? "" : spaceSlug;
+    // Only persist a reverb_send override when the user dragged the slider.
+    // Leaving it empty means "use the manifest default for the selected space",
+    // which keeps Save round-trippable with the dropdown's defaults.
+    const reverbStr = wetOverride != null
+      ? String(round3(clamp(wetOverride, 0, 1)))
+      : "";
+    onSave({ azimuth: azStr, elevation: elStr, path: pathStr, space: spaceStr, reverbSend: reverbStr });
   };
 
   const handleClear = () => {
-    // Wipe spatialization entirely — caller writes empty strings, which the
+    // Wipe all spatial fields — caller writes empty strings, which the
     // render path treats as "no spatial data" and falls back to L/R pan.
-    onSave("", "", "");
+    onSave({ azimuth: "", elevation: "", path: "", space: "", reverbSend: "" });
   };
 
   // ── Web Audio preview ───────────────────────────────────────────────────
@@ -323,6 +372,105 @@ export const SpatializeModal: React.FC<SpatializeModalProps> = ({
               </div>
             )}
           </div>
+        </div>
+
+        {/* ── Space (room IR) picker ── */}
+        <div style={{ marginTop: 16, padding: 12, background: "var(--bg-2)", borderRadius: 4 }}>
+          <div style={{ display: "flex", alignItems: "center", marginBottom: 8 }}>
+            <span style={{ fontWeight: 600, fontSize: 13, flex: 1 }}>Space</span>
+            <span style={{ fontSize: 11, color: "var(--fg-3)" }}>
+              ffmpeg afir convolution
+            </span>
+          </div>
+          {spaces.length === 0 ? (
+            <div style={{ fontSize: 12, color: "var(--fg-3)" }}>
+              No space catalog found. Run <code>./inference/download_spatial_assets.sh</code> to install the curated starter pack.
+            </div>
+          ) : (
+            <>
+              <select
+                value={spaceSlug}
+                onChange={(e) => {
+                  setSpaceSlug(e.target.value);
+                  // Reset wet override when switching spaces — new default kicks in.
+                  setWetOverride(null);
+                }}
+                style={{
+                  width: "100%",
+                  background: "var(--bg-1)",
+                  color: "var(--fg-0)",
+                  border: "1px solid var(--fg-3)",
+                  borderRadius: 3,
+                  padding: "5px 8px",
+                  fontSize: 13,
+                  marginBottom: 8,
+                }}
+              >
+                {spaces.map((sp) => (
+                  <option
+                    key={sp.slug}
+                    value={sp.slug}
+                    disabled={!sp.available}
+                  >
+                    {sp.label}{sp.available ? "" : "  (not installed)"}
+                  </option>
+                ))}
+              </select>
+              {selectedSpace && (
+                <div style={{ fontSize: 11, color: "var(--fg-2)", marginBottom: 8 }}>
+                  {selectedSpace.description}
+                  {selectedSpace.source && (
+                    <span style={{ display: "block", color: "var(--fg-3)", marginTop: 3 }}>
+                      Source: {selectedSpace.source}{selectedSpace.license ? ` · ${selectedSpace.license}` : ""}
+                    </span>
+                  )}
+                  {!selectedSpace.available && selectedSpace.file && (
+                    <span style={{ display: "block", color: "var(--warn)", marginTop: 3 }}>
+                      IR file not installed yet — run <code>./inference/download_spatial_assets.sh</code> or drop the file in <code>assets/spaces/</code>.
+                    </span>
+                  )}
+                </div>
+              )}
+              {selectedSpace && selectedSpace.slug !== "anechoic" && (
+                <div style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 12 }}>
+                  <span style={{ color: "var(--fg-3)", minWidth: 44 }}>Wet</span>
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.01}
+                    value={effectiveWet}
+                    onChange={(e) => setWetOverride(parseFloat(e.target.value))}
+                    style={{ flex: 1 }}
+                  />
+                  <span style={{
+                    color: "var(--fg-0)",
+                    fontFamily: "ui-monospace, monospace",
+                    fontSize: 12,
+                    minWidth: 36,
+                    textAlign: "right",
+                  }}>
+                    {Math.round(effectiveWet * 100)}%
+                  </span>
+                  {wetOverride != null && (
+                    <button
+                      onClick={() => setWetOverride(null)}
+                      style={{
+                        background: "transparent",
+                        border: "1px solid var(--fg-3)",
+                        color: "var(--fg-2)",
+                        borderRadius: 3,
+                        padding: "2px 6px",
+                        fontSize: 10,
+                        cursor: "pointer",
+                      }}
+                      title="Revert to preset default"
+                    >reset</button>
+                  )}
+                </div>
+              )}
+            </>
+          )}
         </div>
 
         {/* ── Trajectory editor ── */}
