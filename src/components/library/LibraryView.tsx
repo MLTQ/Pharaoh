@@ -39,6 +39,7 @@ import {
   submitTtsVoiceDesign,
   exportLibraryCharacter,
   importLibraryCharacterFromFile,
+  importAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
@@ -498,6 +499,83 @@ export const LibraryView: React.FC = () => {
     }
   };
 
+  // Native open dialog → returns the picked source path or null.
+  const pickAudioFile = async (): Promise<string | null> => {
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const result = await open({
+        multiple: false,
+        filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a"] }],
+      });
+      if (!result) return null;
+      return typeof result === "string" ? result : (result as { path: string }).path;
+    } catch {
+      return null;
+    }
+  };
+
+  // Voice tab: upload an existing recording as the character's single voice ref.
+  const handleUploadCharacterReference = async () => {
+    if (!character?.library_id) {
+      setDesignGenError("Save the character first.");
+      return;
+    }
+    const source = await pickAudioFile();
+    if (!source) return;
+    setDesignGenError(null);
+    try {
+      const { absolute_path } = await importAudioIntoLibraryBundle({
+        libraryId: character.library_id,
+        sourcePath: source,
+        slot: "design",
+        destName: "", // backend timestamps it
+      });
+      const updated: Character = {
+        ...character,
+        voice_assignment: {
+          ...character.voice_assignment,
+          ref_audio_path: absolute_path,
+        },
+      };
+      setCharacter(updated);
+      // Auto-save: uploads are a high-value action; don't make the user remember.
+      setSaving(true);
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setDesignGenError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Palette tab: upload an existing recording as a specific emotion's reference.
+  const handleUploadPaletteReference = async (emotion: string) => {
+    if (!character?.library_id) {
+      setPaletteGenError("Save the character first.");
+      return;
+    }
+    const source = await pickAudioFile();
+    if (!source) return;
+    setPaletteGenError(null);
+    try {
+      const { absolute_path } = await importAudioIntoLibraryBundle({
+        libraryId: character.library_id,
+        sourcePath: source,
+        slot: "palette",
+        // Use the emotion slug as the filename so it lands alongside generated
+        // takes (`<emotion>_<seed>_<ts>.wav`) without conflicting.
+        destName: `${emotion}_upload_${Date.now()}.wav`,
+      });
+      // Approve as the reference for this emotion in one shot — same path as
+      // generated-take approval flow.
+      await handleApprovePaletteTake(emotion, absolute_path);
+    } catch (e) {
+      setPaletteGenError(e instanceof Error ? e.message : "Upload failed");
+    }
+  };
+
   const handleSaveDesignAsReference = async (audioPath: string) => {
     if (!character) return;
     const transcript = (voiceDesignTestLine || DEFAULT_TEST_LINE).trim();
@@ -892,7 +970,7 @@ export const LibraryView: React.FC = () => {
               <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line-1)" }}>
                 <label style={labelStyle}>Character reference audio</label>
                 <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
-                  Single-ref fallback used when no palette is approved. Approved Voice Design takes save here automatically.
+                  Single-ref fallback used when no palette is approved. Approved Voice Design takes save here automatically, or you can upload an existing recording to clone from (Pharaoh-b9hf).
                 </p>
                 {character.voice_assignment.ref_audio_path ? (
                   <div style={{
@@ -912,6 +990,12 @@ export const LibraryView: React.FC = () => {
                     </span>
                     <button
                       className="btn btn-sm"
+                      onClick={handleUploadCharacterReference}
+                      disabled={!character.library_id || saving}
+                      title="Replace the reference with an uploaded audio file"
+                    >replace</button>
+                    <button
+                      className="btn btn-sm"
                       style={{ color: "var(--sfx)" }}
                       onClick={() => patch((c) => ({
                         ...c,
@@ -924,8 +1008,17 @@ export const LibraryView: React.FC = () => {
                     padding: "10px 12px", marginBottom: 10,
                     border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
                     color: "var(--fg-4)", fontSize: 11, lineHeight: 1.6,
+                    display: "flex", flexDirection: "column", gap: 8,
                   }}>
-                    No reference audio yet. Generate one above, or import a take from another tool.
+                    <span>
+                      No reference audio yet. Generate one above with Voice Design, or upload an existing recording.
+                    </span>
+                    <button
+                      className="btn btn-sm"
+                      onClick={handleUploadCharacterReference}
+                      disabled={!character.library_id || saving}
+                      style={{ alignSelf: "flex-start" }}
+                    >Upload audio file…</button>
                   </div>
                 )}
 
@@ -1113,6 +1206,7 @@ export const LibraryView: React.FC = () => {
                             }))
                           }
                           onGenerateTake={() => handleGeneratePaletteTake(entry)}
+                          onUploadTake={() => handleUploadPaletteReference(entry.emotion)}
                           onApprove={(audioPath) => handleApprovePaletteTake(entry.emotion, audioPath)}
                           onQa={(jobId, status) => {
                             if (!jobId.startsWith("disk::")) setQaStatus(jobId, status);
@@ -1193,9 +1287,10 @@ const PaletteRow: React.FC<{
   canGenerate: boolean;
   onChangeDirection: (direction: string) => void;
   onGenerateTake: () => void;
+  onUploadTake: () => void;
   onApprove: (audioPath: string) => void;
   onQa: (jobId: string, status: QaJobStatus) => void;
-}> = ({ entry, allTakes, running, canGenerate, onChangeDirection, onGenerateTake, onApprove, onQa }) => {
+}> = ({ entry, allTakes, running, canGenerate, onChangeDirection, onGenerateTake, onUploadTake, onApprove, onQa }) => {
   const [expanded, setExpanded] = useState(false);
   const approved = entry.qa_status === "approved";
   return (
@@ -1246,7 +1341,7 @@ const PaletteRow: React.FC<{
             placeholder="e.g. Slower, more deliberate. Controlled dread just beneath the surface."
           />
 
-          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10 }}>
+          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 10, flexWrap: "wrap" }}>
             <button
               className="btn btn-primary"
               onClick={onGenerateTake}
@@ -1259,11 +1354,18 @@ const PaletteRow: React.FC<{
             >
               {running ? "Generating…" : "Generate take"}
             </button>
+            <button
+              className="btn"
+              onClick={onUploadTake}
+              disabled={running || !canGenerate}
+              title="Upload an existing recording (e.g. a voice actor take) as this emotion's reference"
+              style={{ opacity: canGenerate ? 1 : 0.4 }}
+            >Upload reference…</button>
             {running && <RunningBadge label="Synthesising…" />}
           </div>
 
           {allTakes.length === 0 && !running && (
-            <EmptyTakes label="No takes yet — click Generate take." />
+            <EmptyTakes label="No takes yet — generate one or upload an existing recording." />
           )}
           {allTakes.length > 0 && (
             <TakeList label={`Takes · ${allTakes.length}`}>

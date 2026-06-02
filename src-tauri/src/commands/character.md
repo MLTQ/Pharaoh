@@ -54,6 +54,11 @@ relativization pass.
 - **Interacts with**: `LibraryView.tsx` Import… button, `zip` crate.
 - **Rationale**: Always forks (new `library_id`) — never replaces a local entry, so imports are always safe. Guards against zip-bomb path traversal (`..`, absolute paths, drive prefixes) before writing anything to disk.
 
+### `import_audio_into_library_bundle` (Pharaoh-b9hf)
+- **Does**: Copies an external audio file into a library character's bundle so the file lives alongside generated content. `slot` is whitelisted to `design` / `palette` / `imports` and `dest_name` is sanitized against path-traversal. Preserves recognized audio extensions (`wav`, `mp3`, `aac`, `ogg`, `flac`, `m4a`); falls back to `.wav` for anything else.
+- **Interacts with**: `LibraryView.tsx` Voice-tab "Upload audio file…" and Palette-tab "Upload reference…" buttons.
+- **Rationale**: Clone-from-file workflow: clip a voice actor's recording, upload as either the character's single voice reference (slot=design) or a specific emotion's palette reference (slot=palette). The copy is essential — paths inside a library bundle must be relative for portability (.pharaoh-character export), so an external absolute path can't be used directly.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

@@ -384,6 +384,91 @@ pub fn pull_character_from_library(
     Ok(fresh)
 }
 
+// ── Clone-from-file: import external audio into a library bundle ────────────
+
+#[derive(Debug, Serialize)]
+pub struct ImportedAudioPath {
+    /// Absolute path to the file as it now lives inside the library bundle.
+    /// The UI uses this directly as `ref_audio_path` for voice/palette refs.
+    pub absolute_path: String,
+}
+
+/// Copy an external audio file into a library character's bundle so the
+/// character stays portable (paths inside the bundle are relative).
+///
+/// - `slot` selects the sub-directory and is constrained to a small whitelist
+///   (`design`, `palette`, `imports`) to keep bundles tidy. Future slots
+///   (e.g. `dialogue`) can be added here.
+/// - `dest_name` is the final filename inside that slot. If empty, a
+///   timestamped fallback is used. The original file extension is preserved
+///   only when the source ends in one of the known audio extensions; otherwise
+///   `.wav` is appended.
+#[tauri::command]
+pub fn import_audio_into_library_bundle(
+    app: AppHandle,
+    library_id: String,
+    source_path: String,
+    slot: String,
+    dest_name: String,
+) -> Result<ImportedAudioPath> {
+    let projects_dir = app_projects_dir(&app)?;
+    let bundle_dir = library_character_dir(&projects_dir, &library_id);
+    if !bundle_dir.exists() {
+        return Err(Error::Other(format!(
+            "library character {} not found",
+            library_id
+        )));
+    }
+
+    let slot_clean = slot.trim();
+    if !matches!(slot_clean, "design" | "palette" | "imports") {
+        return Err(Error::Other(format!(
+            "unsupported slot '{}' (allowed: design, palette, imports)",
+            slot_clean
+        )));
+    }
+    let slot_dir = bundle_dir.join(slot_clean);
+    std::fs::create_dir_all(&slot_dir)?;
+
+    let src = std::path::Path::new(&source_path);
+    if !src.is_file() {
+        return Err(Error::Other(format!(
+            "source file does not exist: {}",
+            source_path
+        )));
+    }
+
+    // Resolve destination filename.
+    let src_ext = src
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .filter(|s| matches!(s.as_str(), "wav" | "mp3" | "aac" | "ogg" | "flac" | "m4a"))
+        .unwrap_or_else(|| "wav".to_string());
+    let stem = dest_name.trim();
+    let filename = if stem.is_empty() {
+        format!("imported_{}.{}", Utc::now().timestamp(), src_ext)
+    } else if std::path::Path::new(stem).extension().is_some() {
+        // Caller supplied an extension already — use as-is.
+        stem.to_string()
+    } else {
+        format!("{}.{}", stem, src_ext)
+    };
+    // Guard against `..` or path separators in the supplied name.
+    if filename.contains('/') || filename.contains('\\') || filename.contains("..") {
+        return Err(Error::Other(format!(
+            "destination filename '{}' must be a single filename, not a path",
+            filename
+        )));
+    }
+    let dest = slot_dir.join(&filename);
+
+    std::fs::copy(src, &dest)?;
+    Ok(ImportedAudioPath {
+        absolute_path: dest.to_string_lossy().into_owned(),
+    })
+}
+
 // ── Cross-machine export/import ─────────────────────────────────────────────
 
 #[derive(Debug, Serialize, Deserialize)]

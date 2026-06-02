@@ -638,6 +638,29 @@ export const exportLibraryCharacter = (args: {
 export const importLibraryCharacterFromFile = (filePath: string): Promise<LibraryCharacterSummary> =>
   invoke("import_library_character_from_file", { filePath });
 
+export interface ImportedAudioPath {
+  absolute_path: string;
+}
+
+/**
+ * Copy an external audio file into a library character's bundle so the file
+ * lives alongside generated content (paths inside the bundle are relative,
+ * so the character stays portable).
+ *
+ * Use cases:
+ *   - clone-from-file as the character's single voice reference (slot="design")
+ *   - clone-from-file as a specific emotion's palette reference (slot="palette",
+ *     dest_name="<emotion>.wav")
+ *   - generic recording import (slot="imports")
+ */
+export const importAudioIntoLibraryBundle = (args: {
+  libraryId: string;
+  sourcePath: string;
+  slot: "design" | "palette" | "imports";
+  destName: string;
+}): Promise<ImportedAudioPath> =>
+  invoke("import_audio_into_library_bundle", args);
+
 // ── Spatial spaces (room IR catalog) ─────────────────────────────────────────
 
 /**
