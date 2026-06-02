@@ -117,6 +117,8 @@ pub fn run() {
             commands::character::get_library_character,
             commands::character::save_library_character,
             commands::character::pull_character_from_library,
+            commands::character::export_library_character,
+            commands::character::import_library_character_from_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

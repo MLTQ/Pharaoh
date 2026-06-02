@@ -44,6 +44,16 @@ relativization pass.
 - **Interacts with**: `CharacterDesignerView.tsx` drift-banner "Pull library version" action.
 - **Rationale**: Destructive (overwrites local edits); the UI confirms intent. Errors if the character has no `library_id` or the library entry has been deleted — surfaces the "detached" state explicitly rather than silently no-op'ing.
 
+### `export_library_character` (Pharaoh-tlt4)
+- **Does**: Packages a library character into a single `.pharaoh-character` zip file. Archive layout: `manifest.json` at root + `character/...` mirroring the bundle. The trained RVC model + index are always included; the raw `rvc_corpus/` is opt-in via `include_corpus` because it can add hundreds of MB.
+- **Interacts with**: `LibraryView.tsx` Export… button, `zip` crate (same one `commands/archive.rs` uses).
+- **Rationale**: Cross-machine portability. Workflow: clone voices on a high-storage machine, export, import on the laptop for episode production.
+
+### `import_library_character_from_file` (Pharaoh-tlt4)
+- **Does**: Reads a `.pharaoh-character` file, validates the format version against `EXPORT_FORMAT_VERSION`, allocates a fresh `library_id`, extracts every `character/*` entry into the new bundle dir, then stamps the new id + a current `library_version` into the imported `character.json`.
+- **Interacts with**: `LibraryView.tsx` Import… button, `zip` crate.
+- **Rationale**: Always forks (new `library_id`) — never replaces a local entry, so imports are always safe. Guards against zip-bomb path traversal (`..`, absolute paths, drive prefixes) before writing anything to disk.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

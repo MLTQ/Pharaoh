@@ -12,7 +12,11 @@
 //! `library_version` so a future drift indicator (Pharaoh-wpk) can flag when
 //! the project version has diverged from the canonical library entry.
 
+use std::io::{Read, Write};
+use std::path::Path;
+
 use chrono::Utc;
+use serde::{Deserialize, Serialize};
 use tauri::AppHandle;
 use uuid::Uuid;
 
@@ -25,6 +29,9 @@ use crate::error::{Error, Result};
 use crate::models::{Character, LibraryCharacterSummary, Project, CURRENT_CHARACTER_SCHEMA};
 
 const LIBRARY_BUNDLE_FILE: &str = "character.json";
+const EXPORT_MANIFEST_FILE: &str = "manifest.json";
+const EXPORT_CHAR_PREFIX: &str = "character/";
+const EXPORT_FORMAT_VERSION: u32 = 1;
 
 /// List every character in the library. Fast — only reads each character.json
 /// and stats the rvc/ directory, never scans the corpus.
@@ -376,6 +383,248 @@ pub fn pull_character_from_library(
 
     Ok(fresh)
 }
+
+// ── Cross-machine export/import ─────────────────────────────────────────────
+
+#[derive(Debug, Serialize, Deserialize)]
+struct ExportManifest {
+    pharaoh_character_export_version: u32,
+    exported_at: String,
+    original_library_id: String,
+    name: String,
+    description: String,
+    schema_version: u32,
+    includes_corpus: bool,
+}
+
+#[derive(Debug, Serialize)]
+pub struct ExportResult {
+    pub output_path: String,
+    pub bytes: u64,
+    pub file_count: u64,
+}
+
+/// Package a library character into a single `.pharaoh-character` file (zip).
+///
+/// The archive contains:
+/// - `manifest.json` (format version, original library_id, content flags)
+/// - `character/character.json` (the canonical record, paths still relative)
+/// - `character/palette/*.wav`, `character/design/*.wav`
+/// - `character/rvc/*.pth`, `character/rvc/*.index`
+/// - `character/rvc_corpus/*.wav` (only when `include_corpus = true`)
+///
+/// Use case: train a voice on a high-storage machine, export, import on a
+/// laptop for episode production. The corpus is excluded by default since
+/// it's only useful for retraining and adds hundreds of MB to file size.
+#[tauri::command]
+pub fn export_library_character(
+    app: AppHandle,
+    library_id: String,
+    output_path: String,
+    include_corpus: bool,
+) -> Result<ExportResult> {
+    let projects_dir = app_projects_dir(&app)?;
+    let bundle_dir = library_character_dir(&projects_dir, &library_id);
+    let bundle_file = bundle_dir.join(LIBRARY_BUNDLE_FILE);
+    if !bundle_file.exists() {
+        return Err(Error::Other(format!(
+            "library character {} not found",
+            library_id
+        )));
+    }
+
+    // Read the character so we can stamp metadata into the manifest cheaply.
+    let character: Character = read_json(&bundle_file)?;
+
+    let output = Path::new(&output_path);
+    if let Some(parent) = output.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let file = std::fs::File::create(output)?;
+    let mut zip = zip::ZipWriter::new(file);
+    let opts = zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .compression_level(Some(6));
+
+    let manifest = ExportManifest {
+        pharaoh_character_export_version: EXPORT_FORMAT_VERSION,
+        exported_at: Utc::now().to_rfc3339(),
+        original_library_id: library_id.clone(),
+        name: character.name.clone(),
+        description: character.description.clone(),
+        schema_version: character.schema_version,
+        includes_corpus: include_corpus,
+    };
+    zip.start_file(EXPORT_MANIFEST_FILE, opts)
+        .map_err(|e| Error::Other(format!("zip start manifest: {}", e)))?;
+    let manifest_bytes = serde_json::to_vec_pretty(&manifest)?;
+    zip.write_all(&manifest_bytes)?;
+
+    let mut bytes_written: u64 = manifest_bytes.len() as u64;
+    let mut file_count: u64 = 1;
+
+    // Walk the bundle dir and stream files into the archive under `character/`.
+    let mut stack: Vec<std::path::PathBuf> = vec![bundle_dir.clone()];
+    while let Some(dir) = stack.pop() {
+        for entry in std::fs::read_dir(&dir)? {
+            let entry = entry?;
+            let path = entry.path();
+            let ty = entry.file_type()?;
+            if ty.is_dir() {
+                // Skip corpus dir when not requested.
+                if !include_corpus
+                    && path.file_name().and_then(|n| n.to_str()) == Some("rvc_corpus")
+                {
+                    continue;
+                }
+                stack.push(path);
+                continue;
+            }
+            if !ty.is_file() {
+                continue;
+            }
+            // Skip macOS / metadata noise.
+            let name = entry.file_name();
+            if name.to_string_lossy().starts_with('.') {
+                continue;
+            }
+
+            let rel = match path.strip_prefix(&bundle_dir) {
+                Ok(r) => r.to_path_buf(),
+                Err(_) => continue,
+            };
+            let archive_name = format!(
+                "{}{}",
+                EXPORT_CHAR_PREFIX,
+                rel.to_string_lossy().replace('\\', "/")
+            );
+
+            let bytes = match std::fs::read(&path) {
+                Ok(b) => b,
+                Err(_) => continue,
+            };
+            zip.start_file(&archive_name, opts)
+                .map_err(|e| Error::Other(format!("zip start file: {}", e)))?;
+            zip.write_all(&bytes)?;
+            bytes_written += bytes.len() as u64;
+            file_count += 1;
+        }
+    }
+
+    zip.finish()
+        .map_err(|e| Error::Other(format!("zip finish: {}", e)))?;
+
+    Ok(ExportResult {
+        output_path: output.to_string_lossy().into_owned(),
+        bytes: bytes_written,
+        file_count,
+    })
+}
+
+/// Import a `.pharaoh-character` file into the local library.
+///
+/// Always allocates a fresh `library_id` (no collisions with existing local
+/// entries). The original `library_id` from the source machine is recorded in
+/// the manifest for traceability but not reused — treating import as a fork.
+///
+/// Returns a summary of the new library entry so the UI can scroll to it.
+#[tauri::command]
+pub fn import_library_character_from_file(
+    app: AppHandle,
+    file_path: String,
+) -> Result<LibraryCharacterSummary> {
+    let projects_dir = app_projects_dir(&app)?;
+    let archive_file = std::fs::File::open(&file_path)?;
+    let mut zip = zip::ZipArchive::new(archive_file)
+        .map_err(|e| Error::Other(format!("zip open: {}", e)))?;
+
+    // Read manifest first so we can fail fast on incompatible formats.
+    {
+        let mut manifest_entry = zip
+            .by_name(EXPORT_MANIFEST_FILE)
+            .map_err(|_| Error::Other("archive is missing manifest.json — not a .pharaoh-character file?".into()))?;
+        let mut raw = String::new();
+        manifest_entry.read_to_string(&mut raw)?;
+        let manifest: ExportManifest = serde_json::from_str(&raw)
+            .map_err(|e| Error::Other(format!("manifest parse: {}", e)))?;
+        if manifest.pharaoh_character_export_version > EXPORT_FORMAT_VERSION {
+            return Err(Error::Other(format!(
+                "archive uses export format v{} but this build only understands v{}",
+                manifest.pharaoh_character_export_version, EXPORT_FORMAT_VERSION
+            )));
+        }
+    }
+
+    // Allocate a fresh library_id and bundle dir.
+    let new_library_id = Uuid::new_v4().to_string();
+    let bundle = library_character_dir(&projects_dir, &new_library_id);
+    std::fs::create_dir_all(&bundle)?;
+
+    // Extract every entry under `character/` into the bundle dir.
+    for i in 0..zip.len() {
+        let mut entry = zip
+            .by_index(i)
+            .map_err(|e| Error::Other(format!("zip entry {}: {}", i, e)))?;
+        let name = entry.name().to_string();
+        let Some(rel) = name.strip_prefix(EXPORT_CHAR_PREFIX) else {
+            continue;
+        };
+        if rel.is_empty() || rel.ends_with('/') {
+            continue;
+        }
+        // Guard against path-traversal in the archive (.. components, abs paths).
+        let rel_path = std::path::Path::new(rel);
+        if rel_path.components().any(|c| matches!(c,
+            std::path::Component::ParentDir | std::path::Component::RootDir | std::path::Component::Prefix(_)
+        )) {
+            return Err(Error::Other(format!(
+                "archive contains unsafe path: {}",
+                rel
+            )));
+        }
+        let out_path = bundle.join(rel_path);
+        if let Some(parent) = out_path.parent() {
+            std::fs::create_dir_all(parent)?;
+        }
+        let mut out_file = std::fs::File::create(&out_path)?;
+        std::io::copy(&mut entry, &mut out_file)?;
+    }
+
+    // Stamp the new library_id into the imported character.json and refresh
+    // the library_version so listings sort by import time on this machine.
+    let bundle_file = bundle.join(LIBRARY_BUNDLE_FILE);
+    let mut character: Character = read_json(&bundle_file)?;
+    character.library_id = Some(new_library_id.clone());
+    character.library_version = Some(Utc::now().to_rfc3339());
+    character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    write_json(&bundle_file, &character)?;
+
+    // Build the summary the same way list_library_characters does.
+    let palette_count = character
+        .voice_assignment
+        .emotional_palette
+        .iter()
+        .filter(|e| e.qa_status == "approved" && e.ref_audio_path.is_some())
+        .count() as u32;
+    let has_rvc_model = character
+        .voice_assignment
+        .rvc
+        .as_ref()
+        .and_then(|r| r.model_path.as_deref())
+        .map(|p| bundle.join(p).exists() || std::path::Path::new(p).exists())
+        .unwrap_or(false);
+
+    Ok(LibraryCharacterSummary {
+        library_id: new_library_id,
+        name: character.name,
+        description: character.description,
+        palette_count,
+        has_rvc_model,
+        library_version: character.library_version.unwrap_or_default(),
+    })
+}
+
+// ────────────────────────────────────────────────────────────────────────────
 
 /// Create or update a library character directly (no project context).
 /// - If `character.library_id` is None, allocates a new UUID and bundle dir.

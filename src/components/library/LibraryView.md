@@ -23,6 +23,11 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 ### Model tab (stage 4)
 - **Does**: Drops in `RvcModelStage` similarly. Re-fetches the library character via `getLibraryCharacter` after training completes so the trained model path appears in the UI immediately.
 
+### Export / Import file (Pharaoh-tlt4)
+- **Does**: Per-character `Export…` button + a `+corpus` toggle write a `.pharaoh-character` file (zip) via the native save dialog. Library-header `Import…` button reads one back via the native open dialog and adds it as a new library entry with a fresh `library_id`.
+- **Interacts with**: `exportLibraryCharacter`, `importLibraryCharacterFromFile`, `@tauri-apps/plugin-dialog`.
+- **Rationale**: Cross-machine character portability. Trained RVC model + index are always included; raw `rvc_corpus/` is opt-in (large files, only useful for retraining). Import always forks — no risk of clobbering a local entry by accident.
+
 ### Synthetic `LIBRARY_PROJECT_ID = "_library"`
 - **Does**: Routes every backend path-resolution site (`<projects_dir>/<project_id>/characters/<character_id>/...`) into the library bundle (`<projects_dir>/_library/characters/<library_id>/...`) without modifying any existing command.
 - **Interacts with**: `submitTtsVoiceDesign`, `listPaletteTakes`, future corpus/rvc commands.

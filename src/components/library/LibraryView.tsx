@@ -37,6 +37,8 @@ import {
   deleteLibraryCharacter,
   listPaletteTakes,
   submitTtsVoiceDesign,
+  exportLibraryCharacter,
+  importLibraryCharacterFromFile,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
@@ -235,6 +237,68 @@ export const LibraryView: React.FC = () => {
       setError(e instanceof Error ? e.message : "Create failed");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // ── Export / Import to file (Pharaoh-tlt4) ──
+
+  const [exporting, setExporting] = useState(false);
+  const [importing, setImportingFile] = useState(false);
+  const [includeCorpusInExport, setIncludeCorpusInExport] = useState(false);
+
+  const handleExport = async () => {
+    if (!character?.library_id) return;
+    setExporting(true);
+    setError(null);
+    try {
+      const { save } = await import("@tauri-apps/plugin-dialog");
+      const safeName = character.name.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "character";
+      const defaultPath = `${safeName}.pharaoh-character`;
+      const target = await save({
+        title: "Export character",
+        defaultPath,
+        filters: [{ name: "Pharaoh character", extensions: ["pharaoh-character"] }],
+      });
+      if (!target) {
+        setExporting(false);
+        return;
+      }
+      const result = await exportLibraryCharacter({
+        libraryId: character.library_id,
+        outputPath: typeof target === "string" ? target : (target as { path: string }).path,
+        includeCorpus: includeCorpusInExport,
+      });
+      // Cheap success toast via the existing error/banner channel — paint it
+      // green by clearing error and surfacing a transient note instead.
+      window.alert(`Exported "${character.name}" → ${result.output_path}\n${result.file_count} files, ${(result.bytes / 1024 / 1024).toFixed(1)} MB`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleImportFile = async () => {
+    setImportingFile(true);
+    setError(null);
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        title: "Import character file",
+        multiple: false,
+        filters: [{ name: "Pharaoh character", extensions: ["pharaoh-character", "zip"] }],
+      });
+      if (!picked) {
+        setImportingFile(false);
+        return;
+      }
+      const filePath = typeof picked === "string" ? picked : (picked as { path: string }).path;
+      const summary = await importLibraryCharacterFromFile(filePath);
+      await refreshList(summary.library_id);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Import failed");
+    } finally {
+      setImportingFile(false);
     }
   };
 
@@ -513,13 +577,22 @@ export const LibraryView: React.FC = () => {
           }}>
             Library · {summaries.length}
           </span>
-          <button
-            className="btn btn-sm btn-primary"
-            style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 8px" }}
-            onClick={handleCreate}
-            disabled={saving}
-            title="New library character"
-          >+ New</button>
+          <div style={{ display: "flex", gap: 4 }}>
+            <button
+              className="btn btn-sm"
+              style={{ padding: "2px 8px" }}
+              onClick={handleImportFile}
+              disabled={importing}
+              title="Import a .pharaoh-character file exported from another machine"
+            >{importing ? "…" : "Import…"}</button>
+            <button
+              className="btn btn-sm btn-primary"
+              style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 8px" }}
+              onClick={handleCreate}
+              disabled={saving}
+              title="New library character"
+            >+ New</button>
+          </div>
         </div>
 
         {loading && summaries.length === 0 && (
@@ -629,16 +702,41 @@ export const LibraryView: React.FC = () => {
                 {saving ? "Saving…" : dirty ? "Save changes" : "Saved"}
               </button>
               {character.library_id && (
-                <button
-                  className="btn btn-sm"
-                  style={{
-                    color: "var(--sfx)",
-                    borderColor: "color-mix(in oklch, var(--sfx) 45%, var(--line-1))",
-                    background: "color-mix(in oklch, var(--sfx) 8%, transparent)",
-                  }}
-                  onClick={handleDelete}
-                  disabled={saving}
-                >Delete</button>
+                <>
+                  <label
+                    title="Include the raw RVC training corpus (~hundreds of MB). Off by default — the trained model + index are always included."
+                    style={{
+                      display: "flex", alignItems: "center", gap: 4,
+                      fontSize: 10, color: "var(--fg-4)",
+                      fontFamily: "var(--font-mono)", letterSpacing: "0.04em",
+                      cursor: "pointer", userSelect: "none",
+                    }}
+                  >
+                    <input
+                      type="checkbox"
+                      checked={includeCorpusInExport}
+                      onChange={(e) => setIncludeCorpusInExport(e.target.checked)}
+                      style={{ width: 11, height: 11, accentColor: "var(--tts)" }}
+                    />
+                    +corpus
+                  </label>
+                  <button
+                    className="btn btn-sm"
+                    onClick={handleExport}
+                    disabled={exporting || saving}
+                    title="Export this character as a .pharaoh-character file"
+                  >{exporting ? "Exporting…" : "Export…"}</button>
+                  <button
+                    className="btn btn-sm"
+                    style={{
+                      color: "var(--sfx)",
+                      borderColor: "color-mix(in oklch, var(--sfx) 45%, var(--line-1))",
+                      background: "color-mix(in oklch, var(--sfx) 8%, transparent)",
+                    }}
+                    onClick={handleDelete}
+                    disabled={saving}
+                  >Delete</button>
+                </>
               )}
             </div>
 

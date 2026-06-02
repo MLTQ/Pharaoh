@@ -609,6 +609,35 @@ export const pullCharacterFromLibrary = (args: {
 }): Promise<Character> =>
   invoke("pull_character_from_library", args);
 
+// ── Character file export/import (Pharaoh-tlt4) ────────────────────────────
+
+export interface CharacterExportResult {
+  output_path: string;
+  bytes: number;
+  file_count: number;
+}
+
+/**
+ * Package a library character into a single `.pharaoh-character` file (zip).
+ * - `include_corpus = false` (default) excludes the raw RVC training WAVs
+ *   to keep file size manageable; the trained RVC model + index are always
+ *   included.
+ */
+export const exportLibraryCharacter = (args: {
+  libraryId: string;
+  outputPath: string;
+  includeCorpus: boolean;
+}): Promise<CharacterExportResult> =>
+  invoke("export_library_character", args);
+
+/**
+ * Import a `.pharaoh-character` file into the local library. Always allocates
+ * a fresh `library_id` — never replaces an existing local entry. Returns the
+ * new library summary so the UI can select it.
+ */
+export const importLibraryCharacterFromFile = (filePath: string): Promise<LibraryCharacterSummary> =>
+  invoke("import_library_character_from_file", { filePath });
+
 // ── Spatial spaces (room IR catalog) ─────────────────────────────────────────
 
 /**
