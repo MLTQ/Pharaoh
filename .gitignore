@@ -26,6 +26,8 @@ pharaoh.mcpb
 
 inference/server-output
 
-# Spatial audio: SOFA HRTF files are installed by inference/download_sofa.sh
-# at runtime. Don't ship binary data in the repo; the README pointer is enough.
+# Spatial audio: SOFA HRTF files and synthesized/downloaded room IRs are
+# installed by inference/download_spatial_assets.sh at runtime. Don't ship
+# binary data in the repo — spaces.json + the downloader are enough.
 assets/sofa/*.sofa
+assets/spaces/*.wav

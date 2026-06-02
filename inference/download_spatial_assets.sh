@@ -80,7 +80,7 @@ if [[ $sofa_done -eq 0 ]]; then
   echo "  (HRTF unavailable — Pharaoh falls back to ITD/ILD approximation)"
 fi
 
-# ── 2. Spatial spaces — curated room IRs ─────────────────────────────────────
+# ── 2. Spatial spaces — try URL, fall back to local synthesis ───────────────
 echo ""
 echo "── Spatial spaces (room reverb IRs) ──────────────────────────"
 if [[ ! -f "$SPACES_MANIFEST" ]]; then
@@ -92,27 +92,67 @@ if ! command -v python3 > /dev/null 2>&1; then
   exit 1
 fi
 
-# Iterate manifest entries and fetch each one that has both a URL and a file slot.
-# A null url means "manual install only" — surfaced in the UI but not pulled here.
-python3 - "$SPACES_MANIFEST" <<'PY' | while IFS=$'\t' read -r slug file url; do
+SYNTH_SCRIPT="$SCRIPT_DIR/synth_spatial_irs.py"
+SYNTH_COUNT=0
+
+# Walk the manifest. For each non-dry entry:
+#   1. Skip if the file already exists (manual install or previous run).
+#   2. Try the URL with download_one.
+#   3. On failure (or when URL is null), invoke the synthesizer to produce a
+#      believable IR from the entry's synthesis parameters.
+# Either way, the entry ends up usable.
+# Use '|' as the field separator (not tab) so empty URL columns don't
+# get collapsed by bash's IFS-is-whitespace rule — that bit us in the
+# first install where every entry had url=null and got mis-read.
+while IFS='|' read -r slug file url has_synth; do
+  out="$SPACES_DIR/$file"
+  echo "  → $slug"
+  if [[ -f "$out" ]]; then
+    echo "    already installed: $(basename "$out")"
+    SKIP_COUNT=$((SKIP_COUNT + 1))
+    continue
+  fi
+  installed=0
+  if [[ -n "$url" && "$url" != "null" ]]; then
+    if download_one "$url" "$out"; then
+      installed=1
+    fi
+  fi
+  if [[ $installed -eq 0 && "$has_synth" == "1" ]]; then
+    if python3 "$SYNTH_SCRIPT" --slug "$slug" > /dev/null 2>&1; then
+      if [[ -f "$out" ]]; then
+        echo "    ✓ synthesized $(basename "$out")"
+        SYNTH_COUNT=$((SYNTH_COUNT + 1))
+        installed=1
+      fi
+    fi
+  fi
+  if [[ $installed -eq 0 ]]; then
+    echo "    ✗ no source: drop a file at $out to use this preset"
+    FAIL_COUNT=$((FAIL_COUNT + 1))
+  fi
+done < <(python3 - "$SPACES_MANIFEST" <<'PY'
 import json, sys
 with open(sys.argv[1]) as f:
     data = json.load(f)
 for sp in data["spaces"]:
-    if sp.get("file") and sp.get("url"):
-        print(f"{sp['slug']}\t{sp['file']}\t{sp['url']}")
+    if not sp.get("file"):
+        continue
+    url = sp.get("url") or ""
+    has_synth = "1" if sp.get("synthesis") else "0"
+    print(f"{sp['slug']}|{sp['file']}|{url}|{has_synth}")
 PY
-  out="$SPACES_DIR/$file"
-  echo "  → $slug"
-  download_one "$url" "$out" || true
-done
+)
 
 # ── Summary ──
 echo ""
-echo "Summary:  $OK_COUNT installed · $SKIP_COUNT already present · $FAIL_COUNT failed"
-if [[ $FAIL_COUNT -gt 0 ]]; then
-  echo "Failed downloads can be installed manually. The render path skips"
-  echo "missing IRs gracefully — those presets just show up greyed in the UI."
+echo "Summary:  $OK_COUNT downloaded · $SYNTH_COUNT synthesized · $SKIP_COUNT already present · $FAIL_COUNT failed"
+if [[ $SYNTH_COUNT -gt 0 ]]; then
+  echo ""
+  echo "Synthesized IRs are DSP approximations built from documented room"
+  echo "parameters. They sound correct in narrative mixes; for forensic"
+  echo "acoustic work, drop a real measured WAV into assets/spaces/ to"
+  echo "override (same filename → automatic upgrade)."
 fi
 echo ""
 echo "Done. Pharaoh's SpatializeModal will pick up new assets on next launch."

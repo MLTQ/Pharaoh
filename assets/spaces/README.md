@@ -4,21 +4,41 @@ Pharaoh's spatial-audio renderer applies a room IR (impulse response) via
 ffmpeg's `afir` filter, after the binaural HRTF step (`sofalizer`). Each
 *space* in `spaces.json` points to one IR WAV file that lives here.
 
-## Default: install the curated starter pack
+## Default: install the catalog
 
 ```bash
 ./inference/download_spatial_assets.sh
 ```
 
-This fetches ~12 CC-licensed room IRs covering the audio-drama essentials:
-vocal booth, bedroom, office, stairwell, hallway, small hall, concert hall,
-opera house, church, cathedral, mausoleum, cave, forest. Pulled from the
-OpenAir Library (University of York) and the Aachen Impulse Response (AIR)
-database, both CC-BY-SA.
+Every preset gets installed via a two-tier strategy:
 
-The script is best-effort — if a URL is dead or a mirror is down, that
-preset shows up greyed out in the UI; the others still work. Drop in your
-own WAV and add it to `spaces.json` to extend.
+1. **Download** a real measured IR if `spaces.json` carries a `url` for the
+   entry and the URL responds. (Curated FOSS sources — OpenAir Library at
+   University of York, Aachen Impulse Response database.)
+2. **Synthesize** a plausible IR locally if the download fails or no URL is
+   listed. `inference/synth_spatial_irs.py` reads each entry's `synthesis`
+   block (RT60, brightness, density, early-reflection on/off, predelay) and
+   builds a stereo WAV with exponentially-decaying noise + a handful of
+   discrete early reflections + spectral tilt — the same DSP recipe plate
+   reverbs have shipped for 40 years.
+
+The install always succeeds. A typical first run produces ~10 MB of WAVs
+(mausoleum is the biggest at 3 MB because of its 15-second decay).
+
+## Real measurements vs. synthesis
+
+For narrative audio the difference is small. A synthesized cathedral IR
+correctly reproduces the long stone decay, the modal coloration, and the
+predelay — the things a listener actually identifies as "cathedral." A
+real measured IR of York Minster captures the *specific* modal fingerprint
+of that *specific* building, which matters for forensic acoustic analysis
+but not for "this character is in a cathedral."
+
+To upgrade any preset to a real measurement: drop the WAV into this
+directory with the same filename `spaces.json` specifies (`cathedral.wav`
+for the cathedral entry, etc.). The synthesized version gets overwritten
+and the renderer picks the real one up on the next render. No manifest
+edits required.
 
 ## Adding a custom space
 
