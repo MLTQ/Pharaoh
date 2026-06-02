@@ -301,6 +301,11 @@ pub fn get_library_character(app: AppHandle, library_id: String) -> Result<Chara
     let mut character: Character = read_json(&bundle_file)?;
     absolutize_voice_paths(&mut character.voice_assignment, &bundle);
     character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    // Defensive: enforce id == library_id for library-stored characters so
+    // legacy entries written before the save_library_character fix get
+    // repaired on the next read. See save_library_character for context.
+    character.id = library_id.clone();
+    character.library_id = Some(library_id);
     Ok(character)
 }
 
@@ -466,6 +471,279 @@ pub fn import_audio_into_library_bundle(
     std::fs::copy(src, &dest)?;
     Ok(ImportedAudioPath {
         absolute_path: dest.to_string_lossy().into_owned(),
+    })
+}
+
+/// Concatenate multiple external audio files into a single WAV inside the
+/// library bundle. Use case: build a longer / more-varied reference clip from
+/// several recordings of the same actor so Chatterbox's speaker embedding is
+/// more stable.
+///
+/// The N=1 case is a fast-path file copy (equivalent to
+/// [`import_audio_into_library_bundle`]). For N>=2 the files are concatenated
+/// via ffmpeg's concat audio filter, which transparently resamples mismatched
+/// inputs to 48kHz mono 16-bit PCM WAV.
+///
+/// A `<dest>.sources.json` sidecar is written next to the output listing the
+/// original source filenames in order — provenance for "where did this come
+/// from?" without needing the original files on disk.
+#[tauri::command]
+pub fn concat_audio_into_library_bundle(
+    app: AppHandle,
+    library_id: String,
+    source_paths: Vec<String>,
+    slot: String,
+    dest_name: String,
+) -> Result<ImportedAudioPath> {
+    if source_paths.is_empty() {
+        return Err(Error::Other("source_paths must not be empty".into()));
+    }
+    let projects_dir = app_projects_dir(&app)?;
+    let bundle_dir = library_character_dir(&projects_dir, &library_id);
+    if !bundle_dir.exists() {
+        return Err(Error::Other(format!(
+            "library character {} not found",
+            library_id
+        )));
+    }
+
+    let slot_clean = slot.trim();
+    if !matches!(slot_clean, "design" | "palette" | "imports") {
+        return Err(Error::Other(format!(
+            "unsupported slot '{}' (allowed: design, palette, imports)",
+            slot_clean
+        )));
+    }
+    let slot_dir = bundle_dir.join(slot_clean);
+    std::fs::create_dir_all(&slot_dir)?;
+
+    // Validate every source up front so we don't half-process and fail late.
+    for src in &source_paths {
+        if !std::path::Path::new(src).is_file() {
+            return Err(Error::Other(format!("source file not found: {}", src)));
+        }
+    }
+
+    // Resolve destination filename. Concatenated output is always .wav.
+    let stem_input = dest_name.trim();
+    let dest_filename = if stem_input.is_empty() {
+        format!("imported_{}.wav", Utc::now().timestamp())
+    } else if std::path::Path::new(stem_input)
+        .extension()
+        .and_then(|e| e.to_str())
+        == Some("wav")
+    {
+        stem_input.to_string()
+    } else {
+        // Strip any other extension and append .wav
+        let stem_only = std::path::Path::new(stem_input)
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or(stem_input);
+        format!("{}.wav", stem_only)
+    };
+    if dest_filename.contains('/') || dest_filename.contains('\\') || dest_filename.contains("..") {
+        return Err(Error::Other(format!(
+            "destination filename '{}' must be a single filename, not a path",
+            dest_filename
+        )));
+    }
+    let dest_path = slot_dir.join(&dest_filename);
+
+    if source_paths.len() == 1 {
+        // Fast path: single file, just copy (and normalize via ffmpeg so the
+        // bundle always has a consistent format).
+        let src = &source_paths[0];
+        let src_ext = std::path::Path::new(src)
+            .extension()
+            .and_then(|e| e.to_str())
+            .map(|s| s.to_lowercase())
+            .unwrap_or_default();
+        if src_ext == "wav" {
+            std::fs::copy(src, &dest_path)?;
+        } else {
+            run_ffmpeg_for_concat(&[src.clone()], &dest_path)?;
+        }
+    } else {
+        run_ffmpeg_for_concat(&source_paths, &dest_path)?;
+    }
+
+    // Provenance sidecar — survives even if the originals are deleted.
+    let sidecar_name = format!("{}.sources.json", dest_filename);
+    let sidecar_path = slot_dir.join(&sidecar_name);
+    let provenance = serde_json::json!({
+        "concatenated_from": source_paths,
+        "concatenated_at": Utc::now().to_rfc3339(),
+        "source_count": source_paths.len(),
+    });
+    let _ = std::fs::write(
+        &sidecar_path,
+        serde_json::to_vec_pretty(&provenance).unwrap_or_default(),
+    );
+
+    Ok(ImportedAudioPath {
+        absolute_path: dest_path.to_string_lossy().into_owned(),
+    })
+}
+
+/// Internal: run ffmpeg's concat audio filter and emit a normalized 48kHz mono
+/// 16-bit PCM WAV. Used by [`concat_audio_into_library_bundle`].
+fn run_ffmpeg_for_concat(source_paths: &[String], dest_path: &std::path::Path) -> Result<()> {
+    let mut args: Vec<String> = vec!["-y".into(), "-hide_banner".into(), "-loglevel".into(), "error".into()];
+    for src in source_paths {
+        args.push("-i".into());
+        args.push(src.clone());
+    }
+    // Build `[0:a][1:a]…concat=n=N:v=0:a=1[out]`
+    let n = source_paths.len();
+    let mut filter = String::new();
+    for i in 0..n {
+        filter.push_str(&format!("[{}:a]", i));
+    }
+    filter.push_str(&format!("concat=n={}:v=0:a=1[out]", n));
+    args.push("-filter_complex".into());
+    args.push(filter);
+    args.push("-map".into());
+    args.push("[out]".into());
+    args.push("-ar".into());
+    args.push("48000".into());
+    args.push("-ac".into());
+    args.push("1".into());
+    args.push("-sample_fmt".into());
+    args.push("s16".into());
+    args.push(dest_path.to_string_lossy().into_owned());
+
+    let out = std::process::Command::new("ffmpeg")
+        .args(&args)
+        .output()
+        .map_err(|e| Error::Other(format!("ffmpeg not found (install ffmpeg): {}", e)))?;
+    if !out.status.success() {
+        let stderr = String::from_utf8_lossy(&out.stderr);
+        return Err(Error::Other(format!(
+            "ffmpeg concat failed:\n{}",
+            &stderr[..stderr.len().min(1000)]
+        )));
+    }
+    Ok(())
+}
+
+// ── Bulk import into RVC corpus (Pharaoh-mo0q) ──────────────────────────────
+
+#[derive(Debug, Serialize)]
+pub struct CorpusImportResult {
+    pub copied_count: u64,
+    pub skipped_count: u64,
+    pub total_duration_ms: u64,
+    pub corpus_dir: String,
+}
+
+/// Bulk-import real audio recordings into a library character's
+/// `rvc_corpus/` directory. The synthesized-from-Chatterbox corpus build is
+/// still available — this command just adds an orthogonal path for users who
+/// already have hours of real audio of a voice actor and want to train RVC
+/// on the actual recordings (substantially better quality than training on
+/// Chatterbox output).
+///
+/// Each source file is normalized via ffmpeg to 48kHz mono 16-bit PCM WAV so
+/// the RVC trainer sees a consistent format. Files that fail to convert are
+/// skipped (counted, not fatal) so a single bad clip doesn't poison the batch.
+#[tauri::command]
+pub fn import_audio_files_into_corpus(
+    app: AppHandle,
+    library_id: String,
+    source_paths: Vec<String>,
+) -> Result<CorpusImportResult> {
+    let projects_dir = app_projects_dir(&app)?;
+    let bundle_dir = library_character_dir(&projects_dir, &library_id);
+    if !bundle_dir.exists() {
+        return Err(Error::Other(format!(
+            "library character {} not found",
+            library_id
+        )));
+    }
+    let corpus_dir = bundle_dir.join("rvc_corpus");
+    std::fs::create_dir_all(&corpus_dir)?;
+
+    let mut copied: u64 = 0;
+    let mut skipped: u64 = 0;
+    let mut total_duration_ms: u64 = 0;
+    let base_ts = Utc::now().timestamp();
+
+    for (i, src) in source_paths.iter().enumerate() {
+        let src_path = std::path::Path::new(src);
+        if !src_path.is_file() {
+            skipped += 1;
+            continue;
+        }
+        let stem = src_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("clip")
+            .chars()
+            .filter(|c| c.is_alphanumeric() || matches!(c, '_' | '-'))
+            .take(40)
+            .collect::<String>();
+        let dest_name = format!("import_{}_{:03}_{}.wav", base_ts, i, stem);
+        let dest = corpus_dir.join(&dest_name);
+
+        // Single-input ffmpeg normalize. Cheap to retry per file because
+        // most are tiny relative to the cost of the failure path.
+        let args = vec![
+            "-y".into(),
+            "-hide_banner".into(),
+            "-loglevel".into(),
+            "error".into(),
+            "-i".into(),
+            src.clone(),
+            "-ar".into(),
+            "48000".into(),
+            "-ac".into(),
+            "1".into(),
+            "-sample_fmt".into(),
+            "s16".into(),
+            dest.to_string_lossy().into_owned(),
+        ];
+        let result = std::process::Command::new("ffmpeg")
+            .args(&args)
+            .output();
+        let ok = matches!(&result, Ok(o) if o.status.success());
+        if !ok {
+            skipped += 1;
+            continue;
+        }
+        copied += 1;
+
+        // Write a `.meta.json` sidecar with duration so existing
+        // scan_rvc_corpus_dir picks it up without re-decoding the WAV.
+        if let Ok(reader) = hound::WavReader::open(&dest) {
+            let spec = reader.spec();
+            let samples = reader.duration() as u64;
+            let channels = u64::from(spec.channels.max(1));
+            if let Some(dur_ms) = samples
+                .checked_mul(1000)
+                .and_then(|v| v.checked_div(channels))
+                .and_then(|v| v.checked_div(u64::from(spec.sample_rate)))
+            {
+                total_duration_ms = total_duration_ms.saturating_add(dur_ms);
+                let meta_path = corpus_dir.join(format!("{}.meta.json", dest_name));
+                let meta = serde_json::json!({
+                    "duration_ms": dur_ms,
+                    "source_path": src,
+                    "imported_at": Utc::now().to_rfc3339(),
+                });
+                let _ = std::fs::write(
+                    &meta_path,
+                    serde_json::to_vec_pretty(&meta).unwrap_or_default(),
+                );
+            }
+        }
+    }
+
+    Ok(CorpusImportResult {
+        copied_count: copied,
+        skipped_count: skipped,
+        total_duration_ms,
+        corpus_dir: corpus_dir.to_string_lossy().into_owned(),
     })
 }
 
@@ -734,6 +1012,14 @@ pub fn save_library_character(app: AppHandle, character: Character) -> Result<Ch
     std::fs::create_dir_all(&bundle)?;
 
     let mut to_write = character;
+    // For library-stored characters, `id` and `library_id` must match: the
+    // bundle directory name IS the id, so any backend command that resolves a
+    // path from <projects_dir>/_library/characters/<character_id>/ (e.g.
+    // CorpusBuilder, RvcModelStage) needs character.id == library_id.
+    // Project-imported characters get their id reassigned to a fresh CHAR_XXXX
+    // by import_character_from_library — this rule only applies to entries
+    // living in the library.
+    to_write.id = library_id.clone();
     to_write.library_id = Some(library_id.clone());
     to_write.library_version = Some(now);
     to_write.schema_version = CURRENT_CHARACTER_SCHEMA;

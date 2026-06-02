@@ -39,7 +39,7 @@ import {
   submitTtsVoiceDesign,
   exportLibraryCharacter,
   importLibraryCharacterFromFile,
-  importAudioIntoLibraryBundle,
+  concatAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
@@ -499,36 +499,44 @@ export const LibraryView: React.FC = () => {
     }
   };
 
-  // Native open dialog → returns the picked source path or null.
-  const pickAudioFile = async (): Promise<string | null> => {
+  // Native open dialog → returns picked source paths (multi-select) or [].
+  // Multi-file upload is preferred for voice cloning: concatenating several
+  // takes of the same actor into one ref gives Chatterbox a much more stable
+  // speaker embedding than a single short clip (Pharaoh-aonr).
+  const pickAudioFiles = async (multi: boolean): Promise<string[]> => {
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
       const result = await open({
-        multiple: false,
+        multiple: multi,
         filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a"] }],
       });
-      if (!result) return null;
-      return typeof result === "string" ? result : (result as { path: string }).path;
+      if (!result) return [];
+      if (Array.isArray(result)) {
+        return result.map((r) => typeof r === "string" ? r : (r as { path: string }).path);
+      }
+      return [typeof result === "string" ? result : (result as { path: string }).path];
     } catch {
-      return null;
+      return [];
     }
   };
 
-  // Voice tab: upload an existing recording as the character's single voice ref.
+  // Voice tab: upload existing recording(s) as the character's voice reference.
+  // N>1 files get concatenated into a single ref WAV via ffmpeg — longer
+  // reference = richer Chatterbox speaker embedding.
   const handleUploadCharacterReference = async () => {
     if (!character?.library_id) {
       setDesignGenError("Save the character first.");
       return;
     }
-    const source = await pickAudioFile();
-    if (!source) return;
+    const sources = await pickAudioFiles(true);
+    if (sources.length === 0) return;
     setDesignGenError(null);
     try {
-      const { absolute_path } = await importAudioIntoLibraryBundle({
+      const { absolute_path } = await concatAudioIntoLibraryBundle({
         libraryId: character.library_id,
-        sourcePath: source,
+        sourcePaths: sources,
         slot: "design",
-        destName: "", // backend timestamps it
+        destName: sources.length === 1 ? "" : `imported_concat_${Date.now()}.wav`,
       });
       const updated: Character = {
         ...character,
@@ -550,22 +558,21 @@ export const LibraryView: React.FC = () => {
     }
   };
 
-  // Palette tab: upload an existing recording as a specific emotion's reference.
+  // Palette tab: upload existing recording(s) as a specific emotion's reference.
+  // Multi-file → concatenated for richer per-emotion embedding.
   const handleUploadPaletteReference = async (emotion: string) => {
     if (!character?.library_id) {
       setPaletteGenError("Save the character first.");
       return;
     }
-    const source = await pickAudioFile();
-    if (!source) return;
+    const sources = await pickAudioFiles(true);
+    if (sources.length === 0) return;
     setPaletteGenError(null);
     try {
-      const { absolute_path } = await importAudioIntoLibraryBundle({
+      const { absolute_path } = await concatAudioIntoLibraryBundle({
         libraryId: character.library_id,
-        sourcePath: source,
+        sourcePaths: sources,
         slot: "palette",
-        // Use the emotion slug as the filename so it lands alongside generated
-        // takes (`<emotion>_<seed>_<ts>.wav`) without conflicting.
         destName: `${emotion}_upload_${Date.now()}.wav`,
       });
       // Approve as the reference for this emotion in one shot — same path as
@@ -575,6 +582,7 @@ export const LibraryView: React.FC = () => {
       setPaletteGenError(e instanceof Error ? e.message : "Upload failed");
     }
   };
+
 
   const handleSaveDesignAsReference = async (audioPath: string) => {
     if (!character) return;

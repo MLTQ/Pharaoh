@@ -661,6 +661,38 @@ export const importAudioIntoLibraryBundle = (args: {
 }): Promise<ImportedAudioPath> =>
   invoke("import_audio_into_library_bundle", args);
 
+/**
+ * Concatenate multiple audio files into a single normalized WAV inside the
+ * library bundle. N=1 is a fast-path copy; N>=2 uses ffmpeg's concat filter.
+ * A `<dest>.sources.json` sidecar is written next to the output for provenance.
+ */
+export const concatAudioIntoLibraryBundle = (args: {
+  libraryId: string;
+  sourcePaths: string[];
+  slot: "design" | "palette" | "imports";
+  destName: string;
+}): Promise<ImportedAudioPath> =>
+  invoke("concat_audio_into_library_bundle", args);
+
+export interface CorpusImportResult {
+  copied_count: number;
+  skipped_count: number;
+  total_duration_ms: number;
+  corpus_dir: string;
+}
+
+/**
+ * Bulk-import real audio recordings into a library character's RVC corpus.
+ * Each file is normalized to 48kHz mono 16-bit WAV. Files that fail to
+ * convert are skipped (counted, not fatal). Use case: training RVC on real
+ * actor recordings rather than Chatterbox synthesized output.
+ */
+export const importAudioFilesIntoCorpus = (args: {
+  libraryId: string;
+  sourcePaths: string[];
+}): Promise<CorpusImportResult> =>
+  invoke("import_audio_files_into_corpus", args);
+
 // ── Spatial spaces (room IR catalog) ─────────────────────────────────────────
 
 /**

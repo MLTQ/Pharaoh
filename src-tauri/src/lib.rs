@@ -120,6 +120,8 @@ pub fn run() {
             commands::character::export_library_character,
             commands::character::import_library_character_from_file,
             commands::character::import_audio_into_library_bundle,
+            commands::character::concat_audio_into_library_bundle,
+            commands::character::import_audio_files_into_corpus,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

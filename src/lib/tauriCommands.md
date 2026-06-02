@@ -24,9 +24,9 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 - **Interacts with**: `UpscaleView.tsx`, `commands/sidecar.rs`, `commands/audio_enhance.rs`.
 
 ### Character library wrappers
-- **Does**: `listLibraryCharacters`, `saveCharacterToLibrary`, `importCharacterFromLibrary`, `deleteLibraryCharacter`, `getLibraryCharacter`, `saveLibraryCharacter`, `pullCharacterFromLibrary`, `exportLibraryCharacter`, `importLibraryCharacterFromFile`. Lightweight pass-through to `commands/character.rs`.
-- **Interacts with**: `LibraryView.tsx` (Pharaoh-z21), Cast view modal + drift banner (Pharaoh-65s / Pharaoh-wpk).
-- **Rationale**: Returns `LibraryCharacterSummary[]` from the list call rather than full Characters — list views never need the heavy payload. `getLibraryCharacter` / `saveLibraryCharacter` are the direct library-side editor pair; `saveCharacterToLibrary` and `pullCharacterFromLibrary` are the project ↔ library sync pair (push / pull); `exportLibraryCharacter` / `importLibraryCharacterFromFile` are the cross-machine file pair (Pharaoh-tlt4).
+- **Does**: `listLibraryCharacters`, `saveCharacterToLibrary`, `importCharacterFromLibrary`, `deleteLibraryCharacter`, `getLibraryCharacter`, `saveLibraryCharacter`, `pullCharacterFromLibrary`, `exportLibraryCharacter`, `importLibraryCharacterFromFile`, `importAudioIntoLibraryBundle`, `concatAudioIntoLibraryBundle`, `importAudioFilesIntoCorpus`. Lightweight pass-through to `commands/character.rs`.
+- **Interacts with**: `LibraryView.tsx`, Cast view modal + drift banner, `CorpusBuilder.tsx` (bulk corpus import).
+- **Rationale**: Returns `LibraryCharacterSummary[]` from the list call rather than full Characters — list views never need the heavy payload. The cross-cutting groups: direct library editor pair (`getLibraryCharacter`/`saveLibraryCharacter`), project↔library sync pair (`saveCharacterToLibrary`/`pullCharacterFromLibrary`), cross-machine file pair (`exportLibraryCharacter`/`importLibraryCharacterFromFile`), bundle-audio import family (single-file `importAudioIntoLibraryBundle`, multi-file concat `concatAudioIntoLibraryBundle`, bulk corpus `importAudioFilesIntoCorpus`).
 
 ## Contracts
 

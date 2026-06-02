@@ -19,6 +19,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import type { Character } from "../../lib/types";
+import { importAudioFilesIntoCorpus } from "../../lib/tauriCommands";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -163,6 +164,51 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
   const [confirmClear, setConfirmClear] = useState(false);
   const [emotionCounts, setEmotionCounts] = useState<EmotionCorpusCount[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
+  const [importing, setImporting] = useState(false);
+
+  // Bulk-import real audio recordings into the corpus (Pharaoh-mo0q). Routes
+  // via the synthetic "_library" projectId when CorpusBuilder is mounted from
+  // LibraryView — same path math works for project bundles too if we ever
+  // re-add a project-side corpus tab.
+  const handleBulkImport = useCallback(async () => {
+    // The backend command currently expects a library_id (resolved via the
+    // _library bundle layout). For project-character context, we'd need a
+    // parallel command — defer until that surface exists.
+    if (projectId !== "_library") {
+      setError("Bulk audio import is currently only available in the Library Corpus tab.");
+      return;
+    }
+    try {
+      const { open } = await import("@tauri-apps/plugin-dialog");
+      const picked = await open({
+        title: "Add audio files to corpus",
+        multiple: true,
+        filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a"] }],
+      });
+      if (!picked) return;
+      const paths = Array.isArray(picked)
+        ? picked.map((p) => typeof p === "string" ? p : (p as { path: string }).path)
+        : [typeof picked === "string" ? picked : (picked as { path: string }).path];
+      if (paths.length === 0) return;
+      setImporting(true);
+      setError(null);
+      const result = await importAudioFilesIntoCorpus({
+        libraryId: character.id,
+        sourcePaths: paths,
+      });
+      await fetchEmotionCounts();
+      onCorpusUpdated();
+      const summary = result.skipped_count > 0
+        ? `Imported ${result.copied_count} of ${paths.length} (${result.skipped_count} skipped). +${Math.round(result.total_duration_ms / 1000)}s of corpus audio.`
+        : `Imported ${result.copied_count} files (+${Math.round(result.total_duration_ms / 1000)}s of corpus audio).`;
+      window.alert(summary);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bulk import failed");
+    } finally {
+      setImporting(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [character.id, projectId]);
 
   // Fetch per-emotion corpus counts on mount / when corpusCount changes
   const fetchEmotionCounts = useCallback(async () => {
@@ -442,10 +488,10 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
       )}
 
       {/* ── Actions ── */}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
         <button
           className="btn btn-primary"
-          disabled={isGenerating}
+          disabled={isGenerating || importing}
           onClick={handleGenerate}
           style={{
             background: STAGE_COLOR,
@@ -459,6 +505,18 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
         >
           {isGenerating ? "Generating…" : corpusCount > 0 ? "Auto-Generate More" : "Auto-Generate Corpus"}
         </button>
+
+        {projectId === "_library" && (
+          <button
+            className="btn btn-sm"
+            disabled={isGenerating || importing}
+            onClick={handleBulkImport}
+            title="Add real audio files to the corpus (recordings of the actual voice actor — generally better RVC training data than Chatterbox-synthesized output)"
+            style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}
+          >
+            {importing ? "Importing…" : "Import audio files…"}
+          </button>
+        )}
 
         {corpusCount > 0 && !confirmClear && (
           <button

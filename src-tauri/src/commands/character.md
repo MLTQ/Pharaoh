@@ -56,8 +56,18 @@ relativization pass.
 
 ### `import_audio_into_library_bundle` (Pharaoh-b9hf)
 - **Does**: Copies an external audio file into a library character's bundle so the file lives alongside generated content. `slot` is whitelisted to `design` / `palette` / `imports` and `dest_name` is sanitized against path-traversal. Preserves recognized audio extensions (`wav`, `mp3`, `aac`, `ogg`, `flac`, `m4a`); falls back to `.wav` for anything else.
-- **Interacts with**: `LibraryView.tsx` Voice-tab "Upload audio file…" and Palette-tab "Upload reference…" buttons.
-- **Rationale**: Clone-from-file workflow: clip a voice actor's recording, upload as either the character's single voice reference (slot=design) or a specific emotion's palette reference (slot=palette). The copy is essential — paths inside a library bundle must be relative for portability (.pharaoh-character export), so an external absolute path can't be used directly.
+- **Interacts with**: kept for non-concat callers; the UI now defaults to `concat_audio_into_library_bundle` which handles the N=1 case too.
+- **Rationale**: Clone-from-file workflow. The copy is essential — paths inside a library bundle must be relative for portability (.pharaoh-character export), so an external absolute path can't be used directly.
+
+### `concat_audio_into_library_bundle` (Pharaoh-aonr)
+- **Does**: Takes N source audio paths and writes a single normalized WAV (48kHz mono 16-bit PCM) inside the bundle. N=1 is a fast-path copy (raw WAVs pass straight through, other formats round-trip ffmpeg). N>=2 uses ffmpeg's `concat` audio filter, which resamples/remixes mismatched inputs and emits a single stream. Always writes a `<dest>.sources.json` sidecar listing the originals for provenance.
+- **Interacts with**: `LibraryView.tsx` Voice-tab "Upload audio file…" and Palette-tab "Upload reference…" buttons (both now multi-select capable).
+- **Rationale**: Best-practice for zero-shot voice cloners is 30-60s of varied reference, not a single short clip. A longer/multi-take concatenated ref gives Chatterbox a much more stable speaker embedding — less single-take bias bleeding into the cloned voice. The N=1 fast-path keeps the command general so the UI only ever calls one upload API.
+
+### `import_audio_files_into_corpus` (Pharaoh-mo0q)
+- **Does**: Bulk-imports external audio files into a library character's `rvc_corpus/`. Each file is normalized via ffmpeg to 48kHz mono 16-bit WAV and given a unique timestamped filename derived from the original stem. Writes a `<file>.meta.json` sidecar with `duration_ms` + source path so `scan_rvc_corpus_dir` picks it up. Files that fail to convert are skipped (counted, not fatal).
+- **Interacts with**: `CorpusBuilder.tsx` "Import audio files…" button (visible when `projectId === "_library"`).
+- **Rationale**: The Auto-Generate path fills the corpus from Chatterbox synthesized output — useful for a consistency fingerprint but bounded by Chatterbox's quality. When the user has real recordings of the voice actor, training RVC on real audio gives substantially better identity preservation. This opens that door without retraining or restructuring anything.
 
 ## Contracts
 

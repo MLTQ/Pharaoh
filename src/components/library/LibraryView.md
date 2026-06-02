@@ -23,12 +23,12 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 ### Model tab (stage 4)
 - **Does**: Drops in `RvcModelStage` similarly. Re-fetches the library character via `getLibraryCharacter` after training completes so the trained model path appears in the UI immediately.
 
-### Clone-from-file (Pharaoh-b9hf)
-- **Does**: Two upload affordances that copy an external audio file into the library bundle and wire it as a reference:
-  - Voice tab "Upload audio file…" button next to the Character reference section — sets the character's single `ref_audio_path` (slot=`design`).
-  - Palette tab per-emotion "Upload reference…" button next to "Generate take" — sets that emotion's `ref_audio_path` and auto-approves it (slot=`palette`, dest_name=`<emotion>_upload_<ts>.wav`).
-- **Interacts with**: `importAudioIntoLibraryBundle`, `@tauri-apps/plugin-dialog::open`, `saveLibraryCharacter` (auto-save after upload).
-- **Rationale**: The whole role-separation refactor accidentally dropped the "clone a voice from an existing audio file" surface. Restoring it covers the most common library-side use case beyond Voice Design: ingesting a voice actor's recording. Copying into the bundle keeps `.pharaoh-character` exports self-contained.
+### Clone-from-file (Pharaoh-b9hf + Pharaoh-aonr)
+- **Does**: Two upload affordances that copy / concatenate external audio file(s) into the library bundle and wire them as a reference:
+  - Voice tab "Upload audio file…" button — multi-select; picks the character's single `ref_audio_path` (slot=`design`). When N>1 the files are concatenated into a single richer reference clip.
+  - Palette tab per-emotion "Upload reference…" button — multi-select; sets that emotion's `ref_audio_path` and auto-approves it (slot=`palette`). Same N>1 → concat behavior.
+- **Interacts with**: `concatAudioIntoLibraryBundle`, `@tauri-apps/plugin-dialog::open`, `saveLibraryCharacter` (auto-save after upload).
+- **Rationale**: Restores the clone-from-file surface lost in the role-separation refactor (Pharaoh-b9hf) and extends it with multi-file concatenation (Pharaoh-aonr) so users with multiple takes of the same actor can build a longer, more-varied reference — Chatterbox's speaker embedding is much more stable from 30-60s of varied audio than from a single ~10s clip. Files live inside the bundle so `.pharaoh-character` exports stay self-contained.
 
 ### Export / Import file (Pharaoh-tlt4)
 - **Does**: Per-character `Export…` button + a `+corpus` toggle write a `.pharaoh-character` file (zip) via the native save dialog. Library-header `Import…` button reads one back via the native open dialog and adds it as a new library entry with a fresh `library_id`.
