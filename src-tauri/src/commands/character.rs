@@ -22,8 +22,8 @@ use uuid::Uuid;
 
 use crate::app_support::{
     absolutize_voice_paths, app_projects_dir, character_dir, copy_dir_recursive,
-    library_character_dir, library_root_dir, project_dir, read_json, relativize_voice_paths,
-    write_json,
+    library_character_dir, library_root_dir, lift_legacy_ref_sources, project_dir, read_json,
+    relativize_voice_paths, write_json,
 };
 use crate::error::{Error, Result};
 use crate::models::{Character, LibraryCharacterSummary, Project, CURRENT_CHARACTER_SCHEMA};
@@ -300,6 +300,7 @@ pub fn get_library_character(app: AppHandle, library_id: String) -> Result<Chara
     }
     let mut character: Character = read_json(&bundle_file)?;
     absolutize_voice_paths(&mut character.voice_assignment, &bundle);
+    lift_legacy_ref_sources(&mut character.voice_assignment);
     character.schema_version = CURRENT_CHARACTER_SCHEMA;
     // Defensive: enforce id == library_id for library-stored characters so
     // legacy entries written before the save_library_character fix get

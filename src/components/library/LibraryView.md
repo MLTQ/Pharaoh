@@ -23,12 +23,14 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 ### Model tab (stage 4)
 - **Does**: Drops in `RvcModelStage` similarly. Re-fetches the library character via `getLibraryCharacter` after training completes so the trained model path appears in the UI immediately.
 
-### Clone-from-file (Pharaoh-b9hf + Pharaoh-aonr)
-- **Does**: Two upload affordances that copy / concatenate external audio file(s) into the library bundle and wire them as a reference:
-  - Voice tab "Upload audio file…" button — multi-select; picks the character's single `ref_audio_path` (slot=`design`). When N>1 the files are concatenated into a single richer reference clip.
-  - Palette tab per-emotion "Upload reference…" button — multi-select; sets that emotion's `ref_audio_path` and auto-approves it (slot=`palette`). Same N>1 → concat behavior.
-- **Interacts with**: `concatAudioIntoLibraryBundle`, `@tauri-apps/plugin-dialog::open`, `saveLibraryCharacter` (auto-save after upload).
-- **Rationale**: Restores the clone-from-file surface lost in the role-separation refactor (Pharaoh-b9hf) and extends it with multi-file concatenation (Pharaoh-aonr) so users with multiple takes of the same actor can build a longer, more-varied reference — Chatterbox's speaker embedding is much more stable from 30-60s of varied audio than from a single ~10s clip. Files live inside the bundle so `.pharaoh-character` exports stay self-contained.
+### Clone-from-file with sources list + gold pick (Pharaoh-b9hf / aonr / 0b3l)
+- **Does**: The Character reference audio section is now a sources list, not a single chip. `+ Upload…` adds N candidate files (each copied to `design/` individually). Each row in the list has a radio dot for the "gold" — the single file Chatterbox actually uses for cloning — plus play and remove. A `Concatenate all → gold` button creates a derived combined WAV and sets it as the gold (the individual sources stay in the list). Same pattern wired data-side for per-emotion palette via `ref_audio_sources`.
+- **Interacts with**: `importAudioIntoLibraryBundle` (per-file copy), `concatAudioIntoLibraryBundle` (concat-derived gold), `saveLibraryCharacter` (auto-save on every change to the list), `SourceRow` shared component.
+- **Rationale**: Previous design silently concatenated multi-file uploads into a single chip, hiding the choice from the user. The sources-list pattern surfaces each take, lets the user pick the cleanest one as the gold for 0-shot cloning, and keeps concatenation as an explicit opt-in for users who want the longer-reference benefit. Legacy single-`ref_audio_path` characters get lifted into the sources-list shape on first read by `app_support::lift_legacy_ref_sources`.
+
+### `SourceRow`
+- **Does**: One uploaded / generated take in a voice-reference sources list. Renders gold radio + play + filename (with "concat" badge when the row represents a derived combined file) + remove.
+- **Rationale**: Shared widget so the per-emotion palette can adopt the same affordance later without duplicating styling.
 
 ### Export / Import file (Pharaoh-tlt4)
 - **Does**: Per-character `Export…` button + a `+corpus` toggle write a `.pharaoh-character` file (zip) via the native save dialog. Library-header `Import…` button reads one back via the native open dialog and adds it as a new library entry with a fresh `library_id`.

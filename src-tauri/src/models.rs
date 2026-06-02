@@ -12,8 +12,16 @@ pub struct PaletteEntry {
     /// e.g. "Flat, controlled fear. Each word measured." — NOT a full voice description.
     #[serde(default)]
     pub direction: String,
-    /// Absolute path to locked reference .wav (None = not yet generated/approved)
+    /// Absolute path to locked reference .wav (None = not yet generated/approved).
+    /// This is the "gold" — whichever of `ref_audio_sources` (or a concat-derived
+    /// file) is currently used by Chatterbox for cloning this emotion.
     pub ref_audio_path: Option<String>,
+    /// All uploaded / generated takes for this emotion. The gold (`ref_audio_path`)
+    /// is normally one of these. Empty list = single-source legacy state — read code
+    /// in `commands::character` lifts `ref_audio_path` into this on read so the UI
+    /// only ever has to look at one shape.
+    #[serde(default)]
+    pub ref_audio_sources: Vec<String>,
     pub ref_transcript: Option<String>,
     /// "unreviewed" | "approved"
     pub qa_status: String,
@@ -27,7 +35,14 @@ pub struct VoiceAssignment {
     pub model: String,
     pub speaker: Option<String>,
     pub instruct_default: Option<String>,
+    /// "Gold" character reference — whichever of `ref_audio_sources` (or a
+    /// concat-derived file) Chatterbox should use for 0-shot cloning.
     pub ref_audio_path: Option<String>,
+    /// All uploaded / generated takes available for this character's voice.
+    /// The gold (`ref_audio_path`) is normally one of these. Lifted from
+    /// `ref_audio_path` on read for legacy data.
+    #[serde(default)]
+    pub ref_audio_sources: Vec<String>,
     pub ref_transcript: Option<String>,
     /// Full Qwen3 VoiceDesign description defining this character's vocal identity.
     /// Palette take generation prepends this to each entry's `direction`.

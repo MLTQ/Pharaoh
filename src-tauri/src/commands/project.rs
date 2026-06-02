@@ -4,8 +4,8 @@ use tauri::AppHandle;
 use uuid::Uuid;
 use chrono::Utc;
 use crate::app_support::{
-    absolutize_voice_paths, app_projects_dir, character_dir, project_dir, read_json,
-    relativize_voice_paths, scan_rvc_corpus_dir, write_json,
+    absolutize_voice_paths, app_projects_dir, character_dir, lift_legacy_ref_sources,
+    project_dir, read_json, relativize_voice_paths, scan_rvc_corpus_dir, write_json,
 };
 use crate::models::{
     Project, Scene, Storyboard, LlmConfig, RvcConfig, SceneStatus, CURRENT_CHARACTER_SCHEMA,
@@ -29,6 +29,10 @@ fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
         // and downstream callers don't need to know about the storage format.
         // Idempotent — absolute paths pass through unchanged.
         absolutize_voice_paths(&mut character.voice_assignment, &bundle);
+
+        // Lift legacy single-ref characters into the sources-list shape so
+        // the UI sees one consistent model (Pharaoh-0b3l).
+        lift_legacy_ref_sources(&mut character.voice_assignment);
 
         // Refresh transient corpus stats. If a corpus dir exists but there's no
         // RvcConfig yet, create one with stats only — keeps the UI in sync when

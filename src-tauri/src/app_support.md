@@ -32,10 +32,10 @@ Shared filesystem and config helpers for both Tauri commands and the headless CL
 - **Does**: Recursive directory copy used to move bundles between project and library locations. Skips dotfiles (e.g. `.DS_Store`).
 - **Interacts with**: `commands/character.rs`.
 
-### `relativize_voice_paths`, `absolutize_voice_paths`
-- **Does**: Walk every path field inside a `VoiceAssignment` (ref_audio_path, palette refs, rvc.model_path, rvc.index_path) and rewrite them relative ↔ absolute against a given bundle directory.
-- **Interacts with**: `commands/character.rs` (library save uses relativize; import uses absolutize).
-- **Rationale**: Library bundles store paths relative to the bundle root so they're portable; the rest of the codebase still works in absolute paths. These functions are the only place that knows the full set of path fields.
+### `relativize_voice_paths`, `absolutize_voice_paths`, `lift_legacy_ref_sources`
+- **Does**: `relativize_voice_paths` and `absolutize_voice_paths` walk every path field inside a `VoiceAssignment` — ref_audio_path, ref_audio_sources, palette refs (+ each entry's ref_audio_sources), rvc.model_path, rvc.index_path — and rewrite them relative ↔ absolute against a given bundle directory. `lift_legacy_ref_sources` migrates single-ref characters into the sources-list shape: when `ref_audio_sources` is empty but `ref_audio_path` is set, populate the list with the single path so the UI only ever sees one shape.
+- **Interacts with**: `commands/character.rs` (library save uses relativize; library read uses absolutize + lift), `commands/project.rs::migrate_project_in_place`.
+- **Rationale**: Library bundles store paths relative to the bundle root so they're portable; the rest of the codebase still works in absolute paths. These functions are the only place that knows the full set of path fields. `lift_legacy_ref_sources` makes the sources-list (Pharaoh-0b3l) backwards-compatible without a database migration.
 
 ### `scan_rvc_corpus_dir`
 - **Does**: Counts `.wav` files in a corpus directory and sums duration_ms from adjacent `<name>.wav.meta.json` sidecars.

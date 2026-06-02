@@ -115,6 +115,7 @@ async fn end_to_end_render_pipeline() {
                 speaker: None,
                 instruct_default: None,
                 ref_audio_path: None,
+                ref_audio_sources: vec![],
                 ref_transcript: None,
                 base_voice_description: String::new(),
                 emotional_palette: vec![],

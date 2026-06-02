@@ -16,8 +16,19 @@ export interface PaletteEntry {
    * Combined with VoiceAssignment.base_voice_description at generation time.
    */
   direction: string;
-  /** Absolute path to the locked reference .wav (null = not yet generated/approved) */
+  /**
+   * "Gold" reference for 0-shot cloning — whichever of `ref_audio_sources`
+   * (or a concat-derived file) is currently active. null = not yet
+   * generated/approved.
+   */
   ref_audio_path: string | null;
+  /**
+   * All uploaded / generated takes for this emotion. Multi-upload appends here;
+   * the user picks one to be the gold (ref_audio_path) for cloning.
+   * Optional in TS — backend lifts a single `ref_audio_path` into this list
+   * on read for legacy data.
+   */
+  ref_audio_sources?: string[];
   ref_transcript: string | null;
   qa_status: "unreviewed" | "approved";
 }
@@ -86,8 +97,17 @@ export interface VoiceAssignment {
   model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned" | "Chatterbox";
   speaker: string | null;
   instruct_default: string | null;
-  /** Legacy single-reference path (used by Clone tab). */
+  /**
+   * "Gold" character reference — whichever of `ref_audio_sources` (or a
+   * concat-derived file) is currently used by Chatterbox for 0-shot cloning.
+   */
   ref_audio_path: string | null;
+  /**
+   * All uploaded / generated voice takes. Multi-upload appends here; the user
+   * picks one as the gold for cloning. Optional in TS — backend lifts a
+   * single `ref_audio_path` into this list on read for legacy data.
+   */
+  ref_audio_sources?: string[];
   ref_transcript: string | null;
   /**
    * Full Qwen3 VoiceDesign description that defines this character's vocal identity.

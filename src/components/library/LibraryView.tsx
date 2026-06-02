@@ -24,7 +24,6 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import { Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList";
 import { CharacterPipeline } from "../characters/CharacterPipeline";
@@ -39,6 +38,7 @@ import {
   submitTtsVoiceDesign,
   exportLibraryCharacter,
   importLibraryCharacterFromFile,
+  importAudioIntoLibraryBundle,
   concatAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
@@ -520,9 +520,10 @@ export const LibraryView: React.FC = () => {
     }
   };
 
-  // Voice tab: upload existing recording(s) as the character's voice reference.
-  // N>1 files get concatenated into a single ref WAV via ffmpeg — longer
-  // reference = richer Chatterbox speaker embedding.
+  // Voice tab: upload audio file(s) as candidate character voice references.
+  // Each picked file is copied individually into the bundle as its own source.
+  // If no gold is currently set, the first new upload becomes the gold;
+  // otherwise the existing gold is preserved and the user picks via the list.
   const handleUploadCharacterReference = async () => {
     if (!character?.library_id) {
       setDesignGenError("Save the character first.");
@@ -531,23 +532,31 @@ export const LibraryView: React.FC = () => {
     const sources = await pickAudioFiles(true);
     if (sources.length === 0) return;
     setDesignGenError(null);
+    setSaving(true);
     try {
-      const { absolute_path } = await concatAudioIntoLibraryBundle({
-        libraryId: character.library_id,
-        sourcePaths: sources,
-        slot: "design",
-        destName: sources.length === 1 ? "" : `imported_concat_${Date.now()}.wav`,
-      });
+      // Copy each file individually so users can see + pick.
+      const copied: string[] = [];
+      for (const src of sources) {
+        const { absolute_path } = await importAudioIntoLibraryBundle({
+          libraryId: character.library_id,
+          sourcePath: src,
+          slot: "design",
+          destName: "", // backend timestamps + preserves extension
+        });
+        copied.push(absolute_path);
+      }
+      const existingSources = character.voice_assignment.ref_audio_sources ?? [];
+      const nextSources = [...existingSources, ...copied];
+      const nextGold = character.voice_assignment.ref_audio_path ?? copied[0] ?? null;
       const updated: Character = {
         ...character,
         voice_assignment: {
           ...character.voice_assignment,
-          ref_audio_path: absolute_path,
+          ref_audio_sources: nextSources,
+          ref_audio_path: nextGold,
         },
       };
       setCharacter(updated);
-      // Auto-save: uploads are a high-value action; don't make the user remember.
-      setSaving(true);
       const saved = await saveLibraryCharacter(updated);
       setCharacter(saved);
       setDirty(false);
@@ -558,8 +567,93 @@ export const LibraryView: React.FC = () => {
     }
   };
 
-  // Palette tab: upload existing recording(s) as a specific emotion's reference.
-  // Multi-file → concatenated for richer per-emotion embedding.
+  // Voice tab: concatenate all current sources into a single derived WAV and
+  // set it as the gold. The individual sources stay in the list.
+  const handleConcatCharacterSources = async () => {
+    if (!character?.library_id) return;
+    const sources = character.voice_assignment.ref_audio_sources ?? [];
+    if (sources.length < 2) return;
+    setDesignGenError(null);
+    setSaving(true);
+    try {
+      const { absolute_path } = await concatAudioIntoLibraryBundle({
+        libraryId: character.library_id,
+        sourcePaths: sources,
+        slot: "design",
+        destName: `concat_${Date.now()}.wav`,
+      });
+      const updated: Character = {
+        ...character,
+        voice_assignment: {
+          ...character.voice_assignment,
+          ref_audio_path: absolute_path,
+        },
+      };
+      setCharacter(updated);
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setDesignGenError(e instanceof Error ? e.message : "Concat failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Voice tab: pick which source is the active gold for cloning.
+  const handlePickCharacterGold = async (audioPath: string) => {
+    if (!character) return;
+    const updated: Character = {
+      ...character,
+      voice_assignment: {
+        ...character.voice_assignment,
+        ref_audio_path: audioPath,
+      },
+    };
+    setCharacter(updated);
+    setSaving(true);
+    try {
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setDesignGenError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Voice tab: remove a source from the list. If it was the gold, the next
+  // remaining source (or null) becomes the new gold.
+  const handleRemoveCharacterSource = async (audioPath: string) => {
+    if (!character) return;
+    const sources = (character.voice_assignment.ref_audio_sources ?? []).filter((p) => p !== audioPath);
+    const nextGold =
+      character.voice_assignment.ref_audio_path === audioPath
+        ? (sources[0] ?? null)
+        : character.voice_assignment.ref_audio_path;
+    const updated: Character = {
+      ...character,
+      voice_assignment: {
+        ...character.voice_assignment,
+        ref_audio_sources: sources,
+        ref_audio_path: nextGold,
+      },
+    };
+    setCharacter(updated);
+    setSaving(true);
+    try {
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setDesignGenError(e instanceof Error ? e.message : "Save failed");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  // Palette tab: per-emotion equivalent of upload-as-source.
   const handleUploadPaletteReference = async (emotion: string) => {
     if (!character?.library_id) {
       setPaletteGenError("Save the character first.");
@@ -568,18 +662,44 @@ export const LibraryView: React.FC = () => {
     const sources = await pickAudioFiles(true);
     if (sources.length === 0) return;
     setPaletteGenError(null);
+    setSaving(true);
     try {
-      const { absolute_path } = await concatAudioIntoLibraryBundle({
-        libraryId: character.library_id,
-        sourcePaths: sources,
-        slot: "palette",
-        destName: `${emotion}_upload_${Date.now()}.wav`,
-      });
-      // Approve as the reference for this emotion in one shot — same path as
-      // generated-take approval flow.
-      await handleApprovePaletteTake(emotion, absolute_path);
+      const copied: string[] = [];
+      for (const src of sources) {
+        const { absolute_path } = await importAudioIntoLibraryBundle({
+          libraryId: character.library_id,
+          sourcePath: src,
+          slot: "palette",
+          destName: `${emotion}_upload_${Date.now()}_${copied.length}.wav`,
+        });
+        copied.push(absolute_path);
+      }
+      // Add to the entry's sources; promote first new one to gold if no
+      // existing gold (mirrors voice-tab semantics).
+      const updated: Character = {
+        ...character,
+        voice_assignment: {
+          ...character.voice_assignment,
+          emotional_palette: character.voice_assignment.emotional_palette.map((e) =>
+            e.emotion === emotion
+              ? {
+                  ...e,
+                  ref_audio_sources: [...(e.ref_audio_sources ?? []), ...copied],
+                  ref_audio_path: e.ref_audio_path ?? copied[0] ?? null,
+                  qa_status: e.ref_audio_path ? e.qa_status : "approved",
+                }
+              : e,
+          ),
+        },
+      };
+      setCharacter(updated);
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
     } catch (e) {
       setPaletteGenError(e instanceof Error ? e.message : "Upload failed");
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -587,11 +707,18 @@ export const LibraryView: React.FC = () => {
   const handleSaveDesignAsReference = async (audioPath: string) => {
     if (!character) return;
     const transcript = (voiceDesignTestLine || DEFAULT_TEST_LINE).trim();
+    // Add to the sources list (dedup) and set as gold so it shows up alongside
+    // uploaded files in the Character reference audio section.
+    const existingSources = character.voice_assignment.ref_audio_sources ?? [];
+    const nextSources = existingSources.includes(audioPath)
+      ? existingSources
+      : [...existingSources, audioPath];
     const updated: Character = {
       ...character,
       voice_assignment: {
         ...character.voice_assignment,
         ref_audio_path: audioPath,
+        ref_audio_sources: nextSources,
         ref_transcript: transcript,
       },
     };
@@ -974,61 +1101,77 @@ export const LibraryView: React.FC = () => {
                 );
               })()}
 
-              {/* Reference audio (single-ref fallback) */}
+              {/* Reference audio — sources list with gold pick (Pharaoh-0b3l) */}
               <div style={{ marginTop: 24, paddingTop: 18, borderTop: "1px solid var(--line-1)" }}>
-                <label style={labelStyle}>Character reference audio</label>
+                <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", marginBottom: 6 }}>
+                  <label style={{ ...labelStyle, marginBottom: 0 }}>
+                    Character reference audio
+                    {(() => {
+                      const n = (character.voice_assignment.ref_audio_sources ?? []).length;
+                      return n > 0 ? ` · ${n}` : "";
+                    })()}
+                  </label>
+                  <button
+                    className="btn btn-sm"
+                    onClick={handleUploadCharacterReference}
+                    disabled={!character.library_id || saving}
+                    title="Pick one or more audio files — each becomes a candidate reference. Use the radio dot to choose the gold."
+                  >+ Upload…</button>
+                </div>
                 <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
-                  Single-ref fallback used when no palette is approved. Approved Voice Design takes save here automatically, or you can upload an existing recording to clone from (Pharaoh-b9hf).
+                  Multiple uploads are kept as separate candidates. The dot picks the "gold" — the single file Chatterbox uses for 0-shot cloning. Approved Voice Design takes are also added here.
                 </p>
-                {character.voice_assignment.ref_audio_path ? (
-                  <div style={{
-                    display: "flex", alignItems: "center", gap: 10,
-                    padding: "8px 12px", marginBottom: 10,
-                    background: "color-mix(in oklch, var(--tts) 8%, var(--bg-2))",
-                    borderRadius: "var(--r)", border: "1px solid var(--line-2)",
-                  }}>
-                    <PlayButton path={character.voice_assignment.ref_audio_path} size={12} />
-                    <Wave width={90} height={16} seed={(character.library_id ?? "x").charCodeAt(0)} count={26} color="var(--tts)" opacity={0.7} />
-                    <span style={{
-                      flex: 1, fontFamily: "var(--font-mono)", fontSize: 10,
-                      color: "var(--fg-3)", overflow: "hidden",
-                      textOverflow: "ellipsis", whiteSpace: "nowrap",
-                    }}>
-                      {character.voice_assignment.ref_audio_path.split("/").pop()}
-                    </span>
-                    <button
-                      className="btn btn-sm"
-                      onClick={handleUploadCharacterReference}
-                      disabled={!character.library_id || saving}
-                      title="Replace the reference with an uploaded audio file"
-                    >replace</button>
-                    <button
-                      className="btn btn-sm"
-                      style={{ color: "var(--sfx)" }}
-                      onClick={() => patch((c) => ({
-                        ...c,
-                        voice_assignment: { ...c.voice_assignment, ref_audio_path: null },
-                      }))}
-                    >clear</button>
-                  </div>
-                ) : (
-                  <div style={{
-                    padding: "10px 12px", marginBottom: 10,
-                    border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
-                    color: "var(--fg-4)", fontSize: 11, lineHeight: 1.6,
-                    display: "flex", flexDirection: "column", gap: 8,
-                  }}>
-                    <span>
-                      No reference audio yet. Generate one above with Voice Design, or upload an existing recording.
-                    </span>
-                    <button
-                      className="btn btn-sm"
-                      onClick={handleUploadCharacterReference}
-                      disabled={!character.library_id || saving}
-                      style={{ alignSelf: "flex-start" }}
-                    >Upload audio file…</button>
-                  </div>
-                )}
+
+                {(() => {
+                  const sources = character.voice_assignment.ref_audio_sources ?? [];
+                  const gold = character.voice_assignment.ref_audio_path;
+                  const goldOutsideSources = gold != null && !sources.includes(gold);
+                  if (sources.length === 0 && !gold) {
+                    return (
+                      <div style={{
+                        padding: "10px 12px", marginBottom: 10,
+                        border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
+                        color: "var(--fg-4)", fontSize: 11, lineHeight: 1.6,
+                      }}>
+                        No reference audio yet. Generate one with Voice Design above, or upload existing recordings with + Upload…
+                      </div>
+                    );
+                  }
+                  return (
+                    <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                      {goldOutsideSources && gold && (
+                        <SourceRow
+                          path={gold}
+                          isGold={true}
+                          derivedConcat={true}
+                          onPickGold={() => {}}
+                          onRemove={() => handlePickCharacterGold(sources[0] ?? "")}
+                          disabled={saving}
+                        />
+                      )}
+                      {sources.map((src) => (
+                        <SourceRow
+                          key={src}
+                          path={src}
+                          isGold={src === gold}
+                          derivedConcat={false}
+                          onPickGold={() => handlePickCharacterGold(src)}
+                          onRemove={() => handleRemoveCharacterSource(src)}
+                          disabled={saving}
+                        />
+                      ))}
+                      {sources.length >= 2 && (
+                        <button
+                          className="btn btn-sm"
+                          onClick={handleConcatCharacterSources}
+                          disabled={saving}
+                          title="Concatenate all sources into one longer derived WAV and use that as the gold. Useful when you want a richer speaker embedding from multiple takes."
+                          style={{ alignSelf: "flex-start", marginTop: 4, fontFamily: "var(--font-mono)", fontSize: 10 }}
+                        >Concatenate all → gold</button>
+                      )}
+                    </div>
+                  );
+                })()}
 
                 <label style={labelStyle}>
                   Reference transcript{" "}
@@ -1287,6 +1430,77 @@ export const LibraryView: React.FC = () => {
 // Job-shaped object accepted by TakeList — includes job-store jobs and synthesized
 // "disk job" rows for MCP-generated takes that bypass the in-memory queue.
 type TakeJob = Parameters<typeof TakeRow>[0]["job"];
+
+// ── SourceRow ──────────────────────────────────────────────────────────────
+//
+// One uploaded / generated take in a voice-reference sources list. Renders
+// the gold-pick radio dot, play button, filename, and remove control.
+// Shared by both the Voice tab character ref and the per-emotion palette UI.
+
+const SourceRow: React.FC<{
+  path: string;
+  isGold: boolean;
+  /** True when this row represents a concat-derived file not in the sources list. */
+  derivedConcat: boolean;
+  onPickGold: () => void;
+  onRemove: () => void;
+  disabled: boolean;
+}> = ({ path, isGold, derivedConcat, onPickGold, onRemove, disabled }) => {
+  const fileName = path.split("/").pop() ?? path;
+  return (
+    <div style={{
+      display: "grid",
+      gridTemplateColumns: "auto auto 1fr auto",
+      alignItems: "center",
+      gap: 8,
+      padding: "6px 10px",
+      border: `1px solid ${isGold ? "var(--tts)" : "var(--line-1)"}`,
+      background: isGold
+        ? "color-mix(in oklch, var(--tts) 10%, var(--bg-1))"
+        : "var(--bg-1)",
+      borderRadius: "var(--r)",
+    }}>
+      <button
+        onClick={derivedConcat ? undefined : onPickGold}
+        disabled={disabled || derivedConcat}
+        title={derivedConcat
+          ? "Currently using a concat-derived file as gold. Pick a source below to revert."
+          : isGold ? "This is the gold reference" : "Use this take as the gold reference for cloning"}
+        style={{
+          width: 14, height: 14, borderRadius: "50%",
+          border: `2px solid ${isGold ? "var(--tts)" : "var(--line-2)"}`,
+          background: isGold ? "var(--tts)" : "transparent",
+          cursor: derivedConcat || disabled ? "default" : "pointer",
+          padding: 0,
+        }}
+      />
+      <PlayButton path={path} size={11} />
+      <span style={{
+        fontFamily: "var(--font-mono)", fontSize: 10,
+        color: "var(--fg-3)",
+        overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+        display: "flex", alignItems: "center", gap: 6, minWidth: 0,
+      }}>
+        <span style={{ overflow: "hidden", textOverflow: "ellipsis" }}>{fileName}</span>
+        {derivedConcat && (
+          <span style={{
+            fontSize: 9, color: "var(--tts)", letterSpacing: "0.04em",
+            border: "1px solid color-mix(in oklch, var(--tts) 40%, var(--line-1))",
+            background: "color-mix(in oklch, var(--tts) 8%, transparent)",
+            padding: "0 5px", borderRadius: 3, flexShrink: 0,
+          }}>concat</span>
+        )}
+      </span>
+      <button
+        className="btn btn-sm"
+        onClick={onRemove}
+        disabled={disabled}
+        title={derivedConcat ? "Drop the concat and pick a source as gold" : "Remove this source"}
+        style={{ color: "var(--sfx)", padding: "1px 6px", fontSize: 11 }}
+      >×</button>
+    </div>
+  );
+};
 
 const PaletteRow: React.FC<{
   entry: PaletteEntry;

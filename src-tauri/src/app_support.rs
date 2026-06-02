@@ -165,10 +165,20 @@ pub fn relativize_voice_paths(va: &mut crate::models::VoiceAssignment, bundle_di
             va.ref_audio_path = Some(rel);
         }
     }
+    for p in va.ref_audio_sources.iter_mut() {
+        if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+            *p = rel;
+        }
+    }
     for entry in va.emotional_palette.iter_mut() {
         if let Some(p) = entry.ref_audio_path.as_deref() {
             if let Some(rel) = relativize_character_asset(bundle_dir, p) {
                 entry.ref_audio_path = Some(rel);
+            }
+        }
+        for p in entry.ref_audio_sources.iter_mut() {
+            if let Some(rel) = relativize_character_asset(bundle_dir, p) {
+                *p = rel;
             }
         }
     }
@@ -195,10 +205,18 @@ pub fn absolutize_voice_paths(va: &mut crate::models::VoiceAssignment, bundle_di
         let resolved = resolve_character_asset(bundle_dir, p);
         va.ref_audio_path = Some(resolved.to_string_lossy().into_owned());
     }
+    for p in va.ref_audio_sources.iter_mut() {
+        let resolved = resolve_character_asset(bundle_dir, p);
+        *p = resolved.to_string_lossy().into_owned();
+    }
     for entry in va.emotional_palette.iter_mut() {
         if let Some(p) = entry.ref_audio_path.as_deref() {
             let resolved = resolve_character_asset(bundle_dir, p);
             entry.ref_audio_path = Some(resolved.to_string_lossy().into_owned());
+        }
+        for p in entry.ref_audio_sources.iter_mut() {
+            let resolved = resolve_character_asset(bundle_dir, p);
+            *p = resolved.to_string_lossy().into_owned();
         }
     }
     if let Some(rvc) = va.rvc.as_mut() {
@@ -209,6 +227,25 @@ pub fn absolutize_voice_paths(va: &mut crate::models::VoiceAssignment, bundle_di
         if let Some(p) = rvc.index_path.as_deref() {
             let resolved = resolve_character_asset(bundle_dir, p);
             rvc.index_path = Some(resolved.to_string_lossy().into_owned());
+        }
+    }
+}
+
+/// Lift legacy single-ref characters into the sources-list shape: if
+/// `ref_audio_path` is set but `ref_audio_sources` is empty, populate the list
+/// with the single path so the UI only ever has to think about one shape.
+/// Idempotent. Use on every read path (get_library_character, migrate_project_in_place).
+pub fn lift_legacy_ref_sources(va: &mut crate::models::VoiceAssignment) {
+    if va.ref_audio_sources.is_empty() {
+        if let Some(p) = va.ref_audio_path.as_deref() {
+            va.ref_audio_sources = vec![p.to_string()];
+        }
+    }
+    for entry in va.emotional_palette.iter_mut() {
+        if entry.ref_audio_sources.is_empty() {
+            if let Some(p) = entry.ref_audio_path.as_deref() {
+                entry.ref_audio_sources = vec![p.to_string()];
+            }
         }
     }
 }
