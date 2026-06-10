@@ -4,6 +4,7 @@ mod commands;
 mod error;
 mod fountain;
 mod models;
+mod share;
 
 #[cfg(test)]
 mod integration_tests;
@@ -32,6 +33,10 @@ pub fn run() {
 
             app.manage(AppState::new(config_path, app_config));
             app.manage(RecordingState::new());
+
+            // Gruve share server: UI + HTTP command API for mesh viewers,
+            // plus the lobby announce heartbeat. No-op when share_enabled=false.
+            share::spawn(app.handle().clone());
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![

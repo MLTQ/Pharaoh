@@ -29,6 +29,27 @@ import { useAudioStore } from "./store/audioStore";
 import { useToastStore } from "./store/toastStore";
 import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
 import { WORKSPACE_OF } from "./lib/types";
+import { initGruveCollab } from "./lib/gruveCollab";
+import { isMeshViewer } from "./lib/transport";
+
+// Small fixed pill shown to mesh/browser viewers (no Tauri IPC) so it's
+// obvious you're in someone else's session, not a local install.
+function MeshViewerBadge() {
+  if (!isMeshViewer) return null;
+  return (
+    <div
+      style={{
+        position: "fixed", right: 12, bottom: 12, zIndex: 90,
+        padding: "4px 10px", borderRadius: 999,
+        background: "var(--bg-2)", border: "1px solid var(--stroke-1)",
+        color: "var(--fg-3)", font: "600 11px/1.6 var(--font-ui, sans-serif)",
+        pointerEvents: "none",
+      }}
+    >
+      ◇ mesh session
+    </div>
+  );
+}
 
 // ── Rail = workspace switcher ────────────────────────────────────────────────
 //
@@ -184,6 +205,18 @@ export default function App() {
     return () => { unlisten?.(); };
   }, []);
 
+  // Gruve multiplayer: join the shared session room (harmless when no agent
+  // is running). Mesh viewers don't receive Tauri events, so they poll the
+  // open project for collaborators' edits instead.
+  useEffect(() => {
+    initGruveCollab();
+    if (!isMeshViewer) return;
+    const id = setInterval(() => {
+      if (useProjectStore.getState().realProjectId) reloadProjectFromDisk();
+    }, 10_000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     pollHealth();
     const id = setInterval(pollHealth, 30_000);
@@ -239,6 +272,7 @@ export default function App() {
         {/* Setup banner is part of the launcher experience too — first-run
             users hit ffmpeg-missing before any project exists. */}
         <SetupBanner />
+        <MeshViewerBadge />
       </div>
     );
   }
@@ -783,6 +817,7 @@ export default function App() {
         </div>
       </div>
       <ToastHost />
+      <MeshViewerBadge />
       <SetupBanner />
       {projectChooser && (
         <ProjectChooser

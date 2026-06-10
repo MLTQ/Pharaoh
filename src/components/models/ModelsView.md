@@ -23,3 +23,4 @@ Model lifecycle panel for checking server health and preloading local inference 
 
 ## Notes
 - The panel only reports optional AudioLDM dependency readiness. Installation remains a setup-script concern.
+- Chatterbox URL defaults come from `defaultServerUrls()` in settingsShared; `invoke` routes via `lib/transport.ts`. The direct `fetch(chatterboxUrl)` health probe is host-only by nature and shows offline for mesh viewers.

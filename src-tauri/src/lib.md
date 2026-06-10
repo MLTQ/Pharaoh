@@ -24,3 +24,4 @@ Library entrypoints for Pharaoh’s native application modes. This file boots th
 
 ## Notes
 - GUI startup now reuses the same config-loading helper used by the CLI so path semantics stay aligned.
+- `share::spawn(app.handle())` runs in setup after `AppState` is managed — starts the Gruve share server + announce loop (see share.md).

@@ -1,4 +1,6 @@
-import { invoke } from "@tauri-apps/api/core";
+// invoke routes through transport.ts: Tauri IPC on the host, the Gruve share
+// server's HTTP mirror for mesh/browser viewers. Same args, same results.
+import { invoke } from "./transport";
 import type {
   Project,
   Scene,

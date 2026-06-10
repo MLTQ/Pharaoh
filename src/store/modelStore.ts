@@ -1,5 +1,5 @@
 import { create } from "zustand";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke, isTauri } from "../lib/transport";
 import { listen } from "@tauri-apps/api/event";
 
 export type ServerStatus = "unknown" | "online" | "offline" | "loading";
@@ -53,6 +53,9 @@ export const useModelStore = create<ModelState>((set) => ({
   loadProgress: { tts: 0, sfx: 0, music: 0, post: 0 },
 
   initListeners: async () => {
+    // Tauri events don't exist for mesh/browser viewers — progress bars are
+    // host-only; health still arrives via pollHealth over HTTP.
+    if (!isTauri) return () => {};
     const unlisten = await listen<{ model: string; progress: number }>(
       "model-load-progress",
       ({ payload }) => {

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useCallback } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../lib/transport";
 import { useModelStore } from "../../store/modelStore";
+import { defaultServerUrls } from "../settings/settingsShared";
 import type { AppConfig } from "../../lib/types";
 
 const TTS_VARIANTS = [
@@ -42,7 +43,7 @@ export const ModelsView: React.FC = () => {
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
   // ── Chatterbox state (managed via direct fetch — not wired into modelStore) ──
-  const [chatterboxUrl, setChatterboxUrl] = useState("http://127.0.0.1:18005");
+  const [chatterboxUrl, setChatterboxUrl] = useState(defaultServerUrls().chatterbox);
   const [chatterboxStatus, setChatterboxStatus] = useState<"unknown" | "online" | "offline">("unknown");
   const [chatterboxLoaded, setChatterboxLoaded] = useState(false);
   const [chatterboxVariant, setChatterboxVariant] = useState("");
@@ -51,7 +52,7 @@ export const ModelsView: React.FC = () => {
   useEffect(() => {
     invoke<AppConfig>("get_app_config").then((cfg) => {
       setWooshDir(cfg.woosh_dir ?? "");
-      setChatterboxUrl(cfg.chatterbox_url ?? "http://127.0.0.1:18005");
+      setChatterboxUrl(cfg.chatterbox_url ?? defaultServerUrls().chatterbox);
     }).catch(() => {});
   }, []);
 

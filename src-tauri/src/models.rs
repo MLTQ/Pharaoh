@@ -352,6 +352,18 @@ fn default_split_inference_servers() -> bool {
     false
 }
 
+fn default_share_enabled() -> bool {
+    true
+}
+
+fn default_share_port() -> u16 {
+    18010
+}
+
+fn default_share_collab() -> bool {
+    true
+}
+
 // ── Persistent app config ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -390,6 +402,18 @@ pub struct AppConfig {
     /// When true, each server has its own independently-configurable URL.
     #[serde(default = "default_split_inference_servers")]
     pub split_inference_servers: bool,
+    /// Start the Gruve share server (serves the built UI + HTTP command API on
+    /// share_port and announces Pharaoh to a local Gruve agent if one is running).
+    #[serde(default = "default_share_enabled")]
+    pub share_enabled: bool,
+    /// Localhost port for the Gruve share server. Mesh friends reach it only
+    /// through the Gruve agent's proxy — it binds 127.0.0.1, never the LAN.
+    #[serde(default = "default_share_port")]
+    pub share_port: u16,
+    /// When true, mesh viewers may edit (script/scenes/QA) and trigger
+    /// generation. When false they are read-only spectators.
+    #[serde(default = "default_share_collab")]
+    pub share_collab: bool,
 }
 
 impl AppConfig {
@@ -416,6 +440,9 @@ impl AppConfig {
             single_model_mode: false,
             inference_host: default_inference_host(),
             split_inference_servers: false,
+            share_enabled: default_share_enabled(),
+            share_port: default_share_port(),
+            share_collab: default_share_collab(),
         }
     }
 }

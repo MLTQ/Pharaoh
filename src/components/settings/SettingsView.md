@@ -36,3 +36,4 @@ Entry point for the Settings tab. Owns all settings state (server URLs, unified 
 ## Notes
 - Split from a 1335-line monolith (Pharaoh-us6m) into `settingsShared.tsx`, `SfxPanels.tsx`, `SetupPanels.tsx`, `ModelServerCards.tsx`, `ChatterboxRvcCards.tsx`.
 - `checkChatterboxHealth` intentionally keeps its swallow-to-offline catch: an unreachable server *is* the "offline" result, not an error to toast.
+- Localhost defaults come from `defaultServerUrls()`/`LOOPBACK_HOST` in settingsShared (gruve doctor compliance); `invoke` routes via `lib/transport.ts`.

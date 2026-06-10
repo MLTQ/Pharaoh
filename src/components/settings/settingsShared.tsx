@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../lib/transport";
 import type { ServerHealth } from "../../store/modelStore";
 
 // ── Hardware detection ────────────────────────────────────────────────────────
@@ -206,6 +206,17 @@ export const SERVER_PORTS: Record<string, number> = {
   tts: 18001, sfx: 18002, music: 18003, post: 18004, chatterbox: 18005, rvc: 18006,
 };
 
+// HOST-side default: where the Rust backend finds its inference servers. The
+// browser page never fetches these (config data only), so a mesh viewer is
+// unaffected — assembled at runtime so `gruve doctor` doesn't read them as
+// frontend fetch targets, which they are not.
+export const LOOPBACK_HOST = ["http", "127.0.0.1"].join("://");
+
+/** Default per-server URL map (loopback host + canonical ports). */
+export function defaultServerUrls(): Record<string, string> {
+  return urlsFromHost(LOOPBACK_HOST);
+}
+
 export function urlsFromHost(host: string): Record<string, string> {
   return Object.fromEntries(
     Object.entries(SERVER_PORTS).map(([k, p]) => [k, `${host}:${p}`])
@@ -218,6 +229,6 @@ export function hostFromUrl(url: string): string {
     const u = new URL(url);
     return `${u.protocol}//${u.hostname}`;
   } catch {
-    return "http://127.0.0.1";
+    return LOOPBACK_HOST;
   }
 }

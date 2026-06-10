@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from "react";
-import { invoke } from "@tauri-apps/api/core";
+import { invoke } from "../../lib/transport";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { useModelStore } from "../../store/modelStore";
 import type { AppConfig } from "../../lib/types";
@@ -9,6 +9,8 @@ import {
   SERVER_PORTS,
   urlsFromHost,
   hostFromUrl,
+  defaultServerUrls,
+  LOOPBACK_HOST,
   useHardwareProfile,
   type ModelKind,
   type SfxServerHealth,
@@ -23,15 +25,8 @@ export const SettingsView: React.FC = () => {
   const statusMap = { tts, sfx, music, post };
   const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post };
 
-  const [urls, setUrls] = useState<Record<string, string>>({
-    tts:        `http://127.0.0.1:18001`,
-    sfx:        `http://127.0.0.1:18002`,
-    music:      `http://127.0.0.1:18003`,
-    post:       `http://127.0.0.1:18004`,
-    chatterbox: `http://127.0.0.1:18005`,
-    rvc:        `http://127.0.0.1:18006`,
-  });
-  const [inferenceHost, setInferenceHost] = useState("http://127.0.0.1");
+  const [urls, setUrls] = useState<Record<string, string>>(defaultServerUrls());
+  const [inferenceHost, setInferenceHost] = useState(LOOPBACK_HOST);
   const [splitServers, setSplitServers] = useState(false);
   const [chatterboxHealth, setChatterboxHealth] = useState<ChatterboxHealth>("unknown");
 
@@ -46,8 +41,8 @@ export const SettingsView: React.FC = () => {
         sfx:        cfg.sfx_url,
         music:      cfg.music_url,
         post:       cfg.post_url,
-        chatterbox: cfg.chatterbox_url ?? "http://127.0.0.1:18005",
-        rvc:        cfg.rvc_url        ?? "http://127.0.0.1:18006",
+        chatterbox: cfg.chatterbox_url ?? defaultServerUrls().chatterbox,
+        rvc:        cfg.rvc_url        ?? defaultServerUrls().rvc,
       });
       setInferenceHost(cfg.inference_host ?? hostFromUrl(cfg.tts_url));
       setSplitServers(cfg.split_inference_servers ?? false);
@@ -256,7 +251,7 @@ export const SettingsView: React.FC = () => {
                   value={inferenceHost}
                   onChange={(e) => setInferenceHost(e.target.value)}
                   onBlur={handleHostBlur}
-                  placeholder="http://127.0.0.1"
+                  placeholder={LOOPBACK_HOST}
                   style={{
                     flex: 1, fontFamily: "var(--font-mono)", fontSize: 12,
                     background: "var(--bg-0)", border: "1px solid var(--line-1)",

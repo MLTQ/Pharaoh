@@ -40,3 +40,4 @@ Typed frontend wrappers around Tauri `invoke` calls. This file keeps component c
 
 ## Notes
 - Keep this file boring: it should mirror backend command shapes and avoid frontend business logic.
+- `invoke` now comes from `lib/transport.ts` (Tauri IPC on the host, Gruve share-server HTTP for mesh/browser viewers). Wrapper shapes are unchanged; commands not in share.rs's allowlist reject with a host-only error for viewers.

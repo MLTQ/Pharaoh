@@ -45,3 +45,4 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 ## Notes
 - `JobCompleteEvent` now carries duration and binding metadata so the UI can react to automatic row binding.
 - `SfxT2ARequest.backend` is optional for compatibility; absent means Woosh. AudioLDM callers should also set AudioLDM-specific guidance fields when needed.
+- `AppConfig` gained `share_enabled` (default true), `share_port` (18010), `share_collab` (default true) for the Gruve share server in `share.rs`.

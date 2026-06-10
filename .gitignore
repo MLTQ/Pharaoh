@@ -31,3 +31,6 @@ inference/server-output
 # binary data in the repo — spaces.json + the downloader are enough.
 assets/sofa/*.sofa
 assets/spaces/*.wav
+# Gruve agent binary (vendored from gruve-kit.zip, ~30MB — keep out of git)
+gruve/gruve
+gruve-kit.zip

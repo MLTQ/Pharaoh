@@ -1,5 +1,5 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { convertFileSrc } from "@tauri-apps/api/core";
+import { fileSrc } from "../../lib/transport";
 import { listSpatialSpaces } from "../../lib/tauriCommands";
 import type { ScriptRow, SpatialSpace, SpatialWaypoint } from "../../lib/types";
 import { reportError } from "../../lib/errors";
@@ -185,7 +185,7 @@ export const SpatializeModal: React.FC<SpatializeModalProps> = ({
 
       // Decode once per modal lifetime. Subsequent previews reuse the buffer.
       if (!bufferRef.current) {
-        const url = convertFileSrc(row.file);
+        const url = fileSrc(row.file);
         const res = await fetch(url);
         if (!res.ok) throw new Error(`fetch ${res.status} ${res.statusText}`);
         const arr = await res.arrayBuffer();

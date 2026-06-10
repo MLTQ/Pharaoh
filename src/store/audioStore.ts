@@ -1,5 +1,5 @@
-import { convertFileSrc } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { fileSrc } from "../lib/transport";
 import { reportError } from "../lib/errors";
 
 // ── Module-level streaming audio singleton ──────────────────────────────────
@@ -10,7 +10,7 @@ let _stopAt: number | null = null;
 
 function playableSrc(path: string): string {
   if (/^(https?:|blob:|data:)/.test(path)) return path;
-  return convertFileSrc(path);
+  return fileSrc(path);
 }
 
 function stopCurrent(): void {

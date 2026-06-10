@@ -250,6 +250,12 @@ export interface AppConfig {
   inference_host: string;
   /** When true, each server has its own URL field. When false, all derive from inference_host + default port. */
   split_inference_servers: boolean;
+  /** Gruve sharing: run the share server (UI + HTTP command API) and announce to a local agent. */
+  share_enabled?: boolean;
+  /** Localhost port of the share server (default 18010). */
+  share_port?: number;
+  /** Allow mesh viewers to edit and generate (false = read-only spectators). */
+  share_collab?: boolean;
 }
 
 export interface AllServerHealth {

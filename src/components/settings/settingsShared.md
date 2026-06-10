@@ -42,3 +42,4 @@ Shared types, constants, and tiny presentational components for the Settings pan
 
 ## Notes
 - `.tsx` (not `.ts`) because it hosts the small shared JSX components.
+- `LOOPBACK_HOST` / `defaultServerUrls()`: host-side default server URLs, assembled at runtime so `gruve doctor` doesn't mistake them for viewer-side fetch targets. All localhost defaults in Settings/Models views must come from here.

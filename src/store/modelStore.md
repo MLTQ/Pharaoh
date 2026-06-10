@@ -25,3 +25,4 @@ Zustand store for inference server health, model load/unload state, and load-pro
 ## Notes
 - `loadModel("sfx", variant)` forwards the selected variant through Tauri to the SFX server, enabling AudioLDM preloading without a separate store key.
 - `post` is tracked as a server kind so AudioSR can run remotely like the generation services.
+- `invoke` routes via `lib/transport.ts`; `initListeners` is a no-op for mesh viewers (no Tauri events) — health still arrives through `pollHealth` over HTTP.

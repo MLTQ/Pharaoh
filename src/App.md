@@ -51,3 +51,4 @@ Top-level React shell for Pharaoh's project workspace. It wires navigation, glob
 
 ## Notes
 - The right rail remains global; post-processing pages can still inspect jobs/assets while open.
+- Gruve multiplayer: a mount effect calls `initGruveCollab()` (lib/gruveCollab.ts) and, for mesh viewers, polls `reloadProjectFromDisk` every 10s. `MeshViewerBadge` marks non-Tauri sessions.
