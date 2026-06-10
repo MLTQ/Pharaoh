@@ -368,6 +368,8 @@ async fn dispatch(
         "render_scene",
         "render_episode",
         "draft_scene",
+        "load_model",
+        "unload_model",
     ];
     if COLLAB_CMDS.contains(&cmd) && !collab {
         return Err((
@@ -400,6 +402,7 @@ async fn dispatch(
         )),
         "get_app_config" => ok(settings::get_app_config(app).await),
         "get_server_health_all" => ok(settings::get_server_health_all(app).await),
+        "check_server_health" => ok(inference::check_server_health(app, s(a, "model").map_err(bad)?).await),
         "detect_hardware" => ok_plain(inference::detect_hardware().await),
         "check_setup" => ok_plain(setup_check::check_setup().await),
         "read_sidecar" => ok(sidecar::read_sidecar(s(a, "audioPath").map_err(bad)?)),
@@ -548,6 +551,13 @@ async fn dispatch(
         )
         .await),
         "draft_scene" => ok(llm::draft_scene(de(a, "args").map_err(bad)?).await),
+        "load_model" => ok(inference::load_model(
+            app,
+            s(a, "model").map_err(bad)?,
+            opt_s(a, "variant"),
+        )
+        .await),
+        "unload_model" => ok(inference::unload_model(app, s(a, "model").map_err(bad)?).await),
 
         _ => {
             return Err((
