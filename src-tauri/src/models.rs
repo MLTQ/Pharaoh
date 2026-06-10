@@ -534,12 +534,20 @@ pub struct SfxT2ARequest {
     pub prompt: String,
     pub duration_seconds: f32,
     pub model_variant: String,
+    // Optional fields must be OMITTED when absent, not sent as null — the
+    // FastAPI servers type them as `float = default` (not Optional), so an
+    // explicit null fails pydantic validation with a 422.
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub backend: Option<String>,
     pub steps: u32,
     pub seed: i64,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cfg_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub guidance_scale: Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub negative_prompt: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub num_waveforms_per_prompt: Option<u32>,
     pub output_path: String,
 }
@@ -551,6 +559,8 @@ pub struct MusicText2MusicRequest {
     pub caption: String,
     pub lyrics: String,
     pub duration_seconds: f32,
+    // Omitted when absent — explicit null fails pydantic (see SfxT2ARequest).
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub bpm: Option<u32>,
     pub key: String,
     pub language: String,

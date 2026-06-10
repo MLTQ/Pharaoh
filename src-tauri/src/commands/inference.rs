@@ -675,7 +675,7 @@ pub async fn submit_tts_custom_voice(
 
     let job_id = resp["job_id"]
         .as_str()
-        .ok_or_else(|| Error::Other("missing job_id in response".into()))?
+        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
     let meta = SidecarMeta {
@@ -750,7 +750,7 @@ pub async fn submit_tts_voice_design(
 
     let job_id = resp["job_id"]
         .as_str()
-        .ok_or_else(|| Error::Other("missing job_id".into()))?
+        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
     let meta = SidecarMeta {
@@ -820,7 +820,7 @@ pub async fn submit_tts_voice_clone(
 
     let job_id = resp["job_id"]
         .as_str()
-        .ok_or_else(|| Error::Other("missing job_id".into()))?
+        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
     let meta = SidecarMeta {
@@ -892,7 +892,7 @@ pub async fn submit_sfx_t2a(
 
     let job_id = resp["job_id"]
         .as_str()
-        .ok_or_else(|| Error::Other("missing job_id".into()))?
+        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
     let backend = params.backend.as_deref().unwrap_or("woosh");
@@ -971,7 +971,7 @@ pub async fn submit_music_text2music(
 
     let job_id = resp["job_id"]
         .as_str()
-        .ok_or_else(|| Error::Other("missing job_id".into()))?
+        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
     let meta = SidecarMeta {
