@@ -454,6 +454,11 @@ async fn poll_until_done(
     scene_slug: String,
     row_index: usize,
     projects_dir: PathBuf,
+    // The output path the caller originally asked for. remote_body blanks
+    // output_path before submitting to a remote server, so on download this
+    // is what puts the file where the panel intended (scene assets dir)
+    // instead of mirroring the server's server-output/<job_id>/ layout.
+    local_output_path: String,
     sidecar_meta: SidecarMeta,
 ) {
     let remote = is_remote_url(&server_base_url);
@@ -513,15 +518,27 @@ async fn poll_until_done(
                 // and delete it from the server.  For local servers, use the path
                 // directly — the file is already on the same filesystem.
                 let output_path = if remote && !server_output_path.is_empty() {
-                    match download_remote_file(
-                        &http,
-                        &server_base_url,
-                        &job_id,
-                        &server_output_path,
-                        &projects_dir,
-                    )
-                    .await
-                    {
+                    let downloaded = if local_output_path.is_empty() {
+                        // No intended path (shouldn't happen from the panels) —
+                        // fall back to mirroring the server's UUID layout.
+                        download_remote_file(
+                            &http,
+                            &server_base_url,
+                            &job_id,
+                            &server_output_path,
+                            &projects_dir,
+                        )
+                        .await
+                    } else {
+                        download_remote_file_to(
+                            &http,
+                            &server_base_url,
+                            &job_id,
+                            &local_output_path,
+                        )
+                        .await
+                    };
+                    match downloaded {
                         Ok(local) => local,
                         Err(e) => {
                             let _ = app.emit(
@@ -713,6 +730,7 @@ pub async fn submit_tts_custom_voice(
         scene_slug,
         row_index,
         projects_dir,
+        params.output_path.clone(),
         meta,
     ));
 
@@ -784,6 +802,7 @@ pub async fn submit_tts_voice_design(
         scene_slug,
         row_index,
         projects_dir,
+        params.output_path.clone(),
         meta,
     ));
     Ok(job_id)
@@ -854,6 +873,7 @@ pub async fn submit_tts_voice_clone(
         scene_slug,
         row_index,
         projects_dir,
+        params.output_path.clone(),
         meta,
     ));
     Ok(job_id)
@@ -933,6 +953,7 @@ pub async fn submit_sfx_t2a(
         scene_slug,
         row_index,
         projects_dir,
+        params.output_path.clone(),
         meta,
     ));
     Ok(job_id)
@@ -1013,6 +1034,7 @@ pub async fn submit_music_text2music(
         scene_slug,
         row_index,
         projects_dir,
+        params.output_path.clone(),
         meta,
     ));
     Ok(job_id)

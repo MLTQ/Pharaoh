@@ -33,3 +33,4 @@ Tauri inference commands and generation lifecycle handling. This file submits jo
 
 ## Notes
 - `bind_generated_asset` only claims a row when that row is still unassigned. Alternate take selection stays explicit.
+- Remote servers: `poll_until_done` takes the caller's intended `local_output_path` and downloads completed jobs there via `download_remote_file_to` (scene assets dir), instead of mirroring the server's `server-output/<job_id>/` layout into the projects root. The UUID-mirror fallback remains for callers without an intended path.
