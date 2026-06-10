@@ -24,6 +24,7 @@ import {
   type RoutableAssetKind,
 } from "../../lib/assetRouting";
 import type { GeneratedAudioAsset, Job, MockAssets, QaJobStatus, ScriptRow } from "../../lib/types";
+import { reportError } from "../../lib/errors";
 
 interface AssetBrowserProps {
   assets: MockAssets;
@@ -331,7 +332,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
         setScriptRows(nextRows);
       })
       .catch((error) => {
-        console.error("[AssetBrowser] failed to refresh assets", error);
+        reportError("Could not load assets", error);
         setGeneratedAssets([]);
         setScriptRows([]);
       });
@@ -433,7 +434,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
         audioPath: job.output_path,
         qaStatus: status,
         qaNotes: "",
-      }).catch(console.error);
+      }).catch((e) => reportError("QA update failed", e));
     }
   };
 
@@ -446,7 +447,7 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
         sceneSlug: job.scene_slug,
         rowIndex: job.row_index,
         fields: { file: job.output_path },
-      }).catch(console.error);
+      }).catch((e) => reportError("Take assignment failed", e));
     }
   };
 

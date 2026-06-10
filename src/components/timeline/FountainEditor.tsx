@@ -12,6 +12,7 @@ import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { useToastStore } from "../../store/toastStore";
 import { useProjectStore } from "../../store/projectStore";
 import { draftScene, readFountain, writeFountain } from "../../lib/tauriCommands";
+import { reportError } from "../../lib/errors";
 import type { ScriptRow, TrackType, Character, ViewId, Scene } from "../../lib/types";
 
 // ── Constants ──────────────────────────────────────────────────────────────
@@ -317,7 +318,13 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
         }
         initialLoadDone.current = true;
       })
-      .catch(() => { initialLoadDone.current = true; });
+      .catch((e) => {
+        // A real read failure (not "no file yet" — that resolves null) means
+        // we're showing CSV-derived text instead of the writer's saved prose,
+        // and the next debounced save would overwrite it. Say so.
+        reportError("Script prose load failed", e, { id: "fountain-load-failed" });
+        initialLoadDone.current = true;
+      });
     return () => { cancelled = true; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [realProjectId, sceneSlug]);
@@ -330,7 +337,8 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
     if (!realProjectId || !sceneSlug) return;
     if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
     fountainSaveTimer.current = setTimeout(() => {
-      writeFountain({ projectId: realProjectId, sceneSlug, text }).catch(console.error);
+      writeFountain({ projectId: realProjectId, sceneSlug, text })
+        .catch((e) => reportError("Script save failed", e, { id: "fountain-save-failed" }));
     }, 600);
     return () => {
       if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
@@ -342,7 +350,8 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
     const flush = () => {
       if (!realProjectId || !sceneSlug || !initialLoadDone.current) return;
       if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
-      writeFountain({ projectId: realProjectId, sceneSlug, text }).catch(console.error);
+      writeFountain({ projectId: realProjectId, sceneSlug, text })
+        .catch((e) => reportError("Script save failed", e, { id: "fountain-save-failed" }));
     };
     window.addEventListener("beforeunload", flush);
     return () => {

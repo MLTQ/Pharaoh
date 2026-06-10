@@ -1,5 +1,6 @@
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { create } from "zustand";
+import { reportError } from "../lib/errors";
 
 // ── Module-level streaming audio singleton ──────────────────────────────────
 
@@ -102,7 +103,9 @@ export const useAudioStore = create<AudioState>((set, get) => ({
       await audio.play();
       _rafId = requestAnimationFrame(tick);
     } catch (e) {
-      console.error("[audioStore] play failed:", e);
+      // Stable id: scrubbing can retry play rapidly — refresh one toast
+      // instead of stacking.
+      reportError("Playback failed", e, { id: "audio-play-failed" });
       stopCurrent();
       set({ playing: null, position: 0 });
     }

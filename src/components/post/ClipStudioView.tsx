@@ -13,6 +13,7 @@ import {
   updateScriptRow,
 } from "../../lib/tauriCommands";
 import type { AssetKind, GeneratedAudioAsset, ScriptRow } from "../../lib/types";
+import { reportError } from "../../lib/errors";
 
 const KIND_COLOR: Record<AssetKind, string> = {
   tts: "var(--tts)",
@@ -657,7 +658,10 @@ export const ClipStudioView: React.FC = () => {
           return first >= 0 ? first : null;
         });
       })
-      .catch(() => setScriptRows([]));
+      .catch((e) => {
+        reportError("Script load failed", e, { id: "script-load-failed" });
+        setScriptRows([]);
+      });
   }, [realProjectId, targetSceneSlug]);
 
   const playSelection = () => {

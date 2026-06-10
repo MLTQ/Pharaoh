@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { convertFileSrc } from "@tauri-apps/api/core";
 import { listSpatialSpaces } from "../../lib/tauriCommands";
 import type { ScriptRow, SpatialSpace, SpatialWaypoint } from "../../lib/types";
+import { reportError } from "../../lib/errors";
 
 /**
  * Spatialize modal — place this clip in 3D space around the listener.
@@ -67,7 +68,7 @@ export const SpatializeModal: React.FC<SpatializeModalProps> = ({
       // changed), fall back to anechoic. We don't quietly drop the value
       // until Save — preserves data on first read.
     }).catch((e) => {
-      console.warn("[SpatializeModal] listSpatialSpaces failed:", e);
+      reportError("Could not load spatial spaces", e);
     });
     return () => { cancelled = true; };
   }, []);

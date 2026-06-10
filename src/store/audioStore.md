@@ -22,3 +22,4 @@ Lightweight streaming preview store for generated WAV files. It centralizes clip
 
 ## Notes
 - Local filesystem paths are converted with Tauri `convertFileSrc`; browser-like URLs are passed through unchanged.
+- **Error surfacing**: `play` never rejects — failures are caught internally, reported via `lib/errors.reportError("Playback failed", …)` (error toast + console), and playback state is reset. The toast uses the stable id `audio-play-failed` so rapid retries (e.g. scrubbing) refresh one toast instead of stacking. Call sites do not need their own `.catch` for user feedback.

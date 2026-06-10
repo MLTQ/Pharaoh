@@ -9,6 +9,13 @@ import {
   getProject,
   listScenes,
 } from "../lib/tauriCommands";
+import { reportError } from "../lib/errors";
+import { useToastStore } from "./toastStore";
+
+// Stable toast ids so repeated save failures refresh one toast instead of
+// stacking; a successful save dismisses the matching toast.
+const PROJECT_SAVE_TOAST_ID = "project-save-failed";
+const SCENE_SAVE_TOAST_ID = "scene-save-failed";
 
 // ── Scene conversion ─────────────────────────────────────────────────────────
 
@@ -99,9 +106,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
   const persist = () => {
     const { realProject } = get();
     if (!realProject) return;
-    saveProjectToTauri(realProject).catch((e) =>
-      console.error("[projectStore] save failed:", e)
-    );
+    saveProjectToTauri(realProject)
+      .then(() => useToastStore.getState().dismiss(PROJECT_SAVE_TOAST_ID))
+      .catch((e) => reportError("Project save failed", e, { id: PROJECT_SAVE_TOAST_ID }));
   };
 
   return {
@@ -215,9 +222,9 @@ export const useProjectStore = create<ProjectState>((set, get) => {
         const slug = scenes.find((s) => s.no === no)?.slug;
         const realScene = slug ? realScenes.find((s) => s.slug === slug) : undefined;
         if (realScene) {
-          saveSceneToTauri({ projectId: realProjectId, scene: realScene }).catch((e) =>
-            console.error("[projectStore] scene save failed:", e)
-          );
+          saveSceneToTauri({ projectId: realProjectId, scene: realScene })
+            .then(() => useToastStore.getState().dismiss(SCENE_SAVE_TOAST_ID))
+            .catch((e) => reportError("Scene save failed", e, { id: SCENE_SAVE_TOAST_ID }));
         }
       }
     },
@@ -280,7 +287,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
             : (project.characters[0]?.id ?? null),
         });
       } catch (e) {
-        console.error("[projectStore] reloadProjectFromDisk failed:", e);
+        reportError("Project reload failed", e);
       }
     },
 

@@ -11,6 +11,7 @@ import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
 import { usePeaksStore } from "../../store/peaksStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
+import { reportError } from "../../lib/errors";
 import {
   ASSET_DRAG_MIME,
   ASSET_POINTER_DROP_EVENT,
@@ -508,7 +509,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     if (realProjectId && activeSceneSlug) {
       readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug })
         .then(setScriptRows)
-        .catch(() => setScriptRows([]));
+        .catch((e) => {
+          reportError("Script load failed", e, { id: "script-load-failed" });
+          setScriptRows([]);
+        });
     } else {
       setScriptRows([]);
     }
@@ -527,7 +531,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       if (!realProjectId || !activeSceneSlug) return;
       readScript({ projectId: realProjectId, sceneSlug: activeSceneSlug })
         .then(setScriptRows)
-        .catch(() => setScriptRows([]));
+        .catch((e) => {
+          reportError("Script load failed", e, { id: "script-load-failed" });
+          setScriptRows([]);
+        });
     };
     window.addEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshScript);
     return () => window.removeEventListener(SCRIPT_ASSETS_CHANGED_EVENT, refreshScript);
@@ -548,7 +555,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       sceneSlug: activeSceneSlug,
       rowIndex,
       fields: entry.fields,
-    }).catch(console.error);
+    }).catch((e) => reportError("Script save failed", e, { id: "script-save-failed" }));
   };
 
   const flushAllPendingWrites = () => {
@@ -588,7 +595,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         projectId: realProjectId,
         sceneSlug: activeSceneSlug,
         rows: nextRows,
-      }).catch(console.error);
+      }).catch((e) => reportError("Script save failed", e, { id: "script-save-failed" }));
     }, 600);
   };
 
@@ -712,7 +719,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     const rawSec = Math.max(0, localX / pxPerSec);
     const snapped = Math.round(rawSec / SNAP_SEC) * SNAP_SEC;
     placeDraggedAsset(asset, snapped, targetTrack).catch((error) => {
-      console.error("[CompositionView] asset drop failed", error);
+      reportError("Asset drop failed", error);
     });
     return true;
   };
@@ -739,7 +746,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       const targetTrack = trackIndex >= 0 && trackIndex < activeTracks.length ? activeTracks[trackIndex] : undefined;
 
       placeDraggedAsset(detail.asset, startSec, targetTrack).catch((error) => {
-        console.error("[CompositionView] pointer asset drop failed", error);
+        reportError("Asset drop failed", error);
       });
     };
 
@@ -765,7 +772,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           sceneSlug: activeSceneSlug,
           rowIndex,
           fields: { start_ms: String(Math.round(newStartSec * 1000)) },
-        }).catch(console.error);
+        }).catch((e) => reportError("Clip update failed", e));
       }
     }
   };
@@ -787,7 +794,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           sceneSlug: activeSceneSlug,
           rowIndex,
           fields: { duration_ms: String(Math.round(newDurationSec * 1000)) },
-        }).catch(console.error);
+        }).catch((e) => reportError("Clip update failed", e));
       }
     }
   };
@@ -992,7 +999,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
       const offset = (slug === activeSceneSlug) ? parkedSecRef.current : 0;
       await playAudio(outputPath, offset);
     } catch (error) {
-      console.error("[CompositionView] scene playback failed", error);
+      reportError("Scene playback failed", error);
       setSceneRenderState((prev) => ({ ...prev, [slug]: "error" }));
     }
   };
