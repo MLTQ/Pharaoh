@@ -7,7 +7,7 @@ src-tauri/gen/
 
 .DS_Store
 
-inference/__pycache__/
+__pycache__/
 inference/.venv-tts/
 inference/.venv-music/
 

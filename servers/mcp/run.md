@@ -1,6 +1,6 @@
 # servers/mcp/run.py
 
-MCP control-plane server for the Pharaoh audio drama pipeline.
+Thin entry point for the Pharaoh MCP control-plane server (port 18000).
 
 ## Purpose
 
@@ -9,6 +9,32 @@ Code agents, custom tooling) without requiring the Tauri GUI. Claude can read
 project state, submit generation jobs, review assets, and trigger composition
 entirely through MCP tools and resources.
 
+run.py itself only does four things: put its own directory on sys.path (so it
+works when invoked by absolute path from any cwd), import config/server,
+import the tool/resource modules (which register themselves on the shared
+FastMCP instance as an import side effect), and run the chosen transport.
+
+## Module map
+
+| Module | Doc | Contents |
+|--------|-----|----------|
+| config.py | config.md | CLI args, PROJECTS_DIR, SERVER_URLS, logger |
+| server.py | server.md | the shared FastMCP instance + SSE /health route |
+| projectfs.py | projectfs.md | on-disk project state helpers |
+| remote.py | remote.md | HTTP glue to the inference servers (18001–18006) |
+| resources.py | resources.md | 6 `pharaoh://` read-only resources |
+| tools_project.py | tools_project.md | project/scene/character/script CRUD (17 tools) |
+| tools_generate.py | tools_generate.md | TTS/Chatterbox/SFX/music generation (4 tools) |
+| tools_voice.py | tools_voice.md | palette + RVC voice pipeline (9 tools) |
+| tools_jobs.py | tools_jobs.md | job polling (2 tools) |
+| tools_qa.py | tools_qa.md | asset QA + take management (6 tools) |
+| tools_audio.py | tools_audio.md | ffmpeg post-processing + AudioSR upscale (5 tools) |
+| tools_servers.py | tools_servers.md | model load/unload/health/config (4 tools) |
+| tools_compose.py | tools_compose.md | scene composition + final render (2 tools) |
+
+49 tools + 6 resources total. Tool names, signatures, and docstrings are a
+stable contract — agents and Claude Desktop configs depend on them.
+
 ## Transport modes
 
 | Mode  | When to use                                              |
@@ -16,46 +42,20 @@ entirely through MCP tools and resources.
 | stdio | Claude Desktop config, direct agent integration (default)|
 | sse   | Spawned as a local service alongside inference servers   |
 
-## Tools
-
-| Tool               | Description                                              |
-|--------------------|----------------------------------------------------------|
-| `project_status`   | Per-scene per-stage completion matrix                    |
-| `read_script`      | Script rows as structured JSON                           |
-| `update_script_row`| Patch a single row in script.csv                         |
-| `generate_tts`     | Submit TTS job → job_id                                  |
-| `generate_sfx`     | Submit SFX job → job_id                                  |
-| `generate_music`   | Submit music job, supports batch_size for gacha workflow  |
-| `job_status`       | Poll a job for status/progress                           |
-| `wait_for_job`     | Block until job completes (2s poll, configurable timeout) |
-| `list_assets`      | Assets for a scene, filterable by QA status              |
-| `qa_approve`       | Write qa_status=approved to .meta.json sidecar           |
-| `qa_reject`        | Write qa_status=rejected with notes                      |
-| `regenerate_asset` | Re-submit using original sidecar params, new take index  |
-| `server_health`    | Check inference server status and VRAM                   |
-| `compose_scene`    | Render a scene via the pharaoh CLI                       |
-| `render_final`     | Assemble all scenes into final.wav                       |
-
-## Resources
-
-| URI                                                    | Contents                         |
-|--------------------------------------------------------|----------------------------------|
-| `pharaoh://projects`                                   | List of all projects             |
-| `pharaoh://projects/{id}`                              | project.json                     |
-| `pharaoh://projects/{id}/storyboard`                   | storyboard.json                  |
-| `pharaoh://projects/{id}/scenes/{slug}/script`         | script.csv as JSON array         |
-| `pharaoh://projects/{id}/scenes/{slug}/assets`         | assets with QA status + metadata |
-| `pharaoh://projects/{id}/pipeline`                     | Per-scene stage completion matrix|
+```
+python run.py --projects-dir ~/pharaoh-projects
+python run.py --transport sse --port 18000 --projects-dir ~/pharaoh-projects
+```
 
 ## Design invariants
 
-- **Read-only filesystem access for project state** — reads project.json,
-  storyboard.json, script.csv, and .meta.json sidecars directly. Writes only
-  to script.csv (via `update_script_row`) and .meta.json (via qa_approve/reject).
+- **Sidecars are QA truth** — asset state lives in `.meta.json` next to each
+  WAV; project/storyboard/script state lives in the project directory.
 - **Proxies generation to inference servers** — does not load models itself.
-  Generation requests are forwarded to ports 18001–18004 via httpx.
-- **Composition delegates to pharaoh CLI** — `compose_scene` and `render_final`
-  invoke the compiled `pharaoh` Rust binary. The binary must be built first.
+  Generation requests are forwarded to ports 18001–18006 via httpx, with
+  automatic upload/download path remapping when a server is remote.
+- **Composition is pure Python + ffmpeg** — `compose_scene` / `render_final`
+  build ffmpeg filter graphs directly; only a local `ffmpeg` binary is needed.
 - **No Tauri dependency** — runs standalone; can be used without the GUI.
 
 ## Claude Desktop configuration
