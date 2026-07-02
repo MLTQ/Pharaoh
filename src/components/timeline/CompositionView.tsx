@@ -914,14 +914,14 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
           setParkedSec(pos);
           parkedSecRef.current = pos;
         } else if (activeRenderPath) {
-          playAudio(activeRenderPath, parkedSecRef.current).catch(console.error);
+          playAudio(activeRenderPath, parkedSecRef.current).catch((e) => reportError("Playback failed", e, { id: "playback-failed" }));
         }
       }
 
       if (e.code === "Home") {
         e.preventDefault();
         setParkedSec(0); parkedSecRef.current = 0;
-        if (playing) playAudio(playing, 0).catch(console.error);
+        if (playing) playAudio(playing, 0).catch((e) => reportError("Playback failed", e, { id: "playback-failed" }));
       }
 
       if (e.code === "End") {
@@ -934,14 +934,14 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         e.preventDefault();
         const next = Math.max(0, parkedSecRef.current - 5);
         setParkedSec(next); parkedSecRef.current = next;
-        if (playing) playAudio(playing, next).catch(console.error);
+        if (playing) playAudio(playing, next).catch((e) => reportError("Playback failed", e, { id: "playback-failed" }));
       }
 
       if (e.code === "ArrowRight") {
         e.preventDefault();
         const next = Math.min(TOTAL_SEC, parkedSecRef.current + 5);
         setParkedSec(next); parkedSecRef.current = next;
-        if (playing) playAudio(playing, next).catch(console.error);
+        if (playing) playAudio(playing, next).catch((e) => reportError("Playback failed", e, { id: "playback-failed" }));
       }
     };
     window.addEventListener("keydown", handleKey);
