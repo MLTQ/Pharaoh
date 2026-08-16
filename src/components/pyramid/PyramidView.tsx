@@ -5,6 +5,7 @@ import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { createScene, readScript, readRenderMeta } from "../../lib/tauriCommands";
 import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
+import { StoryShapeView } from "./StoryShapeView";
 
 interface PyramidViewProps {
   project: MockProject;
@@ -24,7 +25,7 @@ interface NewSceneForm {
 export const PyramidView: React.FC<PyramidViewProps> = ({
   project, scenes, cast, activeSceneNo, onOpenScene, onOpenBible,
 }) => {
-  const { realProjectId, addScene, projectsDir } = useProjectStore();
+  const { realProjectId, addScene, projectsDir, updateScene } = useProjectStore();
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [manualScale, setManualScale] = useState<number | null>(null);
@@ -33,6 +34,9 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
   const [formError, setFormError] = useState<string | null>(null);
   const [formBusy, setFormBusy] = useState(false);
+  // Tier II projection: scene plates, or the authored tension curve over the
+  // same scenes. Same data, different view — not a separate document.
+  const [tierMode, setTierMode] = useState<"plates" | "shape">("plates");
 
   // Per-scene asset pip counts, keyed by scene number (e.g. "S01"). Loads
   // lazily once we have a real project and refreshes when a job completes for
@@ -281,6 +285,30 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
           {/* Tier labels */}
           <div style={{ position: "absolute", top: 30, left: 200, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>I · STORY BIBLE</div>
           <div style={{ position: "absolute", top: BASE_Y - 36, left: 80, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>II · SCENES &amp; CONTINUITY</div>
+
+          {/* Tier II projection toggle */}
+          <div style={{
+            position: "absolute", top: BASE_Y - 41, left: 300, zIndex: 6,
+            display: "flex", background: "var(--bg-1)",
+            border: "1px solid var(--line-1)", borderRadius: 2, overflow: "hidden",
+          }}>
+            {(["plates", "shape"] as const).map((m) => (
+              <button
+                key={m}
+                onClick={() => setTierMode(m)}
+                title={m === "plates" ? "Scene plates" : "Story shape — drag scenes to set dramatic tension"}
+                style={{
+                  fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.14em",
+                  textTransform: "uppercase", padding: "3px 10px", cursor: "pointer",
+                  border: "none",
+                  background: tierMode === m ? "color-mix(in oklch, var(--tts) 22%, transparent)" : "transparent",
+                  color: tierMode === m ? "var(--fg-0)" : "var(--fg-4)",
+                }}
+              >
+                {m}
+              </button>
+            ))}
+          </div>
           <div style={{ position: "absolute", top: BASE_Y + PLATE_H + 6, left: 60, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>III · COMPOSITION &amp; MIX</div>
 
           {/* Apex card */}
@@ -316,7 +344,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
           </div>
 
           {/* Scene plates */}
-          {scenes.map((s, i) => {
+          {tierMode === "plates" && scenes.map((s, i) => {
             const x = startX + i * (PLATE_W + plateGap);
             // Derive pip ordering from real script rows (falls back to mock
             // nodes for demo mode, then to empty in real-project edge cases)
@@ -413,7 +441,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
           })}
 
           {/* "+ Add scene" placeholder card */}
-          {(() => {
+          {tierMode === "plates" && (() => {
             const addCardX = startX + n * (PLATE_W + plateGap);
             return (
               <div
@@ -452,6 +480,34 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               </div>
             );
           })()}
+
+          {/* Story shape — same scenes, projected as the authored tension curve */}
+          {tierMode === "shape" && (
+            n > 0 ? (
+              <StoryShapeView
+                scenes={scenes}
+                activeSceneNo={activeSceneNo}
+                left={60}
+                top={BASE_Y - 14}
+                width={W - 120}
+                height={250}
+                onSetTension={(sceneNo, tension) => updateScene(sceneNo, { tension })}
+                onOpenScene={onOpenScene}
+              />
+            ) : (
+              <div style={{
+                position: "absolute", left: 60, top: BASE_Y - 14,
+                width: W - 120, height: 250,
+                display: "flex", alignItems: "center", justifyContent: "center",
+                border: "1.5px dashed var(--line-1)", borderRadius: 4,
+                fontFamily: "var(--font-mono)", fontSize: 10,
+                letterSpacing: "0.14em", textTransform: "uppercase",
+                color: "var(--fg-4)",
+              }}>
+                Add scenes to shape the story
+              </div>
+            )
+          )}
 
           {/* Episode timeline bar */}
           <div style={{

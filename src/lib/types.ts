@@ -301,6 +301,9 @@ export interface Scene {
   connects_from: string | null;
   connects_to: string | null;
   status: SceneStatus;
+  /** Authored dramatic tension, 0–1, for the story-shape view. `null` means
+   *  unshaped — never coerce to 0, which is an authored trough. */
+  tension: number | null;
 }
 
 // ── Script CSV ──────────────────────────────────────────────────────────────
@@ -560,6 +563,7 @@ export interface MockScene {
   duration: string;
   nodes: MockSceneNode[];
   slug?: string; // real slug from Rust, overrides deriveSlug when present
+  tension?: number | null; // authored story-shape tension; null/absent = unshaped
 }
 
 export interface MockCastMember {

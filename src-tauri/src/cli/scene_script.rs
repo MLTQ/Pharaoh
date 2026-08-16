@@ -97,6 +97,7 @@ pub(super) async fn scene_create(
         connects_from: flag_opt(&flags, "connects_from"),
         connects_to: flag_opt(&flags, "connects_to"),
         status: SceneStatus::Draft,
+        tension: flag_opt(&flags, "tension").and_then(|v| v.parse::<f32>().ok()),
     };
     let scene_root = scene_dir(&projects_dir, project_id, &slug);
     std::fs::create_dir_all(scene_root.join("assets"))?;
@@ -562,6 +563,7 @@ pub(super) async fn script_import(
             connects_from: None,
             connects_to: None,
             status: SceneStatus::Draft,
+            tension: None,
         };
         planned.push((scene, rows));
     }

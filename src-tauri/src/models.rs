@@ -253,6 +253,13 @@ pub struct Scene {
     pub connects_from: Option<String>,
     pub connects_to: Option<String>,
     pub status: SceneStatus,
+    /// Authored dramatic tension for the story-shape view, 0.0–1.0.
+    /// `None` means unshaped — the writer has not placed this scene on the
+    /// curve yet. Deliberately distinct from `Some(0.0)`, which is an
+    /// authored trough. `serde(default)` keeps pre-existing storyboard.json
+    /// files loadable.
+    #[serde(default)]
+    pub tension: Option<f32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -694,4 +701,45 @@ pub struct ScriptRow {
     /// or, if empty, the manifest's `default_wet` for the chosen space.
     #[serde(default)]
     pub spatial_space: String,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Storyboards written before the story-shape feature have no `tension`
+    /// key. They must still load, and must load as unshaped — never as 0.0,
+    /// which the shape view would draw as an authored trough.
+    #[test]
+    fn scene_without_tension_loads_as_unshaped() {
+        let legacy = r#"{
+            "id": "abc", "index": 0, "slug": "00_intro", "title": "Intro",
+            "description": "", "location": "", "characters": [], "notes": "",
+            "connects_from": null, "connects_to": null, "status": "draft"
+        }"#;
+        let scene: Scene = serde_json::from_str(legacy).expect("legacy scene must deserialize");
+        assert_eq!(scene.tension, None);
+    }
+
+    #[test]
+    fn tension_round_trips() {
+        let legacy = r#"{
+            "id": "abc", "index": 0, "slug": "00_intro", "title": "Intro",
+            "description": "", "location": "", "characters": [], "notes": "",
+            "connects_from": null, "connects_to": null, "status": "draft"
+        }"#;
+        let mut scene: Scene = serde_json::from_str(legacy).unwrap();
+        scene.tension = Some(0.73);
+
+        let encoded = serde_json::to_string(&scene).unwrap();
+        let decoded: Scene = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.tension, Some(0.73));
+
+        // An explicit null must stay unshaped rather than defaulting oddly.
+        scene.tension = None;
+        let encoded = serde_json::to_string(&scene).unwrap();
+        assert!(encoded.contains("\"tension\":null"));
+        let decoded: Scene = serde_json::from_str(&encoded).unwrap();
+        assert_eq!(decoded.tension, None);
+    }
 }

@@ -173,6 +173,7 @@ async fn end_to_end_render_pipeline() {
         connects_from: None,
         connects_to: None,
         status: SceneStatus::Draft,
+        tension: None,
     };
     let scene_two = Scene {
         id: Uuid::new_v4().to_string(),
@@ -186,6 +187,7 @@ async fn end_to_end_render_pipeline() {
         connects_from: None,
         connects_to: None,
         status: SceneStatus::Draft,
+        tension: None,
     };
     let storyboard = Storyboard { scenes: vec![scene_one.clone(), scene_two.clone()] };
     std::fs::write(

@@ -203,11 +203,19 @@ via headless CLI, sharing the same underlying data model and operations.
       "notes": "tense reunion, claustrophobic ambience",
       "connects_from": "uuid | null",
       "connects_to": "uuid | null",
-      "status": "draft | generating | assets_ready | composed | rendered"
+      "status": "draft | generating | assets_ready | composed | rendered",
+      "tension": 0.73
     }
   ]
 }
 ```
+
+**`tension`** — authored dramatic tension, `0.0`–`1.0`, drives the story-shape
+view. `null` (or absent, in storyboards written before the field existed) means
+**unshaped**: the writer has not placed this scene on the curve. Never coerce
+it to `0.0`, which is an authored trough — the distinction is what lets a
+writer shape three scenes and leave the rest alone without the view asserting a
+valley they never drew.
 
 ### script.csv
 
@@ -677,6 +685,31 @@ navigation without zooming back out.
 
 Zones are separated by thin horizontal rules. The full pyramid view shows all
 three tiers simultaneously; clicking drills down.
+
+### StoryShapeView.tsx
+
+Second projection of pyramid tier II. The `plates | shape` toggle swaps the
+scene plates for a tension curve over the same scenes — one dataset, two views,
+not a separate document.
+
+**Renders:** tension axis (REST/MID/PEAK), one draggable node per scene, the
+interpolated curve, a runtime-midpoint marker, and scene labels.
+
+**Interactions:**
+- Drag a node vertically → sets `tension`; Shift for fine control
+- Double-click, Backspace, or Delete → clears back to unshaped
+- ↑/↓ → ±0.05 (Shift ±0.01); Enter opens the scene
+- Committed on pointer-up, not per-pixel, so one drag is one `update_scene`
+
+Drag math is delta-based against the plot's screen rect, so the pyramid's CSS
+scale transform never desyncs the pointer from the node.
+
+Curve math lives in `src/lib/storyShape.ts` (pure, no React). It uses monotone
+cubic (Fritsch–Carlson) rather than Catmull-Rom: a plain spline overshoots
+between control points and invents peaks the writer never authored, which is
+the one unacceptable failure for a view whose whole job is showing the shape
+you actually made. Segments bridging unshaped scenes render dashed — an
+interpolation must never read as authored.
 
 ### Timeline.tsx
 

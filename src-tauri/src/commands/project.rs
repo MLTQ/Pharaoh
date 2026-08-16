@@ -206,6 +206,7 @@ pub fn create_scene(
         connects_from: None,
         connects_to: None,
         status: SceneStatus::Draft,
+        tension: None,
     };
 
     // Create scene directories
