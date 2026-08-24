@@ -8,6 +8,10 @@ Story Bible -> Storyboard -> Script -> Assets -> Composition -> Render
 
 The app is meant to be fully operable both by humans in the Tauri GUI and by agents through the headless CLI. Both surfaces use the same project files, script CSV rows, sidecar metadata, inference servers, and ffmpeg/audio-engine commands.
 
+![Pharaoh Pyramid view — story bible, scene cards, and episode timeline](images/pyramid.png)
+
+<p align="center"><em>Pyramid view: the story bible at the apex, scenes and their assets below, episode timeline at the base.</em></p>
+
 ## What It Is
 
 Pharaoh is a Tauri 2 desktop app (React + TypeScript frontend, Rust backend) connected to local or remote Python inference servers:
@@ -167,6 +171,10 @@ The scene writer supports a practical audio-drama Fountain subset:
 - `Tab` cycles a line between action, character, SFX, MUSIC, BED, and back.
 - `Draft scene` / `Revise scene` calls the Anthropic LLM command if configured.
 
+![Compose mode — script rows on the left, per-character and per-bed timeline tracks on the right](images/tracks.png)
+
+<p align="center"><em>Compose mode: script rows on the left compile into placed clips on the ATMO / MUSIC / per-character tracks.</em></p>
+
 ### Generation Pages
 
 - Dialogue uses Qwen CustomVoice for production lines so delivery direction can be sent as `instruct`. Voice clone/design remain in Character Designer for probes and reference building.
@@ -174,11 +182,19 @@ The scene writer supports a practical audio-drama Fountain subset:
 - Music exposes caption, lyrics, duration, BPM, key, language, LM size, diffusion steps, thinking mode, reference audio, seed, and batch size.
 - Each generation page lists current jobs plus persisted sidecar assets for the selected scene.
 
+![Character Library — base voice description, test line, reference audio, and voice instructions for a character](images/character-design.png)
+
+<p align="center"><em>Character Library: base voice description, palette state, reference audio, and delivery instructions per cast member.</em></p>
+
 ### Post Pages
 
 - Audio Upscale submits AudioSR jobs to the Post server and writes enhanced 48 kHz child assets next to the source.
 - Clip Studio imports arbitrary source audio, shows long clips with zoom/pan, supports crop handles, fade-envelope handles, gain, highpass/lowpass, LUFS normalization, and row assignment.
 - Cropped/imported clips are sidecar-indexed, so Character Designer can reuse them as clone references.
+
+![Clip Studio — asset list, crop/gain/filter/normalize controls, and the docked waveform editor](images/clip-studio.png)
+
+<p align="center"><em>Clip Studio: crop, gain, filters, and LUFS normalization applied to a take, then saved back to a scene row.</em></p>
 
 ## Project Files
 
