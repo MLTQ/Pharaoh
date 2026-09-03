@@ -267,16 +267,6 @@ pub struct Storyboard {
     pub scenes: Vec<Scene>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "UPPERCASE")]
-pub enum TrackType {
-    Dialogue,
-    Sfx,
-    Bed,
-    Music,
-    Direction,
-}
-
 // ── Inference / job models ────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

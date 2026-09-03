@@ -191,6 +191,9 @@ pub struct StoryboardReviewArgs {
 
 #[derive(Debug, Deserialize)]
 pub struct SceneSummary {
+    /// Present in the caller's payload and kept for shape parity with
+    /// storyboard.json; the prompt builder identifies scenes by `no`.
+    #[allow(dead_code)]
     pub slug: String,
     pub no: String,           // e.g. "S03"
     pub title: String,

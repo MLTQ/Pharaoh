@@ -5,21 +5,9 @@ use crate::models::{
     AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus, SidecarMeta,
 };
 use chrono::Utc;
-use serde::Serialize;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, Manager};
-
-#[derive(Debug, Serialize)]
-struct PostUpscaleRequest {
-    job_id: String,
-    input_path: String,
-    output_path: String,
-    model_name: String,
-    ddim_steps: u32,
-    guidance_scale: f32,
-    seed: i64,
-}
 
 pub fn output_path_for(input: &Path, model_name: &str) -> Result<PathBuf> {
     let parent = input

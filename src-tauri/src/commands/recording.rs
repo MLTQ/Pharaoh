@@ -18,7 +18,7 @@ use crate::error::{Error, Result};
 
 // ── Public managed state ──────────────────────────────────────────────────────
 
-struct ActiveRecording {
+pub struct ActiveRecording {
     /// Kept alive to maintain the CPAL stream; dropped in stop_recording.
     _stream: cpal::Stream,
     /// Closing this sender signals the writer thread to flush and exit.

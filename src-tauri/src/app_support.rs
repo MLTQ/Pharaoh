@@ -422,7 +422,6 @@ pub struct WavInfo {
     /// Sample frames, i.e. per channel.
     pub frames: u64,
     pub sample_rate: u32,
-    pub channels: u16,
 }
 
 impl WavInfo {
@@ -442,7 +441,6 @@ pub fn wav_info(path: &str) -> Result<WavInfo> {
     Ok(WavInfo {
         frames: reader.duration() as u64,
         sample_rate: spec.sample_rate,
-        channels: spec.channels.max(1),
     })
 }
 
