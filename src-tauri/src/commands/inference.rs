@@ -650,6 +650,7 @@ pub fn finalize_generation_output(
         row_index,
         output_path,
         duration_ms,
+        Some(crate::app_support::asset_kind_from_model(&sidecar_meta.model)),
     )?;
 
     Ok(FinalizedJob {

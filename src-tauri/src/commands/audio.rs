@@ -93,7 +93,11 @@ fn compute_waveform_peaks(path: &str, num_peaks: usize) -> Result<Vec<f32>> {
         return Ok(vec![0.0; num_peaks]);
     }
 
-    let samples_per_peak = (total_samples / num_peaks).max(1);
+    // `duration()` counts frames, but `samples()` below yields every
+    // interleaved value (frames × channels). Bucket by frame index so a stereo
+    // file spans the full waveform instead of doubling up in the first half.
+    let channels = spec.channels.max(1) as usize;
+    let frames_per_peak = (total_samples / num_peaks).max(1);
     let max_val = match spec.bits_per_sample {
         8  => i32::from(i8::MAX) as f32,
         16 => i32::from(i16::MAX) as f32,
@@ -106,13 +110,13 @@ fn compute_waveform_peaks(path: &str, num_peaks: usize) -> Result<Vec<f32>> {
     match spec.sample_format {
         hound::SampleFormat::Int => {
             for (i, sample) in reader.samples::<i32>().filter_map(|s| s.ok()).enumerate() {
-                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                let peak_index = (i / channels / frames_per_peak).min(num_peaks - 1);
                 peaks[peak_index] = peaks[peak_index].max((sample as f32 / max_val).abs());
             }
         }
         hound::SampleFormat::Float => {
             for (i, sample) in reader.samples::<f32>().filter_map(|s| s.ok()).enumerate() {
-                let peak_index = (i / samples_per_peak).min(num_peaks - 1);
+                let peak_index = (i / channels / frames_per_peak).min(num_peaks - 1);
                 peaks[peak_index] = peaks[peak_index].max(sample.abs());
             }
         }
@@ -222,6 +226,60 @@ mod tests {
         writer.finalize().unwrap();
     }
 
+    /// A stereo WAV whose second half is loud and first half silent, so a
+    /// channel-count mistake in the bucketing is visible in the peaks.
+    fn write_stereo_wav(path: &Path, seconds: u32) {
+        let spec = hound::WavSpec {
+            channels: 2,
+            sample_rate: 48_000,
+            bits_per_sample: 16,
+            sample_format: hound::SampleFormat::Int,
+        };
+        let mut writer = hound::WavWriter::create(path, spec).unwrap();
+        let frames = (spec.sample_rate * seconds) as usize;
+        for i in 0..frames {
+            let v = if i * 2 >= frames { (i16::MAX as f32 * 0.8) as i16 } else { 0 };
+            writer.write_sample(v).unwrap(); // L
+            writer.write_sample(v).unwrap(); // R
+        }
+        writer.finalize().unwrap();
+    }
+
+    #[test]
+    fn stereo_duration_is_not_halved() {
+        let dir = std::env::temp_dir().join(format!("pharaoh_stereo_dur_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("stereo.wav");
+        write_stereo_wav(&wav, 2);
+
+        // hound's duration() is already frames-per-channel; dividing by the
+        // channel count again reported 1000ms for this 2s file.
+        let ms = get_duration_ms(wav.to_string_lossy().to_string()).unwrap();
+        assert_eq!(ms, 2000, "2s stereo file must report 2000ms, not {}", ms);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn stereo_peaks_span_the_whole_file() {
+        let dir = std::env::temp_dir().join(format!("pharaoh_stereo_peaks_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let wav = dir.join("stereo.wav");
+        write_stereo_wav(&wav, 2);
+
+        let peaks = compute_waveform_peaks(&wav.to_string_lossy(), 100).unwrap();
+        assert_eq!(peaks.len(), 100);
+        // Silent first half, loud second half. Bucketing by interleaved sample
+        // index instead of frame index squeezed the whole file into the first
+        // half of the waveform, which put the loud part around index 25.
+        assert!(peaks[10] < 0.01, "first quarter should be silent, got {}", peaks[10]);
+        assert!(peaks[40] < 0.01, "second quarter should be silent, got {}", peaks[40]);
+        assert!(peaks[60] > 0.5, "third quarter should be loud, got {}", peaks[60]);
+        assert!(peaks[90] > 0.5, "fourth quarter should be loud, got {}", peaks[90]);
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
     #[test]
     fn cache_roundtrip() {
         let dir = std::env::temp_dir().join(format!("pharaoh_peaks_test_{}", std::process::id()));
@@ -264,17 +322,9 @@ mod tests {
 /// Get the duration of a WAV file in milliseconds.
 #[tauri::command]
 pub fn get_duration_ms(path: String) -> Result<u64> {
-    let reader = hound::WavReader::open(&path)
-        .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
-    let spec = reader.spec();
-    let total_samples = reader.duration() as u64;
-    let channels = spec.channels as u64;
-    let per_channel = if channels > 0 {
-        total_samples / channels
-    } else {
-        total_samples
-    };
-    Ok((per_channel * 1000) / spec.sample_rate as u64)
+    let info = crate::app_support::wav_info(&path)?;
+    info.duration_ms()
+        .ok_or_else(|| Error::Other(format!("WAV has an invalid sample rate: {}", path)))
 }
 
 /// Find the nearest zero-crossing in a WAV file, searching ±200ms around `near_ms`.

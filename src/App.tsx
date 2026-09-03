@@ -31,6 +31,7 @@ import type { ViewId, WorkspaceId, RightTab } from "./lib/types";
 import { WORKSPACE_OF } from "./lib/types";
 import { initGruveCollab } from "./lib/gruveCollab";
 import { isMeshViewer } from "./lib/transport";
+import { requestFlush } from "./lib/flush";
 
 // Small fixed pill shown to mesh/browser viewers (no Tauri IPC) so it's
 // obvious you're in someone else's session, not a local install.
@@ -149,9 +150,10 @@ export default function App() {
       // beforeunload-style listeners that components install.
       if (cmd && e.key.toLowerCase() === "s" && !e.shiftKey && !e.altKey) {
         e.preventDefault();
-        // Dispatch a synthetic beforeunload so any debounced writers flush
-        // immediately. They install with `addEventListener("beforeunload", flush)`.
-        window.dispatchEvent(new Event("beforeunload"));
+        // Ask the debounced writers to commit now. This used to dispatch a
+        // synthetic `beforeunload`, but gruveCollab listens on that to leave
+        // the mesh — so every Cmd-S silently ended collaboration.
+        requestFlush();
         useToastStore.getState().push({ kind: "info", title: "Saved" });
         return;
       }

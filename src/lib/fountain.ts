@@ -258,8 +258,30 @@ export function compileBlocksToRows(
     const id = rowId(r);
     if (id) byId.set(id, r);
   }
-  return blocks.map((block) => {
-    const prior = byId.get(block.id);
+  // Rows already spoken for by an id match must not be reused by the
+  // positional fallback below.
+  const claimed = new Set<ScriptRow>();
+  for (const b of blocks) {
+    const hit = byId.get(b.id);
+    if (hit) claimed.add(hit);
+  }
+  return blocks.map((block, i) => {
+    // Rows authored outside the Fountain editor (ScriptCanvas, asset drop, the
+    // MCP server) carry no `id:` tag in notes, so rowsToBlocks minted a fresh
+    // id for them and the lookup above misses. Without a fallback blockToRow
+    // would emit empty file/start_ms/duration_ms and silently drop the audio
+    // binding the moment the writer opens Write mode. rowsToBlocks emits blocks
+    // 1:1 in row order, so the positionally aligned row is the right prior as
+    // long as it is untagged, unclaimed, and of the same type.
+    let prior = byId.get(block.id);
+    if (!prior) {
+      const aligned = existing[i];
+      if (aligned && !claimed.has(aligned) && rowId(aligned) === null
+          && aligned.type === block.type) {
+        prior = aligned;
+        claimed.add(aligned);
+      }
+    }
     const next = blockToRow(block, sceneNo, characters, prior);
     return setRowId(next, block.id);
   });

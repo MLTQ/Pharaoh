@@ -402,15 +402,72 @@ pub fn update_script_row_fields(
     Ok(updated)
 }
 
-/// Read a WAV file's duration in milliseconds without decoding samples —
-/// computed from the header fields (sample_rate × total_frames).
-fn wav_duration_ms(path: &str) -> Result<u64> {
+/// Header-derived facts about a WAV file.
+///
+/// `hound`'s `WavReader::duration()` already returns the number of sample
+/// *frames* — that is, per channel — while `samples()` iterates every
+/// interleaved value (frames × channels). Dividing `duration()` by the channel
+/// count a second time is the mistake this type exists to prevent: it used to
+/// halve the reported length of every stereo render and Clip Studio export,
+/// because `process_clip_asset` and `normalize_clip` both emit `-ac 2`.
+pub struct WavInfo {
+    /// Sample frames, i.e. per channel.
+    pub frames: u64,
+    pub sample_rate: u32,
+    pub channels: u16,
+}
+
+impl WavInfo {
+    /// Duration in milliseconds, or `None` for a malformed 0 Hz header.
+    pub fn duration_ms(&self) -> Option<u64> {
+        self.frames
+            .checked_mul(1000)
+            .and_then(|v| v.checked_div(u64::from(self.sample_rate)))
+    }
+}
+
+/// Read a WAV header without decoding samples.
+pub fn wav_info(path: &str) -> Result<WavInfo> {
     let reader = hound::WavReader::open(path)
-        .map_err(|e| Error::Other(format!("cannot open WAV for duration: {}", e)))?;
+        .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
     let spec = reader.spec();
-    let total_frames = reader.duration() as u64; // frames (samples ÷ channels)
-    let ms = total_frames * 1000 / spec.sample_rate as u64;
-    Ok(ms)
+    Ok(WavInfo {
+        frames: reader.duration() as u64,
+        sample_rate: spec.sample_rate,
+        channels: spec.channels.max(1),
+    })
+}
+
+/// Read a WAV file's duration in milliseconds without decoding samples.
+fn wav_duration_ms(path: &str) -> Result<u64> {
+    wav_info(path)?
+        .duration_ms()
+        .ok_or_else(|| Error::Other(format!("WAV has an invalid sample rate: {}", path)))
+}
+
+/// Map a sidecar `model` string to the asset kind it produced.
+/// Mirrors `commands::sidecar::kind_from_model`.
+pub fn asset_kind_from_model(model: &str) -> &'static str {
+    let model = model.to_lowercase();
+    if model.contains("qwen") || model.contains("tts") || model.contains("chatterbox") {
+        "tts"
+    } else if model.contains("ace") || model.contains("music") {
+        "music"
+    } else {
+        "sfx"
+    }
+}
+
+/// Whether an asset of `kind` may be bound to a script row of `row_type`.
+/// Speech only lands on DIALOGUE, score only on MUSIC, foley on SFX or BED.
+/// DIRECTION rows are prose and never carry audio.
+fn row_type_accepts(row_type: &str, kind: &str) -> bool {
+    match kind {
+        "tts" => row_type.eq_ignore_ascii_case("DIALOGUE"),
+        "music" => row_type.eq_ignore_ascii_case("MUSIC"),
+        "sfx" => row_type.eq_ignore_ascii_case("SFX") || row_type.eq_ignore_ascii_case("BED"),
+        _ => false,
+    }
 }
 
 pub fn bind_generated_asset(
@@ -420,6 +477,7 @@ pub fn bind_generated_asset(
     row_index: usize,
     output_path: &str,
     duration_ms: Option<u64>,
+    kind: Option<&str>,
 ) -> Result<bool> {
     let path = script_path(projects_dir, project_id, scene_slug);
     if !path.exists() {
@@ -433,6 +491,15 @@ pub fn bind_generated_asset(
 
     if !row.file.trim().is_empty() && row.file != output_path {
         return Ok(false);
+    }
+
+    // Callers that don't name a target row default to row 0, so without this
+    // guard a music cue generated while row 0 happened to be an empty DIALOGUE
+    // line would attach itself to that line. Bind only where the kinds agree.
+    if let Some(kind) = kind {
+        if !row_type_accepts(&row.track_type, kind) {
+            return Ok(false);
+        }
     }
 
     row.file = output_path.to_string();

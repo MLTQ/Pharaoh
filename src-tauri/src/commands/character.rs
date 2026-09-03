@@ -716,15 +716,8 @@ pub fn import_audio_files_into_corpus(
 
         // Write a `.meta.json` sidecar with duration so existing
         // scan_rvc_corpus_dir picks it up without re-decoding the WAV.
-        if let Ok(reader) = hound::WavReader::open(&dest) {
-            let spec = reader.spec();
-            let samples = reader.duration() as u64;
-            let channels = u64::from(spec.channels.max(1));
-            if let Some(dur_ms) = samples
-                .checked_mul(1000)
-                .and_then(|v| v.checked_div(channels))
-                .and_then(|v| v.checked_div(u64::from(spec.sample_rate)))
-            {
+        if let Ok(info) = crate::app_support::wav_info(&dest.to_string_lossy()) {
+            if let Some(dur_ms) = info.duration_ms() {
                 total_duration_ms = total_duration_ms.saturating_add(dur_ms);
                 let meta_path = corpus_dir.join(format!("{}.meta.json", dest_name));
                 let meta = serde_json::json!({

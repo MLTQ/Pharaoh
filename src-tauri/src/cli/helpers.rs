@@ -228,17 +228,10 @@ pub(super) async fn poll_job(
 /// Best-effort duration/sample-rate probe for a WAV on disk. Returns
 /// `(None, 48000)` when the file cannot be opened.
 pub(super) fn cli_wav_info(path: &str) -> (Option<u64>, u32) {
-    let Ok(reader) = hound::WavReader::open(path) else {
-        return (None, 48000);
-    };
-    let spec = reader.spec();
-    let samples = reader.duration() as u64;
-    let channels = u64::from(spec.channels.max(1));
-    let duration_ms = samples
-        .checked_mul(1000)
-        .and_then(|v| v.checked_div(channels))
-        .and_then(|v| v.checked_div(u64::from(spec.sample_rate)));
-    (duration_ms, spec.sample_rate)
+    match crate::app_support::wav_info(path) {
+        Ok(info) => (info.duration_ms(), info.sample_rate),
+        Err(_) => (None, 48000),
+    }
 }
 
 pub(super) fn random_seed() -> i64 {

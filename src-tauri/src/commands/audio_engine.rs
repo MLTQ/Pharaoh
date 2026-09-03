@@ -45,16 +45,8 @@ fn run_ffmpeg_owned(args: &[String]) -> Result<()> {
 }
 
 fn wav_info(path: &str) -> Result<(Option<u64>, u32)> {
-    let reader = hound::WavReader::open(path)
-        .map_err(|e| Error::Other(format!("could not read processed WAV metadata: {}", e)))?;
-    let spec = reader.spec();
-    let samples = reader.duration() as u64;
-    let channels = u64::from(spec.channels.max(1));
-    let duration_ms = samples
-        .checked_mul(1000)
-        .and_then(|v| v.checked_div(channels))
-        .and_then(|v| v.checked_div(u64::from(spec.sample_rate)));
-    Ok((duration_ms, spec.sample_rate))
+    let info = crate::app_support::wav_info(path)?;
+    Ok((info.duration_ms(), info.sample_rate))
 }
 
 fn clip_output_path(input_path: &str) -> Result<String> {

@@ -23,6 +23,7 @@ import {
 } from "../../lib/assetRouting";
 import { useRenderMetaStore } from "../../store/renderMetaStore";
 import type { MockScene, MockTrack, MockTrackClip, MockAssets, ScriptRow, TrackType, EnvelopePoint } from "../../lib/types";
+import { FLUSH_EVENT } from "../../lib/flush";
 
 type ScriptMode = "write" | "direct" | "mix";
 
@@ -498,6 +499,10 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const pendingWritesRef = useRef<Map<number, { timer: ReturnType<typeof setTimeout>; fields: Record<string, string> }>>(new Map());
   // Whole-script write debouncer used by Fountain mode (replaces all rows at once)
   const fountainSaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Payload for the debounced Fountain write, so it survives unmount.
+  const pendingFountainRef = useRef<
+    { projectId: string; sceneSlug: string; rows: ScriptRow[] } | null
+  >(null);
   const tracksRowsRef = useRef<HTMLDivElement | null>(null);
 
   const { realProjectId, activeSceneSlug, characters, projectsDir } = useProjectStore();
@@ -577,32 +582,50 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
     return () => flushAllPendingWrites();
   }, [activeSceneSlug, realProjectId]);
   useEffect(() => {
-    const onBeforeUnload = () => flushAllPendingWrites();
-    window.addEventListener("beforeunload", onBeforeUnload);
-    return () => window.removeEventListener("beforeunload", onBeforeUnload);
+    const onFlush = () => { flushAllPendingWrites(); flushFountainWrite(); };
+    window.addEventListener("beforeunload", onFlush);
+    window.addEventListener(FLUSH_EVENT, onFlush);
+    return () => {
+      window.removeEventListener("beforeunload", onFlush);
+      window.removeEventListener(FLUSH_EVENT, onFlush);
+    };
   }, []);
 
   // ── Fountain commit handler ─────────────────────────────────────────────
   // Fountain edits replace the entire row list at once; debounce to coalesce
   // typing bursts, but flush when we hide the editor or switch scenes.
 
+  const flushFountainWrite = () => {
+    const pending = pendingFountainRef.current;
+    if (fountainSaveTimerRef.current) {
+      clearTimeout(fountainSaveTimerRef.current);
+      fountainSaveTimerRef.current = null;
+    }
+    if (!pending) return;
+    pendingFountainRef.current = null;
+    writeScript(pending)
+      .catch((e) => reportError("Script save failed", e, { id: "script-save-failed" }));
+  };
+
   const handleFountainCommit = (nextRows: ScriptRow[]) => {
     setScriptRows(nextRows);
     if (!realProjectId || !activeSceneSlug) return;
     if (fountainSaveTimerRef.current) clearTimeout(fountainSaveTimerRef.current);
-    fountainSaveTimerRef.current = setTimeout(() => {
-      writeScript({
-        projectId: realProjectId,
-        sceneSlug: activeSceneSlug,
-        rows: nextRows,
-      }).catch((e) => reportError("Script save failed", e, { id: "script-save-failed" }));
-    }, 600);
+    // Park the payload on a ref so a scene switch, a mode toggle or Cmd-S can
+    // still commit it. Holding it only in this closure meant the cleanup below
+    // cancelled the timer and dropped the write, leaving scriptRows in memory
+    // ahead of disk — after which index-based row writes hit the wrong rows.
+    pendingFountainRef.current = {
+      projectId: realProjectId,
+      sceneSlug: activeSceneSlug,
+      rows: nextRows,
+    };
+    fountainSaveTimerRef.current = setTimeout(flushFountainWrite, 600);
   };
 
   useEffect(() => {
-    return () => {
-      if (fountainSaveTimerRef.current) clearTimeout(fountainSaveTimerRef.current);
-    };
+    return () => flushFountainWrite();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeSceneSlug, realProjectId, mode]);
 
   // ── Timeline tracks ──────────────────────────────────────────────────────

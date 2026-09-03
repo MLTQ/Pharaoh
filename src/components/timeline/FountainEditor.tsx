@@ -14,6 +14,7 @@ import { useProjectStore } from "../../store/projectStore";
 import { draftScene, readFountain, writeFountain } from "../../lib/tauriCommands";
 import { reportError } from "../../lib/errors";
 import type { ScriptRow, TrackType, Character, ViewId, Scene } from "../../lib/types";
+import { FLUSH_EVENT } from "../../lib/flush";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -345,17 +346,24 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
     };
   }, [text, realProjectId, sceneSlug]);
 
-  // Flush on unmount / scene switch / before-unload so nothing is lost
+  // Flush on unmount / scene switch / before-unload so nothing is lost.
+  // The flush closure is created once per scene, so it must read the live text
+  // through a ref — capturing `text` directly would write the mount-time,
+  // rows-derived prose back over everything typed during the session.
+  const textRef = useRef(text);
+  useEffect(() => { textRef.current = text; }, [text]);
   useEffect(() => {
     const flush = () => {
       if (!realProjectId || !sceneSlug || !initialLoadDone.current) return;
       if (fountainSaveTimer.current) clearTimeout(fountainSaveTimer.current);
-      writeFountain({ projectId: realProjectId, sceneSlug, text })
+      writeFountain({ projectId: realProjectId, sceneSlug, text: textRef.current })
         .catch((e) => reportError("Script save failed", e, { id: "fountain-save-failed" }));
     };
     window.addEventListener("beforeunload", flush);
+    window.addEventListener(FLUSH_EVENT, flush);
     return () => {
       window.removeEventListener("beforeunload", flush);
+      window.removeEventListener(FLUSH_EVENT, flush);
       flush();
     };
   // eslint-disable-next-line react-hooks/exhaustive-deps
