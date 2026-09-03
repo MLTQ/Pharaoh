@@ -10,7 +10,7 @@ or dummy head, indexed by azimuth/elevation.
 Run the install script to fetch the MIT KEMAR HRTF set (~3 MB):
 
 ```bash
-./inference/download_sofa.sh
+./inference/download_spatial_assets.sh
 ```
 
 This drops `mit-kemar-normal.sofa` into this directory. Pharaoh picks it up

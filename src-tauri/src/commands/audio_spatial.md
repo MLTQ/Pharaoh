@@ -24,7 +24,7 @@ in the stereo field.
 ## Engine selection
 
 At call time the renderer probes `assets/sofa/` for a `.sofa` HRTF file
-(see `assets/sofa/README.md` for the `download_sofa.sh` setup that installs
+(see `assets/sofa/README.md` for the `download_spatial_assets.sh` setup that installs
 the MIT KEMAR set). If one is present we use ffmpeg's `sofalizer` filter
 — true HRTF, full front/back/up/down disambiguation. If not, we fall back
 to an ITD + ILD + HF-rolloff approximation that works with zero external
