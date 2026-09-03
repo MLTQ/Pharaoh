@@ -26,7 +26,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
 
 log = logging.getLogger(__name__)
 
@@ -243,7 +243,7 @@ def _submit(params: CloneParams) -> dict:
     job_id = params.job_id or new_job_id()
     params_dict = params.model_dump() if hasattr(params, "model_dump") else params.dict()
     jobs.create(job_id, "chatterbox", "clone", params_dict)
-    asyncio.create_task(_run_clone(job_id, params))
+    spawn_job(_run_clone(job_id, params))
     return {"job_id": job_id, "status": "queued"}
 
 

@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import datetime
 import json
 
-from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
 
 log = logging.getLogger(__name__)
 
@@ -279,14 +279,29 @@ class VoiceCloneParams(BaseModel):
 
 # ── Background worker ────────────────────────────────────────────────────────
 
+# Qwen3-TTS can loop on pathological input and never return a stop token. Cap
+# the wall clock so a wedged generation fails its job instead of pinning a
+# worker thread and leaving the client polling "running" forever.
+GENERATION_TIMEOUT_S = int(os.environ.get("PHARAOH_TTS_TIMEOUT_S", "300"))
+
+
 async def _run_blocking_generation(job_id: str, fn, start: float = 0.15, end: float = 0.85):
     """Run a blocking Qwen generation call and emit coarse progress heartbeats."""
     loop = asyncio.get_running_loop()
     future = loop.run_in_executor(None, fn)
     progress = start
+    waited = 0.0
     while not future.done():
+        if waited >= GENERATION_TIMEOUT_S:
+            future.cancel()
+            raise asyncio.TimeoutError(
+                f"generation exceeded {GENERATION_TIMEOUT_S}s — the input text may be "
+                f"too long, or the model may be looping. Raise PHARAOH_TTS_TIMEOUT_S "
+                f"if this text legitimately needs longer."
+            )
         jobs.update(job_id, progress=progress)
         await asyncio.sleep(1.0)
+        waited += 1.0
         progress = min(end, progress + 0.03)
     return await future
 
@@ -386,7 +401,7 @@ async def _run_tts(job_id: str, params: dict) -> None:
 def _submit(params: dict) -> dict:
     job_id = new_job_id()
     jobs.create(job_id, "tts", params.get("_endpoint", "custom_voice"), params)
-    asyncio.create_task(_run_tts(job_id, params))
+    spawn_job(_run_tts(job_id, params))
     return {"job_id": job_id}
 
 

@@ -215,7 +215,10 @@ def _scene_pipeline_status(project_id: str, scene: dict) -> dict:
     assets = _list_assets(project_id, slug)
     approved = [a for a in assets if a["qa_status"] == "approved"]
     unreviewed = [a for a in assets if a["qa_status"] == "unreviewed"]
-    render_path = _scene_dir(project_id, slug) / "render" / f"scene_{slug}.wav"
+    render_path = _scene_dir(project_id, slug) / "render" / "render.wav"
+    # Scenes rendered before the MCP renderer was aligned with Rust may still
+    # carry the old per-slug name; count either as rendered.
+    legacy_render = _scene_dir(project_id, slug) / "render" / f"scene_{slug}.wav"
     return {
         "slug": slug,
         "title": scene.get("title", slug),
@@ -225,5 +228,5 @@ def _scene_pipeline_status(project_id: str, scene: dict) -> dict:
         "assets_total": len(assets),
         "assets_approved": len(approved),
         "assets_unreviewed": len(unreviewed),
-        "rendered": render_path.exists(),
+        "rendered": render_path.exists() or legacy_render.exists(),
     }

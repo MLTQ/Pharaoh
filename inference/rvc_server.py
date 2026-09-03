@@ -44,7 +44,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
 
 log = logging.getLogger(__name__)
 
@@ -542,7 +542,7 @@ def _submit_train(params: TrainParams) -> dict:
     """Enqueue a training job and return immediately."""
     job_id = params.job_id or new_job_id()
     jobs.create(job_id, "rvc", "train", params.model_dump())
-    asyncio.create_task(_run_train(job_id, params))
+    spawn_job(_run_train(job_id, params))
     return {"job_id": job_id, "status": "queued"}
 
 
@@ -550,7 +550,7 @@ def _submit_convert(params: ConvertParams) -> dict:
     """Enqueue a conversion job and return immediately."""
     job_id = params.job_id or new_job_id()
     jobs.create(job_id, "rvc", "convert", params.model_dump())
-    asyncio.create_task(_run_convert(job_id, params))
+    spawn_job(_run_convert(job_id, params))
     return {"job_id": job_id, "status": "queued"}
 
 

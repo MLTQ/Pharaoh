@@ -31,7 +31,9 @@ def _compose_scene_ffmpeg(project_id: str, scene_slug: str) -> dict:
     rows = _script_rows(project_id, scene_slug)
     scene_d = _scene_dir(project_id, scene_slug)
 
-    AUDIO_TYPES = {"DIALOGUE", "SFX", "MUSIC", "AMBIENCE", "EFFECT", "EFFECT_SFX"}
+    # Must match the Rust renderer's row filter. BED was missing, so every
+    # ambience/loop bed a scene relied on was silently dropped from the mix.
+    AUDIO_TYPES = {"DIALOGUE", "SFX", "BED", "MUSIC", "AMBIENCE", "EFFECT", "EFFECT_SFX"}
     audio_rows = [
         r for r in rows
         if r.get("type", "").upper() in AUDIO_TYPES and r.get("file")
@@ -59,7 +61,11 @@ def _compose_scene_ffmpeg(project_id: str, scene_slug: str) -> dict:
 
     render_dir = scene_d / "render"
     render_dir.mkdir(parents=True, exist_ok=True)
-    output_path = render_dir / f"scene_{scene_slug}.wav"
+    # The Rust renderer writes render/render.wav. Writing a different name here
+    # meant a GUI render and an MCP render produced two files, and
+    # _scene_pipeline_status only ever looked for the MCP one — so scenes
+    # rendered in the app reported rendered:false to agents.
+    output_path = render_dir / "render.wav"
 
     # ── Compute total timeline duration ───────────────────────────────────────
     max_end_ms = 0

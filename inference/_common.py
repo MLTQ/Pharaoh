@@ -73,6 +73,46 @@ def new_job_id() -> str:
     return str(uuid.uuid4())
 
 
+# ── Task lifetime + concurrency ───────────────────────────────────────────────
+
+# asyncio only holds a weak reference to a task, so a bare
+# `asyncio.create_task(...)` can be garbage-collected mid-flight and the job
+# silently stops at whatever progress it had reached. Keeping a strong reference
+# until the task finishes is the documented fix.
+_BACKGROUND_TASKS: "set" = set()
+
+
+def spawn_job(coro):
+    """Start a background job task and keep it alive until it completes."""
+    import asyncio
+
+    task = asyncio.ensure_future(coro)
+    _BACKGROUND_TASKS.add(task)
+    task.add_done_callback(_BACKGROUND_TASKS.discard)
+    return task
+
+
+def inference_lock():
+    """
+    Process-wide serializer for GPU work.
+
+    Every server holds a single model, and `torch.manual_seed` is global — so N
+    concurrent /generate calls both thrash the device and let seeds
+    cross-contaminate between takes. Jobs queue here instead of racing.
+
+    Created lazily so it binds to the running loop rather than import-time.
+    """
+    import asyncio
+
+    global _INFERENCE_LOCK
+    if _INFERENCE_LOCK is None:
+        _INFERENCE_LOCK = asyncio.Semaphore(1)
+    return _INFERENCE_LOCK
+
+
+_INFERENCE_LOCK = None
+
+
 def is_server_owned(path: str) -> bool:
     """
     Whether `path` lives under this server's own scratch directory.

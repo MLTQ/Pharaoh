@@ -80,3 +80,57 @@ class TestJobStore:
 
     def test_missing_job_reads_as_none(self):
         assert JobStore().get("nope") is None
+
+
+class TestSpawnJob:
+    """
+    asyncio holds only a weak reference to a bare create_task, so a job task can
+    be garbage-collected mid-flight and the job silently stops at whatever
+    progress it reached. spawn_job keeps a strong reference until it finishes.
+    """
+
+    def test_task_survives_gc_and_runs_to_completion(self):
+        import asyncio
+        import gc
+
+        from _common import spawn_job, _BACKGROUND_TASKS
+
+        async def main():
+            done = []
+
+            async def work():
+                await asyncio.sleep(0)
+                done.append(True)
+
+            spawn_job(work())
+            # Drop every local reference and force a collection; a weakly-held
+            # task would be reaped here.
+            gc.collect()
+            await asyncio.sleep(0.05)
+            return done
+
+        assert asyncio.run(main()) == [True]
+        # Registry drains itself once tasks complete.
+        assert len(_BACKGROUND_TASKS) == 0
+
+    def test_inference_lock_serializes_generation(self):
+        import asyncio
+
+        import _common
+
+        async def main():
+            _common._INFERENCE_LOCK = None  # bind to this loop
+            lock = _common.inference_lock()
+            overlap = {"max": 0, "cur": 0}
+
+            async def job():
+                async with lock:
+                    overlap["cur"] += 1
+                    overlap["max"] = max(overlap["max"], overlap["cur"])
+                    await asyncio.sleep(0.01)
+                    overlap["cur"] -= 1
+
+            await asyncio.gather(*(job() for _ in range(5)))
+            return overlap["max"]
+
+        assert asyncio.run(main()) == 1, "GPU work must not run concurrently"

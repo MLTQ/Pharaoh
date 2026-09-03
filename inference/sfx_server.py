@@ -25,7 +25,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
-from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
 
 
 def _write_sidecar(audio_path: str, meta: dict) -> None:
@@ -743,7 +743,7 @@ async def _run_diffusers_audioldm_sfx(job_id: str, params: dict) -> None:
 def _submit(params: dict) -> dict:
     job_id = new_job_id()
     jobs.create(job_id, "sfx", params.get("_endpoint", "t2a"), params)
-    asyncio.create_task(_run_sfx(job_id, params))
+    spawn_job(_run_sfx(job_id, params))
     return {"job_id": job_id}
 
 
