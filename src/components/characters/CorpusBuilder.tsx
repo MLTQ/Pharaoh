@@ -17,9 +17,15 @@
  */
 
 import React, { useState, useEffect, useCallback } from "react";
-import { invoke } from "../../lib/transport";
 import type { Character } from "../../lib/types";
-import { importAudioFilesIntoCorpus } from "../../lib/tauriCommands";
+import {
+  importAudioFilesIntoCorpus,
+  getCorpusEmotionCounts,
+  getCorpusJobStatus,
+  buildCorpus,
+  clearCorpus,
+  type EmotionCorpusCount,
+} from "../../lib/tauriCommands";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -31,23 +37,6 @@ export interface CorpusBuilderProps {
   corpusDurationMs: number;
   corpusTarget: number;
   onCorpusUpdated: () => void;
-}
-
-interface EmotionCorpusCount {
-  emotion: string;
-  count: number;
-}
-
-interface BuildCorpusResult {
-  job_id: string;
-  total: number;
-}
-
-interface CorpusJobStatus {
-  completed: number;
-  total: number;
-  done: boolean;
-  error: string | null;
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
@@ -213,13 +202,10 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
   // Fetch per-emotion corpus counts on mount / when corpusCount changes
   const fetchEmotionCounts = useCallback(async () => {
     try {
-      const counts = await invoke<EmotionCorpusCount[]>("get_corpus_emotion_counts", {
-        projectId,
-        characterId: character.id,
-      });
-      setEmotionCounts(counts);
+      setEmotionCounts(await getCorpusEmotionCounts({ projectId, characterId: character.id }));
     } catch {
-      // Fail silently — not available until corpus commands are implemented
+      // A character with no corpus directory yet is the normal case, not an
+      // error worth surfacing.
       setEmotionCounts([]);
     }
   }, [projectId, character.id]);
@@ -237,9 +223,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
     const poll = async () => {
       while (!cancelled) {
         try {
-          const status = await invoke<CorpusJobStatus>("get_corpus_job_status", {
-            jobId: activeJobId,
-          });
+          const status = await getCorpusJobStatus(activeJobId);
 
           if (cancelled) break;
 
@@ -279,10 +263,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
     setGenerationProgress(null);
 
     try {
-      const result = await invoke<BuildCorpusResult>("build_corpus", {
-        projectId,
-        characterId: character.id,
-      });
+      const result = await buildCorpus({ projectId, characterId: character.id });
       setGenerationProgress({ completed: 0, total: result.total });
       setActiveJobId(result.job_id);
     } catch (e: unknown) {
@@ -295,7 +276,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
     setConfirmClear(false);
     setError(null);
     try {
-      await invoke("clear_corpus", { projectId, characterId: character.id });
+      await clearCorpus({ projectId, characterId: character.id });
       onCorpusUpdated();
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : "Failed to clear corpus.");

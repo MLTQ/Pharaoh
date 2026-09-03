@@ -18,7 +18,7 @@ use crate::error::{Error, Result};
 /// Idempotent. Called on every read path (`get_project`, `open_project`,
 /// `list_projects`) so the UI always sees a consistent, current shape regardless
 /// of how the project was last written.
-fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
+pub(crate) fn migrate_project_in_place(project: &mut Project, projects_dir: &Path) {
     for character in project.characters.iter_mut() {
         character.voice_assignment.consolidate_legacy_rvc();
 

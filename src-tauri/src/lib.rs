@@ -114,6 +114,11 @@ pub fn run() {
             commands::rvc::submit_rvc_train,
             commands::rvc::get_rvc_job,
             commands::rvc::get_corpus_status,
+            commands::rvc::get_rvc_model_info,
+            commands::corpus::get_corpus_emotion_counts,
+            commands::corpus::get_corpus_job_status,
+            commands::corpus::build_corpus,
+            commands::corpus::clear_corpus,
             // Character library
             commands::character::list_library_characters,
             commands::character::save_character_to_library,

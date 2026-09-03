@@ -4,6 +4,7 @@ pub mod audio_enhance;
 pub mod audio_spatial;
 pub mod archive;
 pub mod character;
+pub mod corpus;
 pub mod inference;
 pub mod llm;
 pub mod setup_check;

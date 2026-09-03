@@ -461,3 +461,64 @@ pub async fn get_corpus_status(
         ready_for_training: total_duration_ms >= MIN_TRAINING_MS,
     })
 }
+
+/// The character's active RVC model plus the corpus it was trained from.
+///
+/// [`RvcModelInfo`] describes a file on disk; the Model stage also shows when
+/// the model was trained and how much corpus audio went into it.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RvcModelDetail {
+    pub name: String,
+    pub pth_path: String,
+    pub index_path: Option<String>,
+    pub pth_size_bytes: u64,
+    /// RFC 3339 mtime of the `.pth` file.
+    pub trained_at: String,
+    /// WAV count currently in `rvc_corpus/`.
+    pub corpus_count: usize,
+    /// Summed duration of that corpus, in milliseconds.
+    pub corpus_duration_ms: u64,
+}
+
+/// Return the character's trained RVC model, if one exists.
+///
+/// The Model stage shows a single active model per character; this is the
+/// alphabetically first `.pth` found by [`list_rvc_models`], or `None` when the
+/// character has not been trained yet.
+#[tauri::command]
+pub async fn get_rvc_model_info(
+    app: AppHandle,
+    project_id: String,
+    character_id: String,
+) -> Result<Option<RvcModelDetail>> {
+    let projects_dir = app_projects_dir(&app)?;
+    let corpus_dir = projects_dir
+        .join(&project_id)
+        .join("characters")
+        .join(&character_id)
+        .join("rvc_corpus");
+    let (corpus_count, corpus_duration_ms) = scan_rvc_corpus_dir(&corpus_dir);
+
+    let mut models = list_rvc_models(app, project_id, character_id).await?;
+    // Stable pick, so repeated calls agree when a character has more than one
+    // checkpoint on disk.
+    models.sort_by(|a, b| a.name.cmp(&b.name));
+    let Some(model) = models.into_iter().next() else {
+        return Ok(None);
+    };
+
+    let trained_at = std::fs::metadata(&model.pth_path)
+        .and_then(|m| m.modified())
+        .map(|t| chrono::DateTime::<chrono::Utc>::from(t).to_rfc3339())
+        .unwrap_or_default();
+
+    Ok(Some(RvcModelDetail {
+        name: model.name,
+        pth_path: model.pth_path,
+        index_path: model.index_path,
+        pth_size_bytes: model.size_bytes,
+        trained_at,
+        corpus_count: corpus_count as usize,
+        corpus_duration_ms,
+    }))
+}

@@ -468,8 +468,19 @@ export const submitRvcTrain = (args: {
     epochs: args.epochs ?? null,
   });
 
-/** Poll a job on the RVC server. Returns raw status JSON. */
-export const getRvcJob = (jobId: string): Promise<{ status: string; progress: number; output_path: string | null; error: string | null }> =>
+/** Status of a job on the RVC server. */
+export interface RvcJobResponse {
+  status: "pending" | "running" | "complete" | "failed";
+  /** 0..1 */
+  progress: number;
+  output_path: string | null;
+  error: string | null;
+  /** Current stage description, e.g. "Training… 42/100 steps". */
+  message: string | null;
+}
+
+/** Poll a job on the RVC server. */
+export const getRvcJob = (jobId: string): Promise<RvcJobResponse> =>
   invoke("get_rvc_job", { jobId });
 
 /**
@@ -481,6 +492,85 @@ export const getCorpusStatus = (args: {
   characterId: string;
 }): Promise<CorpusStatus> =>
   invoke("get_corpus_status", { projectId: args.projectId, characterId: args.characterId });
+
+/** One emotion's share of the RVC corpus. */
+export interface EmotionCorpusCount {
+  emotion: string;
+  count: number;
+}
+
+/** Handle for a running corpus build. */
+export interface BuildCorpusResult {
+  job_id: string;
+  total: number;
+}
+
+/** Progress of a corpus build started by buildCorpus(). */
+export interface CorpusJobStatus {
+  completed: number;
+  total: number;
+  done: boolean;
+  error: string | null;
+}
+
+/** The character's active RVC model plus the corpus it was trained from. */
+export interface RvcModelDetail {
+  name: string;
+  pth_path: string;
+  index_path: string | null;
+  pth_size_bytes: number;
+  /** RFC 3339 mtime of the .pth file. */
+  trained_at: string;
+  corpus_count: number;
+  corpus_duration_ms: number;
+}
+
+/** Count corpus WAVs per emotion, to show which states are under-represented. */
+export const getCorpusEmotionCounts = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<EmotionCorpusCount[]> =>
+  invoke("get_corpus_emotion_counts", {
+    projectId: args.projectId,
+    characterId: args.characterId,
+  });
+
+/**
+ * Queue a Chatterbox corpus build (stage 3).
+ * Returns immediately; poll getCorpusJobStatus() with the returned job_id.
+ * Requires at least one approved palette entry with reference audio.
+ */
+export const buildCorpus = (args: {
+  projectId: string;
+  characterId: string;
+  targetCount?: number;
+}): Promise<BuildCorpusResult> =>
+  invoke("build_corpus", {
+    projectId: args.projectId,
+    characterId: args.characterId,
+    targetCount: args.targetCount ?? null,
+  });
+
+/** Poll a corpus build. */
+export const getCorpusJobStatus = (jobId: string): Promise<CorpusJobStatus> =>
+  invoke("get_corpus_job_status", { jobId });
+
+/** Delete every generated corpus WAV and sidecar. Returns the number removed. */
+export const clearCorpus = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<number> =>
+  invoke("clear_corpus", { projectId: args.projectId, characterId: args.characterId });
+
+/** The character's trained RVC model, or null if not trained yet. */
+export const getRvcModelInfo = (args: {
+  projectId: string;
+  characterId: string;
+}): Promise<RvcModelDetail | null> =>
+  invoke("get_rvc_model_info", {
+    projectId: args.projectId,
+    characterId: args.characterId,
+  });
 
 // ── Setup integrity ─────────────────────────────────────────────────────────
 

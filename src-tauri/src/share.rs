@@ -147,6 +147,11 @@ async fn cors(req: Request, next: Next) -> Response {
 async fn static_assets(State(ctx): State<Ctx>, uri: Uri) -> Response {
     let rel = uri.path().trim_start_matches('/');
     let rel = if rel.is_empty() { "index.html" } else { rel };
+    // The dist/ fallback below joins this onto a base directory, so a request
+    // path containing ".." would otherwise escape and serve arbitrary files.
+    if rel.split('/').any(|seg| seg == ".." || seg == ".") || rel.contains('\0') {
+        return (StatusCode::BAD_REQUEST, "bad path").into_response();
+    }
 
     if let Some(asset) = ctx.app.asset_resolver().get(format!("/{rel}")) {
         return ([(header::CONTENT_TYPE, asset.mime_type)], asset.bytes).into_response();
@@ -308,6 +313,81 @@ fn u(v: &Value, k: &str) -> Result<u64, String> {
         .and_then(Value::as_u64)
         .ok_or_else(|| format!("missing integer arg '{k}'"))
 }
+/// A numeric arg that may be fractional. Clip Studio sends float viewport
+/// bounds for `startMs`/`endMs`; `as_u64` rejected those outright, so mesh
+/// viewers got a 400 on every zoomed waveform request.
+fn f(v: &Value, k: &str) -> Result<f64, String> {
+    v.get(k)
+        .and_then(Value::as_f64)
+        .ok_or_else(|| format!("missing number arg '{k}'"))
+}
+
+/// A string arg that names one path component — a project id, scene slug or
+/// character id. Anything that could climb or re-root the path is refused.
+///
+/// Without this, a mirrored `write_fountain` with `sceneSlug = "../../../x"`
+/// resolved outside the projects dir and `create_dir_all` happily wrote
+/// attacker-controlled content anywhere the host process could reach.
+fn s_id(v: &Value, k: &str) -> Result<String, String> {
+    let raw = s(v, k)?;
+    let bad = raw.is_empty()
+        || raw == "."
+        || raw == ".."
+        || raw.contains('/')
+        || raw.contains('\\')
+        || raw.contains('\0')
+        || std::path::Path::new(&raw).components().count() != 1;
+    if bad {
+        return Err(format!("invalid '{k}': must be a single path component"));
+    }
+    Ok(raw)
+}
+
+/// A filesystem-path arg, confined to the host's projects directory.
+///
+/// The read commands that take an absolute path (`read_sidecar`, `get_takes`,
+/// peaks, duration, zero crossings, render meta) would otherwise let a mesh
+/// viewer read any file the host could — and `get_waveform_peaks` also writes
+/// a cache file next to whatever it was pointed at.
+fn s_path(app: &AppHandle, v: &Value, k: &str) -> Result<String, String> {
+    let raw = s(v, k)?;
+    let projects_dir = crate::app_support::app_projects_dir(app)
+        .map_err(|e| e.to_string())?
+        .canonicalize()
+        .map_err(|e| format!("projects dir unavailable: {e}"))?;
+    // Canonicalize the deepest existing ancestor so paths that do not exist yet
+    // (a cache file about to be written) are still checked against symlinks.
+    let candidate = std::path::PathBuf::from(&raw);
+    let mut probe = candidate.clone();
+    let mut tail = Vec::new();
+    let resolved = loop {
+        match probe.canonicalize() {
+            Ok(p) => {
+                let mut p = p;
+                for part in tail.iter().rev() {
+                    p.push(part);
+                }
+                break p;
+            }
+            Err(_) => match probe.file_name() {
+                Some(name) => {
+                    tail.push(name.to_os_string());
+                    match probe.parent() {
+                        Some(parent) if !parent.as_os_str().is_empty() => {
+                            probe = parent.to_path_buf()
+                        }
+                        _ => return Err(format!("invalid path arg '{k}'")),
+                    }
+                }
+                None => return Err(format!("invalid path arg '{k}'")),
+            },
+        }
+    };
+    if !resolved.starts_with(&projects_dir) {
+        return Err(format!("'{k}' is outside the projects directory"));
+    }
+    Ok(raw)
+}
 fn de<T: serde::de::DeserializeOwned>(v: &Value, k: &str) -> Result<T, String> {
     let inner = v.get(k).ok_or_else(|| format!("missing arg '{k}'"))?;
     serde_json::from_value(inner.clone()).map_err(|e| format!("bad '{k}': {e}"))
@@ -382,73 +462,73 @@ async fn dispatch(
         // ── Reads ───────────────────────────────────────────────────────
         "get_projects_dir" => ok_plain(project::get_projects_dir(app)),
         "list_projects" => ok(project::list_projects(app)),
-        "get_project" => ok(project::get_project(app, s(a, "projectId").map_err(bad)?)),
-        "open_project" => ok(project::open_project(app, s(a, "projectId").map_err(bad)?)),
-        "list_scenes" => ok(project::list_scenes(app, s(a, "projectId").map_err(bad)?)),
+        "get_project" => ok(project::get_project(app, s_id(a, "projectId").map_err(bad)?)),
+        "open_project" => ok(project::open_project(app, s_id(a, "projectId").map_err(bad)?)),
+        "list_scenes" => ok(project::list_scenes(app, s_id(a, "projectId").map_err(bad)?)),
         "get_scene" => ok(project::get_scene(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneId").map_err(bad)?,
         )),
         "read_script" => ok(script::read_script(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
         )),
         "read_fountain" => ok(script::read_fountain(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
         )),
         "get_app_config" => ok(settings::get_app_config(app).await),
         "get_server_health_all" => ok(settings::get_server_health_all(app).await),
         "check_server_health" => ok(inference::check_server_health(app, s(a, "model").map_err(bad)?).await),
         "detect_hardware" => ok_plain(inference::detect_hardware().await),
         "check_setup" => ok_plain(setup_check::check_setup().await),
-        "read_sidecar" => ok(sidecar::read_sidecar(s(a, "audioPath").map_err(bad)?)),
-        "get_takes" => ok(sidecar::get_takes(s(a, "baseAudioPath").map_err(bad)?)),
+        "read_sidecar" => ok(sidecar::read_sidecar(s_path(&app, a, "audioPath").map_err(bad)?)),
+        "get_takes" => ok(sidecar::get_takes(s_path(&app, a, "baseAudioPath").map_err(bad)?)),
         "list_palette_takes" => ok(sidecar::list_palette_takes(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "characterId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "characterId").map_err(bad)?,
             s(a, "emotion").map_err(bad)?,
         )),
         "list_generated_audio_assets" => ok(sidecar::list_generated_audio_assets(
             app,
-            s(a, "projectId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
         )),
         "get_waveform_peaks" => ok(audio::get_waveform_peaks(
-            s(a, "path").map_err(bad)?,
+            s_path(&app, a, "path").map_err(bad)?,
             u(a, "numPeaks").map_err(bad)? as usize,
         )),
         "get_window_peaks" => ok(audio::get_window_peaks(
-            s(a, "path").map_err(bad)?,
-            u(a, "startMs").map_err(bad)? as f64,
-            u(a, "endMs").map_err(bad)? as f64,
+            s_path(&app, a, "path").map_err(bad)?,
+            f(a, "startMs").map_err(bad)?,
+            f(a, "endMs").map_err(bad)?,
             u(a, "numPeaks").map_err(bad)? as usize,
         )),
-        "get_duration_ms" => ok(audio::get_duration_ms(s(a, "path").map_err(bad)?)),
+        "get_duration_ms" => ok(audio::get_duration_ms(s_path(&app, a, "path").map_err(bad)?)),
         "find_zero_crossings" => ok(audio::find_zero_crossings(
-            s(a, "path").map_err(bad)?,
+            s_path(&app, a, "path").map_err(bad)?,
             u(a, "nearMs").map_err(bad)?,
         )),
-        "read_render_meta" => ok(audio_engine::read_render_meta(s(a, "renderPath").map_err(bad)?).await),
+        "read_render_meta" => ok(audio_engine::read_render_meta(s_path(&app, a, "renderPath").map_err(bad)?).await),
         "list_spatial_spaces" => ok_plain(audio_spatial::list_spatial_spaces()),
         "list_library_characters" => ok(character::list_library_characters(app)),
         "get_library_character" => ok(character::get_library_character(
             app,
-            s(a, "libraryId").map_err(bad)?,
+            s_id(a, "libraryId").map_err(bad)?,
         )),
         "list_rvc_models" => ok(rvc::list_rvc_models(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "characterId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "characterId").map_err(bad)?,
         )
         .await),
         "get_corpus_status" => ok(rvc::get_corpus_status(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "characterId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "characterId").map_err(bad)?,
         )
         .await),
 
@@ -456,91 +536,104 @@ async fn dispatch(
         "update_project" => ok(project::update_project(app, de(a, "project").map_err(bad)?)),
         "create_scene" => ok(project::create_scene(
             app,
-            s(a, "projectId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
             s(a, "title").map_err(bad)?,
             opt_s(a, "description"),
             opt_s(a, "location"),
             u(a, "index").map_err(bad)? as u32,
         )),
+        "get_rvc_model_info" => ok(rvc::get_rvc_model_info(
+            app,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "characterId").map_err(bad)?,
+        ).await),
+        "get_corpus_emotion_counts" => ok(corpus::get_corpus_emotion_counts(
+            app,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "characterId").map_err(bad)?,
+        ).await),
+        "get_corpus_job_status" => ok(corpus::get_corpus_job_status(
+            s(a, "jobId").map_err(bad)?,
+        ).await),
         "update_scene" => ok(project::update_scene(
             app,
-            s(a, "projectId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
             de(a, "scene").map_err(bad)?,
         )),
         "write_script" => ok(script::write_script(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             de(a, "rows").map_err(bad)?,
         )),
         "update_script_row" => ok(script::update_script_row(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "fields").map_err(bad)?,
         )),
         "write_fountain" => ok(script::write_fountain(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             s(a, "text").map_err(bad)?,
         )),
         "update_sidecar_qa" => ok(sidecar::update_sidecar_qa(
-            s(a, "audioPath").map_err(bad)?,
+            s_path(&app, a, "audioPath").map_err(bad)?,
             s(a, "qaStatus").map_err(bad)?,
             s(a, "qaNotes").map_err(bad)?,
         )),
         "submit_tts_custom_voice" => ok(inference::submit_tts_custom_voice(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "params").map_err(bad)?,
         )
         .await),
         "submit_tts_voice_design" => ok(inference::submit_tts_voice_design(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "params").map_err(bad)?,
         )
         .await),
         "submit_tts_voice_clone" => ok(inference::submit_tts_voice_clone(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "params").map_err(bad)?,
         )
         .await),
         "submit_sfx_t2a" => ok(inference::submit_sfx_t2a(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "params").map_err(bad)?,
         )
         .await),
         "submit_music_text2music" => ok(inference::submit_music_text2music(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             u(a, "rowIndex").map_err(bad)? as usize,
             de(a, "params").map_err(bad)?,
         )
         .await),
         "render_scene" => ok(audio_engine::render_scene(
             app,
-            s(a, "projectId").map_err(bad)?,
-            s(a, "sceneSlug").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
+            s_id(a, "sceneSlug").map_err(bad)?,
             a.get("targetLufs").and_then(Value::as_f64).map(|f| f as f32),
         )
         .await),
         "render_episode" => ok(audio_engine::render_episode(
             app,
-            s(a, "projectId").map_err(bad)?,
+            s_id(a, "projectId").map_err(bad)?,
             u(a, "crossfadeMs").map_err(bad)?,
             a.get("targetLufs").and_then(Value::as_f64).map(|f| f as f32),
             a.get("sceneSlugs")
@@ -568,4 +661,56 @@ async fn dispatch(
     };
 
     out.map_err(|m| (StatusCode::BAD_REQUEST, m))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn s_id_accepts_a_plain_component() {
+        let v = json!({ "projectId": "3f2504e0-4f89-11d3-9a0c-0305e82c3301" });
+        assert!(s_id(&v, "projectId").is_ok());
+        let v = json!({ "sceneSlug": "03_the_return" });
+        assert_eq!(s_id(&v, "sceneSlug").unwrap(), "03_the_return");
+    }
+
+    #[test]
+    fn s_id_refuses_traversal_and_separators() {
+        for bad in [
+            "../../../etc",
+            "..",
+            ".",
+            "",
+            "a/b",
+            "/abs",
+            "a\\b",
+        ] {
+            let v = json!({ "sceneSlug": bad });
+            assert!(
+                s_id(&v, "sceneSlug").is_err(),
+                "{bad:?} should be refused as a scene slug",
+            );
+        }
+    }
+
+    #[test]
+    fn f_accepts_fractional_and_integral_numbers() {
+        // Clip Studio sends float viewport bounds; `u` rejected them outright.
+        let v = json!({ "startMs": 1234.56, "endMs": 2000 });
+        assert!((f(&v, "startMs").unwrap() - 1234.56).abs() < 1e-9);
+        assert!((f(&v, "endMs").unwrap() - 2000.0).abs() < 1e-9);
+        assert!(f(&json!({}), "startMs").is_err());
+    }
+
+    #[test]
+    fn static_path_traversal_segments_are_detectable() {
+        // Mirrors the guard in `static_assets`.
+        let refuse = |rel: &str| rel.split('/').any(|seg| seg == ".." || seg == ".");
+        assert!(refuse("../../etc/passwd"));
+        assert!(refuse("assets/../../secret"));
+        assert!(!refuse("assets/index-abc123.js"));
+        assert!(!refuse("index.html"));
+    }
 }

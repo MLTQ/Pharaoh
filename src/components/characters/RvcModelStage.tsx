@@ -19,8 +19,13 @@
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import { invoke } from "../../lib/transport";
 import type { Character } from "../../lib/types";
+import {
+  getRvcModelInfo,
+  getRvcJob,
+  submitRvcTrain,
+  type RvcModelDetail,
+} from "../../lib/tauriCommands";
 
 // ── Types ────────────────────────────────────────────────────────────────────
 
@@ -32,24 +37,7 @@ export interface RvcModelStageProps {
   onModelTrained: () => void;
 }
 
-interface RvcModelInfo {
-  pth_path: string;
-  index_path: string | null;
-  pth_size_bytes: number;
-  trained_at: string;
-  corpus_count: number;
-  corpus_duration_ms: number;
-}
-
 /** Shape returned by GET /jobs/{id} on the RVC server (via get_rvc_job Tauri cmd). */
-interface RvcJobResponse {
-  status: "pending" | "running" | "complete" | "failed";
-  progress: number;         // 0..1
-  output_path: string | null;
-  error: string | null;
-  message: string | null;   // current stage description, e.g. "Training… 42/100 steps"
-}
-
 interface RvcParams {
   pitchShift: number;    // -12 to +12 semitones
   indexRate: number;     // 0 to 1
@@ -234,7 +222,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
   corpusReady,
   onModelTrained,
 }) => {
-  const [modelInfo, setModelInfo]           = useState<RvcModelInfo | null>(null);
+  const [modelInfo, setModelInfo]           = useState<RvcModelDetail | null>(null);
   const [isTraining, setIsTraining]         = useState(false);
   const [trainProgress, setTrainProgress]   = useState<number>(0);   // 0..1
   const [trainMessage, setTrainMessage]     = useState<string | null>(null);
@@ -253,11 +241,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
   // Load existing model info on mount
   const fetchModelInfo = useCallback(async () => {
     try {
-      const info = await invoke<RvcModelInfo | null>("get_rvc_model_info", {
-        projectId,
-        characterId: character.id,
-      });
-      setModelInfo(info);
+      setModelInfo(await getRvcModelInfo({ projectId, characterId: character.id }));
     } catch {
       setModelInfo(null);
     }
@@ -276,9 +260,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
     const poll = async () => {
       while (!pollCancelRef.current) {
         try {
-          const resp = await invoke<RvcJobResponse>("get_rvc_job", {
-            jobId: activeJobId,
-          });
+          const resp = await getRvcJob(activeJobId);
 
           if (pollCancelRef.current) break;
 
@@ -326,7 +308,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
     setTrainMessage(null);
 
     try {
-      const jobId = await invoke<string>("submit_rvc_train", {
+      const jobId = await submitRvcTrain({
         projectId,
         characterId: character.id,
         characterName: character.name.toLowerCase().replace(/\s+/g, "_"),
