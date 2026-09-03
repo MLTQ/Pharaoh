@@ -310,12 +310,20 @@ pub fn read_json<T: serde::de::DeserializeOwned>(path: &Path) -> Result<T> {
     Ok(serde_json::from_str(&data)?)
 }
 
+/// Write JSON atomically: serialize to a sibling temp file, then rename.
+///
+/// `project.json` and `storyboard.json` went through a plain `fs::write`, so a
+/// crash or a full disk mid-write left a truncated file and lost the project.
+/// The CSV, sidecar and fountain writers already used temp+rename; this brings
+/// the JSON writer in line.
 pub fn write_json<T: serde::Serialize>(path: &Path, value: &T) -> Result<()> {
     let json = serde_json::to_string_pretty(value)?;
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent)?;
     }
-    std::fs::write(path, json)?;
+    let tmp_path = path.with_extension("json.tmp");
+    std::fs::write(&tmp_path, json)?;
+    std::fs::rename(&tmp_path, path)?;
     Ok(())
 }
 

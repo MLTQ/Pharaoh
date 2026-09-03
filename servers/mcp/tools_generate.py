@@ -78,7 +78,11 @@ def generate_tts(
 
     # ── Chatterbox routing (auto, based on character voice_assignment) ──────────
     char_id = row.get("character", "")
+    chatterbox_ref = None   # (character_name, resolved_ref, ref_transcript)
     if char_id:
+        # Deciding *whether* this row routes to Chatterbox is best-effort: a
+        # project that cannot be read just means we fall through to Qwen, the
+        # same as a character with no Chatterbox assignment.
         try:
             project = _project_json(project_id)
             character = next(
@@ -98,19 +102,40 @@ def generate_tts(
                     if entry and entry.get("ref_audio_path"):
                         # Resolve relative paths (Pharaoh-1qp) against the
                         # character's bundle dir before uploading.
-                        resolved_ref = _resolve_voice_path(
-                            project_id, character["id"], entry["ref_audio_path"]
+                        chatterbox_ref = (
+                            character.get("name", char_id),
+                            _resolve_voice_path(
+                                project_id, character["id"], entry["ref_audio_path"]
+                            ),
+                            entry.get("ref_transcript") or "",
                         )
-                        result = _post("chatterbox", "/generate/clone", {
-                            "text": row["prompt"],
-                            "ref_audio_path": resolved_ref,
-                            "ref_transcript": entry.get("ref_transcript") or "",
-                            "seed": seed,
-                            "output_path": output_path,
-                        }, upload_fields=("ref_audio_path",))
-                        return json.dumps(result)
         except Exception as exc:
-            log.warning(f"Chatterbox auto-routing failed, falling back to Qwen3: {exc}")
+            log.warning(f"Could not check Chatterbox routing for {char_id}: {exc}")
+
+    # Once we know the row *is* Chatterbox-routed, a failure is fatal. Falling
+    # through to Qwen here returned a job_id and the preset speaker's voice with
+    # no signal that the character's cloned voice was not used.
+    if chatterbox_ref is not None:
+        char_name, resolved_ref, ref_transcript = chatterbox_ref
+        try:
+            return json.dumps(_post("chatterbox", "/generate/clone", {
+                "text": row["prompt"],
+                "ref_audio_path": resolved_ref,
+                "ref_transcript": ref_transcript,
+                "seed": seed,
+                "output_path": output_path,
+            }, upload_fields=("ref_audio_path",)))
+        except Exception as exc:
+            log.warning(f"Chatterbox generation failed for {char_name}: {exc}")
+            return json.dumps({
+                "error": (
+                    f"character '{char_name}' is configured for the Chatterbox "
+                    f"pipeline but the request failed: {exc}. Check the "
+                    f"Chatterbox server (port 18005) with server_health, or "
+                    f"pass speaker=... to synthesise with a Qwen preset voice "
+                    f"on purpose."
+                )
+            })
 
     if voice_description:
         # Voice Design mode: synthesise voice from natural-language description

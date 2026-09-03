@@ -86,7 +86,42 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
         output_path = str(p.parent / f"{p.stem}_take{take_idx}{p.suffix}")
 
     model = meta.get("model", "")
-    if "qwen" in model.lower() or "tts" in model.lower():
+    lowered = model.lower()
+
+    # Route by model family, and refuse anything this tool cannot regenerate.
+    # The old chain fell through to the SFX branch for everything unmatched, so
+    # chatterbox, rvc, audiosr and clip-studio assets were re-submitted to Woosh
+    # — and a "tts-reference-import" asset (from import_audio) matched the "tts"
+    # substring and got re-synthesised as speech over the writer's own audio.
+    _UNSUPPORTED = {
+        "tts-reference-import": (
+            "this asset was imported, not generated — there are no generation "
+            "parameters to re-run. Use import_audio again with a new source file."
+        ),
+        "clip-studio": (
+            "this asset was produced by Clip Studio edits. Re-run process_clip "
+            "on the source asset instead."
+        ),
+        "audiosr": (
+            "this asset is an upscale of another take. Re-run upscale_audio on "
+            "the source asset instead."
+        ),
+        "rvc": (
+            "this asset is an RVC conversion. Re-run rvc_convert on the source "
+            "Chatterbox take instead."
+        ),
+        "chatterbox": (
+            "regenerating a Chatterbox take needs its palette reference. Use "
+            "generate_chatterbox with the character and emotion instead."
+        ),
+    }
+    for marker, reason in _UNSUPPORTED.items():
+        if marker in lowered:
+            return json.dumps({
+                "error": f"cannot regenerate asset with model '{model}': {reason}"
+            })
+
+    if "qwen" in lowered or "tts" in lowered:
         return json.dumps(_post("tts", "/generate/custom_voice", {
             "text": meta.get("prompt", ""),
             "speaker": meta.get("speaker") or "Vivian",
@@ -97,7 +132,7 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "max_new_tokens": meta.get("max_new_tokens", 2048),
             "output_path": output_path,
         }))
-    elif "ace" in model.lower() or "music" in model.lower():
+    elif "ace" in lowered or "music" in lowered:
         return json.dumps(_post("music", "/generate/text2music", {
             "caption": meta.get("prompt", ""),
             "lyrics": "",
@@ -108,7 +143,7 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "batch_size": 1,
             "output_path": output_path,
         }))
-    else:
+    elif "woosh" in lowered or "sfx" in lowered or "audioldm" in lowered:
         return json.dumps(_post("sfx", "/generate/t2a", {
             "prompt": meta.get("prompt", ""),
             "duration_seconds": (meta.get("duration_actual_ms") or 3000) / 1000,
@@ -117,6 +152,14 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "seed": meta.get("seed", 0),
             "output_path": output_path,
         }))
+    else:
+        return json.dumps({
+            "error": (
+                f"unrecognised model '{model}' — regenerate_asset does not know "
+                f"which server produced this asset. Known families: qwen/tts, "
+                f"ace/music, woosh/sfx/audioldm."
+            )
+        })
 
 
 # ── Asset metadata & take management ─────────────────────────────────────────

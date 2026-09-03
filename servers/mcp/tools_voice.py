@@ -477,7 +477,7 @@ def rvc_convert(
     - A/B compare Chatterbox-only vs Chatterbox+RVC output
 
     The character must have a trained RVC model (Stage 4 complete).
-    generate_tts() applies this automatically when rvc_enabled is true.
+    call this after generate_tts() when the character's production_pipeline is 'chatterbox+rvc' — generate_tts does NOT run RVC itself.
 
     Args:
         input_path:   Absolute path to Chatterbox output WAV.

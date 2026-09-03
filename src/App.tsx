@@ -186,10 +186,17 @@ export default function App() {
     return () => window.removeEventListener("keydown", onKey);
   }, [scenes, activeSceneNo, audioPlayingPath, setActiveScene, stopAudio]);
 
+  // initListeners resolves asynchronously, so under StrictMode the cleanup runs
+  // while `unlisten` is still null and the first registration leaks — every job
+  // event then fires twice in dev. Track cancellation and unlisten on resolve.
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
-    initListeners().then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    initListeners().then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   // Reload project from disk whenever the window regains focus — this keeps
@@ -202,9 +209,13 @@ export default function App() {
   }, [realProjectId, reloadProjectFromDisk]);
 
   useEffect(() => {
+    let cancelled = false;
     let unlisten: (() => void) | null = null;
-    initModelListeners().then((fn) => { unlisten = fn; });
-    return () => { unlisten?.(); };
+    initModelListeners().then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+    return () => { cancelled = true; unlisten?.(); };
   }, []);
 
   // Gruve multiplayer: join the shared session room (harmless when no agent

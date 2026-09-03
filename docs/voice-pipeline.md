@@ -33,7 +33,7 @@ STAGE 2 — EMOTIONAL PALETTE
   Approve one reference WAV per state.
   Goal: capture how this character sounds across their emotional range.
 
-       ↓ AudioSR (24 kHz → 48 kHz) applied to each palette reference
+       ↓ AudioSR (24 kHz → 48 kHz) — run upscale_audio on each palette reference
 
 STAGE 3 — CHATTERBOX CORPUS
   Chatterbox Turbo clones each palette reference and generates 50–100 takes
@@ -44,7 +44,7 @@ STAGE 3 — CHATTERBOX CORPUS
   with tags intact, consistent timbre (from the palette refs), and varied
   prosodic texture.
 
-       ↓ AudioSR on each corpus WAV
+       ↓ AudioSR on each corpus WAV — run upscale_audio per file
 
 STAGE 4 — RVC MODEL TRAINING
   RVC (Retrieval-based Voice Conversion) trains on the Chatterbox corpus.
@@ -186,7 +186,7 @@ rvc_convert(
     output_path="/path/to/rvc_output.wav",
 )
 
-# 5. Generate production lines (generate_tts now routes through RVC automatically)
+# 5. Generate production lines (Chatterbox clone; run rvc_convert after)
 generate_tts(project_id="...", scene_slug="01_the_archive", row_index=3)
 ```
 
@@ -233,3 +233,18 @@ Start the RVC server:
 cd inference && PHARAOH_INSTALL_RVC=1 ./setup.sh   # first time only
 ./.venv-rvc/bin/python rvc_server.py
 ```
+
+## Automation status
+
+Two steps in this document are **manual today**, and were previously described
+as automatic:
+
+- `generate_tts` routes a Chatterbox-assigned character to the Chatterbox server,
+  but does **not** then run RVC. Call `rvc_convert` on the resulting take
+  yourself when the character's `production_pipeline` is `chatterbox+rvc`.
+- AudioSR is **not** applied automatically to palette references or corpus WAVs.
+  `build_corpus` generates takes only. Run `upscale_audio` on the files you want
+  upscaled.
+
+Both are tracked as follow-up work; the arrows above show the intended pipeline,
+not what runs unattended.

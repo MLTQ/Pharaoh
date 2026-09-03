@@ -18,11 +18,13 @@ Pharaoh is a Tauri 2 desktop app (React + TypeScript frontend, Rust backend) con
 
 | Port | Service | Models / work |
 |------|---------|---------------|
-| 18000 | MCP | Agent control-plane — no models, proxies to 18001–18004 |
+| 18000 | MCP | Agent control-plane — no models, proxies to 18001–18006 |
 | 18001 | TTS | Qwen3-TTS CustomVoice, VoiceDesign, and voice clone probes |
 | 18002 | SFX | Woosh short foley plus optional AudioLDM long soundscapes |
 | 18003 | Music | ACE-Step score/music generation |
 | 18004 | Post | Optional AudioSR neural upscaling |
+| 18005 | Chatterbox | Chatterbox voice clone (stage 3 of the voice pipeline) |
+| 18006 | RVC | Applio voice conversion and model training (stage 4) |
 
 The GUI can run locally while the Python servers run on another machine, as long as both sides can address the same audio paths. Server URLs are editable in Settings and through the CLI.
 
@@ -32,7 +34,7 @@ The GUI can run locally while the Python servers run on another machine, as long
 - Write/Direct/Mix composition workflow with a Fountain scene editor, syntax-aware audio-drama cues, and live compilation back to `script.csv`.
 - Anthropic-backed scene drafting/revision from project context when `ANTHROPIC_API_KEY` (or the configured env var) is available.
 - Dialogue generation through Qwen CustomVoice with separate editable spoken `line` and delivery `direction` (`instruct`) fields.
-- Character Designer for cast records, voice assignments, VoiceDesign probes, clone probes, and reusable reference clips.
+- Cast view listing character records and their voice assignments. All voice editing — VoiceDesign probes, clone references, emotional palette, corpus and RVC model — happens in the Character Library.
 - SFX generation through Woosh for short foley and AudioLDM for long ambiences/sound beds.
 - Score generation through ACE-Step with duration, BPM, key, lyrics, reference audio, seed, and model controls.
 - Persisted generated-asset lists for dialogue, SFX, and score pages; pages show real sidecar-indexed takes, not mock variations.
@@ -177,7 +179,7 @@ The scene writer supports a practical audio-drama Fountain subset:
 
 ### Generation Pages
 
-- Dialogue uses Qwen CustomVoice for production lines so delivery direction can be sent as `instruct`. Voice clone/design remain in Character Designer for probes and reference building.
+- Dialogue uses Qwen CustomVoice for production lines so delivery direction can be sent as `instruct`. Voice clone/design probes and reference building live in the Character Library.
 - SFX exposes backend, model variant, duration, steps, seed, CFG/guidance, candidate count, and AudioLDM negative prompt.
 - Music exposes caption, lyrics, duration, BPM, key, language, LM size, diffusion steps, thinking mode, reference audio, seed, and batch size.
 - Each generation page lists current jobs plus persisted sidecar assets for the selected scene.
@@ -190,7 +192,7 @@ The scene writer supports a practical audio-drama Fountain subset:
 
 - Audio Upscale submits AudioSR jobs to the Post server and writes enhanced 48 kHz child assets next to the source.
 - Clip Studio imports arbitrary source audio, shows long clips with zoom/pan, supports crop handles, fade-envelope handles, gain, highpass/lowpass, LUFS normalization, and row assignment.
-- Cropped/imported clips are sidecar-indexed, so Character Designer can reuse them as clone references.
+- Cropped/imported clips are sidecar-indexed, so the Character Library can reuse them as clone references.
 
 ![Clip Studio — asset list, crop/gain/filter/normalize controls, and the docked waveform editor](images/clip-studio.png)
 
@@ -347,6 +349,11 @@ pip install -r servers/mcp/requirements.txt
 ```
 
 ### What the MCP server exposes
+
+The server registers 49 tools. The table below lists the ones you will reach for
+first; `tools/list` on a connected client returns the full set, including
+project/scene/character CRUD, `write_script`, `spatialize_row`, the Clip Studio
+and import commands, and the corpus/RVC voice pipeline.
 
 **Resources** — read project state without running commands:
 

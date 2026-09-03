@@ -42,95 +42,90 @@ via headless CLI, sharing the same underlying data model and operations.
 ## REPOSITORY STRUCTURE
 
 ```
-~/Code/Pharaoh/
-├── src-tauri/                  # Rust backend (Tauri 2)
+Pharaoh/
+├── src-tauri/                  # Rust backend (Tauri 2) — also the CLI binary
 │   ├── src/
-│   │   ├── main.rs
-│   │   ├── commands/
-│   │   │   ├── project.rs      # CRUD for project/scene/clip
-│   │   │   ├── audio.rs        # ffmpeg ops, normalization, render
-│   │   │   ├── inference.rs    # spawn/manage Python servers
-│   │   │   ├── sidecar.rs      # read/write .meta.json files
-│   │   │   └── fs.rs           # file I/O, archive, export
-│   │   ├── audio_engine.rs     # ffmpeg filter_complex builder
-│   │   ├── model_manager.rs    # VRAM tracking, offload logic
-│   │   └── ipc.rs              # event streaming to frontend
+│   │   ├── main.rs             # entry: args → CLI, no args → GUI
+│   │   ├── lib.rs              # Tauri builder + generate_handler! (78 commands)
+│   │   ├── models.rs           # every serialized type + AppState
+│   │   ├── app_support.rs      # paths, project/script I/O, wav_info, asset binding
+│   │   ├── fountain.rs         # Fountain parse/serialize
+│   │   ├── share.rs            # Gruve share server (static + HTTP command mirror)
+│   │   ├── error.rs
+│   │   ├── integration_tests.rs
+│   │   ├── commands/           # the Tauri command surface, one module per domain
+│   │   │   ├── project.rs   script.rs     sidecar.rs
+│   │   │   ├── audio.rs     audio_engine.rs  audio_spatial.rs  audio_enhance.rs
+│   │   │   ├── inference.rs corpus.rs     rvc.rs      character.rs
+│   │   │   ├── llm.rs       settings.rs   setup.rs    setup_check.rs
+│   │   │   └── recording.rs archive.rs
+│   │   └── cli/                # headless subcommands
+│   │       ├── mod.rs          # arg parsing + usage()
+│   │       ├── project.rs   scene_script.rs  character.rs
+│   │       ├── generate.rs  generate_scene.rs  compose.rs
+│   │       └── asset_post.rs llm.rs        helpers.rs  server_setup.rs
 │   └── Cargo.toml
 │
-├── inference/                  # Python inference servers
-│   ├── tts_server.py           # Qwen3-TTS FastAPI server
-│   ├── sfx_server.py           # Woosh FastAPI server
-│   ├── music_server.py         # ACE-Step FastAPI server
-│   ├── requirements.txt
-│   └── README.md
+├── inference/                  # Python inference servers (FastAPI)
+│   ├── _common.py              # shared job store, path remap, /upload, /files
+│   ├── tts_server.py           # 18001 — Qwen3-TTS
+│   ├── sfx_server.py           # 18002 — Woosh + AudioLDM
+│   ├── music_server.py         # 18003 — ACE-Step
+│   ├── post_server.py          # 18004 — AudioSR
+│   ├── chatterbox_server.py    # 18005 — Chatterbox clone
+│   ├── rvc_server.py           # 18006 — RVC convert/train (Applio workers)
+│   ├── setup.sh  start_servers.sh  download_spatial_assets.sh
+│   └── requirements*.txt
+│
+├── servers/mcp/                # MCP control plane (18000) — agent surface
+│   ├── run.py                  # entry point; stdio or SSE
+│   ├── server.py config.py projectfs.py remote.py resources.py
+│   └── tools_*.py              # 49 registered tools
 │
 ├── src/                        # React/TypeScript frontend
-│   ├── main.tsx
-│   ├── App.tsx
-│   ├── store/
-│   │   ├── projectStore.ts     # project, scenes, clips (Zustand)
-│   │   ├── jobStore.ts         # generation job queue
-│   │   ├── playbackStore.ts    # transport state
-│   │   └── modelStore.ts       # model load/VRAM state
-│   ├── components/
-│   │   ├── pyramid/
-│   │   │   ├── PyramidCanvas.tsx
-│   │   │   ├── StoryBibleCard.tsx
-│   │   │   ├── SceneCard.tsx
-│   │   │   └── CompositionView.tsx
-│   │   ├── generators/
-│   │   │   ├── TTSPanel.tsx
-│   │   │   ├── SFXPanel.tsx
-│   │   │   └── MusicPanel.tsx
-│   │   ├── timeline/
-│   │   │   ├── Timeline.tsx        # HTML Canvas, not DOM
-│   │   │   ├── Track.tsx
-│   │   │   ├── Clip.tsx
-│   │   │   └── WaveformCanvas.tsx  # shared peaks renderer
-│   │   └── shared/
-│   │       ├── AssetBrowser.tsx
-│   │       ├── JobQueue.tsx
-│   │       ├── ModelManager.tsx
-│   │       ├── PlaybackBar.tsx
-│   │       └── FinalAssembly.tsx
-│   ├── hooks/
-│   │   ├── useProject.ts
-│   │   ├── usePlayback.ts
-│   │   ├── useInference.ts
-│   │   └── useWaveform.ts
-│   └── lib/
-│       ├── csvParser.ts        # script CSV read/write/update
-│       ├── tauriCommands.ts    # typed invoke() wrappers
-│       └── audioUtils.ts       # duration, time formatting
+│   ├── App.tsx main.tsx styles.css
+│   ├── store/                  # projectStore jobStore modelStore audioStore
+│   │                           # uiStore toastStore peaksStore regenerateStore
+│   │                           # renderMetaStore
+│   ├── lib/                    # transport tauriCommands types fountain
+│   │                           # assetRouting storyShape scenePips errors
+│   │                           # gruveCollab flush
+│   ├── hooks/useGenerateJob.ts
+│   └── components/
+│       ├── pyramid/            # PyramidView StoryBibleView StoryShapeView
+│       ├── timeline/           # CompositionView FountainEditor ScriptCanvas
+│       │                       # SpatializeModal TakesPopover
+│       ├── generators/         # TTSPanel SFXPanel MusicPanel RichDirector
+│       ├── characters/         # CharacterDesignerView CorpusBuilder RvcModelStage
+│       ├── library/            # LibraryView + voice/palette/corpus tabs
+│       ├── post/               # ClipStudioView FinalAssemblyView
+│       ├── launcher/ models/ settings/ upscale/ shared/
 │
-├── cli/                        # Headless agent CLI
-│   ├── main.ts
-│   ├── commands/
-│   │   ├── project.ts
-│   │   ├── generate.ts
-│   │   ├── compose.ts
-│   │   └── render.ts
-│   └── README.md
-│
-└── projects/                   # Default project root
-    └── [project-slug]/
-        ├── project.json
-        ├── story.md
-        ├── storyboard.json
-        ├── scenes/
-        │   └── 03_the_return/
-        │       ├── script.csv
-        │       ├── assets/
-        │       │   ├── mira_line_01.wav
-        │       │   ├── mira_line_01.wav.meta.json
-        │       │   └── ...
-        │       └── render/
-        │           └── scene_03.wav
-        └── output/
-            └── final.wav
+├── tests/                      # pytest over the Python side
+├── scripts/                    # check-invoke-commands.mjs
+├── assets/                     # spatial IR catalog + SOFA HRTF (downloaded)
+├── gruve/                      # Gruve mesh integration kit + JS SDK
+└── docs/voice-pipeline.md
 ```
 
----
+Projects live outside the repo, under `projects_dir` (default
+`~/pharaoh-projects`):
+
+```
+[project-id]/
+├── project.json
+├── storyboard.json
+├── characters/[character_id]/     # voice refs, rvc_corpus/, rvc/
+├── scenes/[scene_slug]/
+│   ├── script.csv
+│   ├── script.fountain
+│   ├── assets/*.wav + *.wav.meta.json
+│   └── render/render.wav
+└── output/final.wav
+```
+
+Every code file has a companion `.md` describing intent, contracts and
+rationale (the modular-docs pattern).
 
 ## DATA MODEL
 
@@ -221,19 +216,29 @@ valley they never drew.
 
 One row per audio event. This is the core working document for each scene.
 
+22 columns, in this order (matching the `ScriptRow` struct in `models.rs` and
+`SCRIPT_FIELDS` in the MCP server's `projectfs.py` — all three must agree):
+
 ```
-scene,track,type,character,prompt,file,start_ms,duration_ms,loop,pan,gain_db,instruct,fade_in_ms,fade_out_ms,reverb_send,emotion,notes
+scene,track,type,character,prompt,file,start_ms,duration_ms,loop,pan,gain_db,
+instruct,fade_in_ms,fade_out_ms,reverb_send,emotion,notes,gain_envelope,
+spatial_azimuth,spatial_elevation,spatial_path,spatial_space
 ```
 
 **Field notes:**
 - `type`: `DIALOGUE | SFX | BED | MUSIC | DIRECTION`
 - `file`: empty string = unresolved; populated = resolved asset path
 - `start_ms`: empty = unresolved (pre-backfill); integer = placed on timeline
-- `duration_ms`: auto-populated from WAV header when `file` is assigned; never set manually
+- `duration_ms`: auto-populated from the WAV header when `file` is assigned; never set manually
 - `loop`: `true` for beds and continuous ambience tracks
-- `pan`: -100 (full left) to 100 (full right)
+- `pan`: L/R amplitude pan, clamped to `-1.0`–`1.0` by the render graph
 - `reverb_send`: 0.0–1.0 wet send amount
 - `emotion`: palette emotion key (e.g. `neutral`, `sardonic`); selects which reference take Chatterbox clones; empty = first palette entry
+- `notes`: free text, and the home of the `id:r-xxx` tag that lets the Fountain editor keep row identity across edits
+- `gain_envelope`: `ms:db` breakpoints for the per-clip gain lane, empty = flat
+- `spatial_azimuth` / `spatial_elevation`: degrees; azimuth 0 = front, 90 = right, 180 = behind. Empty = not spatialized (the clip uses `pan` instead)
+- `spatial_path`: JSON waypoint list for a moving source, empty = static
+- `spatial_space`: room IR slug from `assets/spaces/spaces.json`, empty = anechoic
 - `DIRECTION` rows carry no audio — composition notes only, used by agent
 
 **Example (mixed resolved/unresolved):**
@@ -276,22 +281,24 @@ with identical parameters, and provides full take lineage.
 
 ## INFERENCE SERVER SPEC
 
-Three persistent FastAPI servers, one per model family.
-The Rust backend spawns them on demand and keeps them alive between generations.
-Model weights are loaded once — subsequent generations pay only inference cost.
+Six persistent FastAPI servers, one per model family, plus the MCP control
+plane. They are started out of band by `./inference/start_servers.sh` — the Rust
+backend does not spawn them, it only health-polls and drives them over HTTP.
+Model weights load once; subsequent generations pay only inference cost.
 
-### Ports (configurable in settings.json)
+### Ports (configurable in Settings, or `pharaoh server config-set`)
 
-| Server      | Default port |
-|-------------|-------------|
-| MCP         | 18000       |
-| TTS         | 18001       |
-| SFX         | 18002       |
-| Music       | 18003       |
-| Post        | 18004       |
-| Chatterbox  | 18005       |
+| Server      | Default port | Models |
+|-------------|--------------|--------|
+| MCP         | 18000        | none — agent control plane, proxies to the rest |
+| TTS         | 18001        | Qwen3-TTS CustomVoice / VoiceDesign / VoiceClone |
+| SFX         | 18002        | Woosh (short foley), AudioLDM (long ambience) |
+| Music       | 18003        | ACE-Step |
+| Post        | 18004        | AudioSR upscale |
+| Chatterbox  | 18005        | Chatterbox clone |
+| RVC         | 18006        | Applio convert + train |
 
-### Common endpoints (all three servers)
+### Common endpoints (every generation server)
 
 ```
 GET  /health
@@ -590,264 +597,258 @@ Larger = better planning, slower. Disable for direct control when you know exact
 
 ## RUST BACKEND
 
+> Command inventory below is generated from `generate_handler!` in
+> `src-tauri/src/lib.rs` (78 commands). Run `npm run check:commands` to verify
+> the frontend never calls a name that is not registered there.
+
+### Module map
+
+| Module | Responsibility |
+|--------|----------------|
+| `app_support.rs` | Paths, project/script/JSON I/O, voice-path relativize/absolutize, `wav_info`, asset→row binding |
+| `models.rs` | Every serialized type plus `AppState` |
+| `commands/project.rs` | Project and scene CRUD, on-load migration |
+| `commands/script.rs` | `script.csv` and `script.fountain` read/write |
+| `commands/sidecar.rs` | `.meta.json` read/write, takes, QA status, asset listing |
+| `commands/audio.rs` | Waveform peaks (full + windowed), duration, zero crossings |
+| `commands/audio_engine.rs` | ffmpeg `filter_complex` builder, clip processing, scene and episode render |
+| `commands/audio_spatial.rs` | HRTF/binaural prerender, room IR catalog |
+| `commands/audio_enhance.rs` | AudioSR upscale proxy |
+| `commands/inference.rs` | Server health, model load/unload, generation job submit + poll |
+| `commands/corpus.rs` | Chatterbox corpus build for RVC training (stage 3) |
+| `commands/rvc.rs` | RVC convert/train proxies, corpus and model status (stage 4) |
+| `commands/character.rs` | Character library: save, import, export, corpus import |
+| `commands/llm.rs` | Anthropic scene drafting and storyboard review |
+| `commands/settings.rs` | App config and aggregate server health |
+| `commands/setup.rs`, `setup_check.rs` | Installer invocation and integrity checks |
+| `commands/recording.rs` | CPAL input capture |
+| `commands/archive.rs` | Project zip export |
+| `share.rs` | Gruve share server: static frontend, HTTP mirror of the command surface, Range-aware `/file` |
+| `fountain.rs` | Fountain parse/serialize |
+
+There is no `model_manager.rs` or `ipc.rs`. VRAM is not budgeted or LRU-offloaded
+in Rust; each inference server reports its own `vram_mb` from `/health`, and
+`settings::get_server_health_all` aggregates the seven servers for the status
+bar. Model load/unload is explicit, driven from the Models view.
+
 ### audio_engine.rs
 
 Builds and executes ffmpeg `filter_complex` graphs from a scene's `script.csv`.
-All operations are idempotent — same inputs always produce same output.
-
-**Key operations:**
+Renders are idempotent — the same rows and assets produce the same output.
 
 ```rust
-// Per-clip loudness normalization before composition
-normalize_clip(path: &Path, target_lufs: f32 = -23.0) -> Result<PathBuf>
+// Per-clip processing: trim, gain, fades, filters. Writes a child asset.
+process_clip_asset(app, params: ClipProcessParams) -> Result<String>
 
-// Resample all assets to 48kHz (Qwen3-TTS outputs 24kHz, others 48kHz)
-resample_to_48k(path: &Path) -> Result<PathBuf>
+// Loudness normalization to a target LUFS
+normalize_clip(app, input_path: String, target_lufs: Option<f32>) -> Result<String>
 
-// Read script.csv, build filter_complex, render scene WAV
-render_scene(scene_path: &Path) -> Result<PathBuf>
+// Everything lands at 48kHz (Qwen3-TTS emits 24kHz)
+resample_to_48k(input_path: String, output_path: String) -> Result<()>
 
-// Final assembly with crossfade between scenes
-concat_scenes(paths: Vec<PathBuf>, crossfade_ms: u64) -> Result<PathBuf>
+// Read script.csv, build filter_complex, write scenes/<slug>/render/render.wav
+render_scene(app, project_id, scene_slug, target_lufs: Option<f32>) -> Result<String>
 
-// Auto-ducking: DIALOGUE clips duck BED/MUSIC by configured dB
-// with configurable attack/release curves
-apply_ducking(timeline: &Timeline, duck_db: f32, attack_ms: u64, release_ms: u64)
+// Concatenate scene renders into output/final.wav
+render_episode(app, project_id, crossfade_ms, target_lufs) -> Result<String>
 ```
 
-**filter_complex strategy:** Build graph as a string, write to temp file, pass to
-`ffmpeg -filter_complex_script`. This avoids shell escaping issues with complex graphs
-and keeps the graph readable for debugging.
-
-### model_manager.rs
-
-- Tracks VRAM budget across all three inference servers via `/health` polling
-- On load request: check available VRAM, offload LRU model if needed, then trigger load
-- Health-polls all servers every 30s
-- Emits Tauri events to frontend for live VRAM status bar indicator
-- Configurable VRAM budget ceiling (leave headroom for OS and other apps)
+Ducking is applied inline as a `sidechaincompress` stage in the scene graph
+rather than a separate pass. Spatialized rows are prerendered to binaural
+intermediates by `audio_spatial.rs` before the main graph runs.
 
 ### sidecar.rs
 
 ```rust
 // Atomic write: write to .tmp, then rename (prevents partial writes)
-write_sidecar(audio_path: &Path, params: &SidecarData) -> Result<()>
+write_sidecar(audio_path: String, meta: SidecarMeta) -> Result<()>
+read_sidecar(audio_path: String) -> Result<Option<SidecarMeta>>
 
-// Returns None if no sidecar exists (un-generated asset)
-read_sidecar(audio_path: &Path) -> Result<Option<SidecarData>>
+// All takes for a base filename, ordered by take_index
+get_takes(base_audio_path: String) -> Result<Vec<GeneratedAudioAsset>>
 
-// Discover all takes for a base filename, ordered by take_index
-// e.g. mira_line_01_take1.wav, mira_line_01_take2.wav, ...
-get_takes(base_path: &Path) -> Result<Vec<SidecarData>>
+// QA workflow
+update_sidecar_qa(audio_path: String, status: String, notes: String) -> Result<()>
 ```
 
-### commands/audio.rs (Tauri commands exposed to frontend)
+`app_support::write_json`, `write_script_rows`, the sidecar writer and the
+fountain writer all use temp-file + rename, so a crash mid-write never leaves a
+truncated project file.
 
-```rust
-#[tauri::command]
-get_waveform_peaks(path: String, num_peaks: usize) -> Result<Vec<f32>>
+### Job lifecycle (Rust side)
 
-#[tauri::command]
-get_duration_ms(path: String) -> Result<u64>
-
-#[tauri::command]
-find_zero_crossings(path: String, near_ms: u64) -> Result<Vec<u64>>
-
-#[tauri::command]
-trim_clip(src: String, dst: String, start_ms: u64, end_ms: u64) -> Result<()>
-
-#[tauri::command]
-render_scene(scene_id: String) -> Result<String>  // returns output path
-
-#[tauri::command]
-render_final(project_id: String, crossfade_ms: u64) -> Result<String>
-```
-
----
+`commands/inference.rs` submits to the relevant Python server, gets a `job_id`
+back, and spawns a poll task per job. On completion it writes the sidecar, then
+calls `app_support::bind_generated_asset`, which claims a script row only when
+that row's `file` is empty **and** the row's `type` matches the asset kind
+(speech→DIALOGUE, score→MUSIC, foley→SFX/BED). Progress, completion and failure
+are emitted to the frontend as `job-progress` / `job-complete` / `job-failed`.
 
 ## FRONTEND
 
-### PyramidCanvas.tsx
+### Shell — App.tsx
 
-Main workspace. Three visual zones with explicit zoom state machine.
+The app is organised as *workspaces* (left rail) rather than a zooming pyramid.
+`WORKSPACE_OF` in `lib/types.ts` maps each `ViewId` to its workspace; `App.tsx`
+renders the rail, a per-workspace sidebar, the scene sub-tab strip, the active
+view, and the transport bar.
 
-```typescript
-type ZoomLevel = "full" | "story" | "scene"
-type PyramidState = {
-  zoom: ZoomLevel
-  active_scene_id: string | null
-}
-```
+### pyramid/PyramidView.tsx
 
-Transitions animate at 200ms ease-out. When zoomed into a scene, the middle
-tier collapses to a mini scene strip at the top of the canvas for lateral
-navigation without zooming back out.
+The project overview: story bible at the apex, scene cards below, episode
+timeline at the base. It has a `plates | shape` toggle (the second is
+`StoryShapeView`, a per-scene tension curve) and scales to fit — there is no
+zoom state machine and no animated drill-down.
 
-Zones are separated by thin horizontal rules. The full pyramid view shows all
-three tiers simultaneously; clicking drills down.
+### timeline/CompositionView.tsx
 
-### StoryShapeView.tsx
+The scene workspace, in two modes:
 
-Second projection of pyramid tier II. The `plates | shape` toggle swaps the
-scene plates for a tension curve over the same scenes — one dataset, two views,
-not a separate document.
+- **Write** — `FountainEditor`, a Fountain source editor whose blocks compile
+  back to `script.csv` rows. Row identity survives edits via an `id:` tag tucked
+  into the row's `notes`.
+- **Direct/Mix** — a canvas timeline of clip rectangles with embedded waveforms,
+  drag/trim, per-clip gain lanes, pan, spatial placement and render.
 
-**Renders:** tension axis (REST/MID/PEAK), one draggable node per scene, the
-interpolated curve, a runtime-midpoint marker, and scene labels.
+Peaks are rendered by `shared/atoms.tsx` (`PeaksWave` / `Wave`), backed by the
+`peaksStore` cache over the Rust `get_waveform_peaks` and `get_window_peaks`
+commands. There is no separate `Timeline.tsx` or `WaveformCanvas.tsx`.
 
-**Interactions:**
-- Drag a node vertically → sets `tension`; Shift for fine control
-- Double-click, Backspace, or Delete → clears back to unshaped
-- ↑/↓ → ±0.05 (Shift ±0.01); Enter opens the scene
-- Committed on pointer-up, not per-pixel, so one drag is one `update_scene`
+### Transport — lib/transport.ts
 
-Drag math is delta-based against the plot's screen rect, so the pyramid's CSS
-scale transform never desyncs the pointer from the node.
+Every command call goes through `invoke()` here, which dispatches to Tauri IPC
+in the desktop app and to `POST /invoke/{cmd}` on the share server for mesh
+viewers in a browser. `lib/tauriCommands.ts` holds the typed wrappers.
 
-Curve math lives in `src/lib/storyShape.ts` (pure, no React). It uses monotone
-cubic (Fritsch–Carlson) rather than Catmull-Rom: a plain spline overshoots
-between control points and invents peaks the writer never authored, which is
-the one unacceptable failure for a view whose whole job is showing the shape
-you actually made. Segments bridging unshaped scenes render dashed — an
-interpolation must never read as authored.
-
-### Timeline.tsx
-
-Built on HTML Canvas (not DOM elements) for performance at scale.
-
-**Renders:** track lanes, clip rectangles with embedded waveforms, time ruler,
-playhead cursor, loop region markers.
-
-**Interactions:**
-- Drag clips horizontally → updates `start_ms` in CSV immediately
-- Drag clip left/right edges → calls `trim_clip` Tauri command
-- Click clip → select (shows per-clip controls in sidebar)
-- Right-click clip → context menu: Regenerate, Replace, Properties, Remove
-
-All mutations write back to `script.csv` immediately. No unsaved state.
-
-### WaveformCanvas.tsx
-
-Shared peaks renderer used across the entire app.
-
-```typescript
-type WaveformCanvasProps = {
-  peaks: Float32Array
-  width: number
-  height: number
-  color: string
-  playhead_position?: number  // 0.0-1.0, optional
-}
-```
-
-Used in: timeline clip interiors, asset browser thumbnails, playback bar mini-preview.
-Rendered via Canvas 2D API for performance.
+Mesh viewers reach a deliberately narrower surface: reads are always allowed,
+mutations are gated behind the host's `share_collab` flag, and host-only
+commands (config writes, filesystem imports/exports, recording, library
+deletion) are not mirrored at all.
 
 ### Job lifecycle
 
-```
-1. User triggers generation from any panel
-2. Frontend calls Tauri command (invoke)
-3. Rust POSTs to inference server → receives job_id immediately
-4. Rust polls /jobs/{id} at 500ms intervals
-5. Rust emits Tauri events: job-progress, job-complete, job-failed
-6. Frontend jobStore updates in real time (progress bars, status badges)
-7. On complete:
-   a. Sidecar written with all generation params
-   b. Asset browser refreshes for active scene
-   c. Matching unresolved CSV rows updated (file + duration_ms populated)
-```
+1. A panel calls a `submit_*` command and gets a `job_id`.
+2. `jobStore` adds the job as `running` and renders it in the queue.
+3. Rust polls the Python server and emits `job-progress` events.
+4. On `job-complete` the store marks the job done, refreshes the scene's asset
+   list, and fetches peaks for the new file.
+5. Rust has already written the sidecar and, when the target row is empty and
+   type-compatible, bound the asset to it.
 
 ### State management (Zustand stores)
 
 ```typescript
-// projectStore — source of truth for all project data
+// projectStore — project, scenes, characters, and the active scene
 {
-  project: Project | null
-  scenes: Scene[]
-  active_scene_id: string | null
-  getScene: (id: string) => Scene
-  updateClip: (scene_id, row_index, fields) => void  // writes CSV
+  realProject: Project | null
+  realScenes: Scene[]
+  realProjectId: string | null
+  activeSceneSlug: string | null
+  projectsDir: string
+  characters: Character[]
+  reloadProjectFromDisk: () => Promise<void>
 }
 
-// jobStore — generation job queue
+// jobStore — generation job queue (an array, not a Map)
 {
-  jobs: Map<string, Job>
-  addJob: (job: Job) => void
-  updateJob: (id: string, update: Partial<Job>) => void
+  jobs: Job[]
+  activeTakes: Record<string, string>
+  initListeners: () => Promise<() => void>   // no-op outside Tauri
 }
 
-// playbackStore — transport state
+// modelStore — per-kind load status and health
 {
-  is_playing: boolean
-  context: "clip" | "scene" | "final"
-  context_id: string | null
-  position_ms: number
+  status: Record<ModelKind, ModelStatus>
+  health: Record<ModelKind, ServerHealth | null>
+  loadProgress: Record<ModelKind, number>
 }
 
-// modelStore — model load/VRAM state
-{
-  servers: Map<"tts"|"sfx"|"music", ServerStatus>
-  vram_used_mb: number
-  vram_budget_mb: number
-}
+// audioStore    — single-element playback and transport position
+// uiStore       — active view, workspace, modal state
+// toastStore    — transient notifications
+// peaksStore    — waveform peak cache keyed by path + resolution
+// regenerateStore — hand-off of sidecar params into a generator panel
+// renderMetaStore — LUFS/peak readout for the current render
 ```
 
----
+There is no `playbackStore` — transport state lives in `audioStore`.
 
 ## HEADLESS CLI
 
-All operations available as CLI commands. JSON to stdout, errors to stderr.
-Inference servers are auto-started when CLI is invoked headlessly.
+The same binary is the GUI and the CLI: `pharaoh <args>` runs headless, no args
+opens the window. JSON goes to stdout, errors to stderr.
 
-**Exit codes:** 0 success · 1 generation failure · 2 model unavailable · 3 project not found
+Composition and render go through the same `commands::*` functions the Tauri
+surface uses. Several other areas (asset listing, project listing, scene and
+fountain creation, per-scene generation) still carry their own copies in `cli/`,
+which have drifted from the GUI paths — see Pharaoh-20kp.
+
+**Exit codes:** 0 success, 1 failure. (The finer-grained 2 = model unavailable /
+3 = project not found split described in earlier drafts is not implemented —
+`main.rs` exits 1 on any error.)
+
+Inference servers are **not** auto-started; run `./inference/start_servers.sh`
+first, or point the CLI at remote servers with `pharaoh server config-set`.
+Lifecycle commands are tracked as Pharaoh-wnf.
 
 ```bash
-# Project management
-pharaoh project create --title "The Reach" --llm claude
-pharaoh project list
-pharaoh project status [project_id]
-
-# Story generation (LLM-driven)
-pharaoh story generate [project_id]
-pharaoh storyboard generate [project_id]
-pharaoh storyboard rewrite [project_id]     # Chekhov's Gun continuity pass
-pharaoh script generate [project_id] --scene [scene_id]
-
-# Asset generation
-pharaoh generate tts   --scene [id] --row [n]
-pharaoh generate sfx   --scene [id] --row [n]
-pharaoh generate music --scene [id] --row [n]
-pharaoh generate all   --scene [id]           # all unresolved rows in scene
-
-# QA workflow
-pharaoh qa list       --scene [id] --status unreviewed
-pharaoh qa approve    [asset_path]
-pharaoh qa reject     [asset_path] --notes "too bright, try again"
-pharaoh qa regenerate [asset_path]            # reads sidecar, reruns with same params
-
-# Composition
-pharaoh compose backfill  --scene [id]        # timestamp pass: populate start_ms + duration_ms
-pharaoh compose render    --scene [id]
-pharaoh compose render-all [project_id]
-pharaoh compose final     [project_id] --crossfade 500
-
-# Full pipeline — agent entry point
-pharaoh run [project_id]                      # walks entire pyramid top to bottom
-pharaoh run [project_id] --from storyboard    # resume from a specific stage
-pharaoh run [project_id] --from script        # resume from script generation
-pharaoh run [project_id] --from assets        # resume from asset generation
-pharaoh run [project_id] --from compose       # resume from composition
-pharaoh run [project_id] --scene [id]         # single scene only
+  pharaoh project list
+  pharaoh project status <project_id>
+  pharaoh project create --title <title> [--logline <text>] [--tone <text>]
+  pharaoh project update <project_id> [--title <text>] [--synopsis <text>] [--tone <text>]
+  pharaoh project archive <project_id> [--output <path>]
+  pharaoh scene list <project_id>
+  pharaoh scene get <project_id> <scene_slug_or_id>
+  pharaoh scene create <project_id> --title <title> [--slug <slug>] [--index <n>]
+  pharaoh scene update <project_id> <scene_slug_or_id> [--status draft|generating|assets_ready|composed|rendered]
+  pharaoh script read <project_id> <scene_slug>
+  pharaoh script write <project_id> <scene_slug> <script.csv|script.json>
+  pharaoh script fountain-read <project_id> <scene_slug>
+  pharaoh script fountain-write <project_id> <scene_slug> <script.fountain|-> [--compile true|false]
+  pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
+  pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--space <slug>] [--wet <0-1>] [--clear]
+  pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
+  pharaoh character list <project_id>
+  pharaoh character create <project_id> --name <name> [--description <text>]
+  pharaoh character update <project_id> <character_id> [--name <name>] [--description <text>]
+  pharaoh character delete <project_id> <character_id>
+  pharaoh character voice-set <project_id> <character_id> [--model CustomVoice|VoiceDesign|VoiceClone] [--instruct <text>]
+  pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
+  pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
+  pharaoh server health [tts|sfx|music|post|all]
+  pharaoh server config
+  pharaoh server config-set [--tts-url <url>] [--sfx-url <url>] [--music-url <url>] [--post-url <url>]
+  pharaoh model load <tts|sfx|music|post> [--variant <name>]
+  pharaoh model unload <tts|sfx|music|post>
+  pharaoh asset list <project_id> [--kind tts|sfx|music] [--scene <slug>]
+  pharaoh asset meta <audio_path>
+  pharaoh asset qa <audio_path> --status <status> [--notes <text>]
+  pharaoh asset takes <audio_path>
+  pharaoh asset use <project_id> <scene_slug> <row_index> <audio_path>
+  pharaoh generate tts-custom --text <text> --output-path <wav> [--speaker <name>] [--instruct <text>]
+  pharaoh generate tts-design --text <text> --voice-description <text> --output-path <wav>
+  pharaoh generate tts-clone --text <text> --ref-audio-path <wav> --output-path <wav>
+  pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
+  pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
+  pharaoh compose render scene <project_id> <scene_slug>
+  pharaoh compose meta <render_wav>
+  pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
+  pharaoh llm draft-scene <project_id> <scene_slug> [--model <name>] [--api-key-env <var>] [--write-fountain true|false] [--compile true|false]
+  pharaoh storyboard review <project_id> [--model <name>] [--api-key-env <var>]
+  pharaoh storyboard rewrite <project_id> [--model <name>] [--api-key-env <var>]
+  pharaoh audio peaks <audio_path> <num_peaks>
+  pharaoh audio duration <audio_path>
+  pharaoh audio zero-crossings <audio_path> <near_ms>
+  pharaoh post import <project_id> <source_audio> [--label <text>]
+  pharaoh post process <input_wav> [--start-ms <n>] [--end-ms <n>] [--gain-db <n>] [--fade-in-ms <n>] [--fade-out-ms <n>] [--fade-in-curve tri|qsin|qua] [--fade-out-curve tri|qsin|qua]
+  pharaoh post normalize <input_wav> [--target-lufs -16]
+  pharaoh post resample <input_wav> <output_wav>
+  pharaoh post upscale <input_wav> [--model basic|speech] [--steps 50] [--guidance 3.5] [--seed 0]
+  pharaoh setup status
+  pharaoh setup hardware
+  pharaoh generate row scene <project_id> <scene_slug> <row_index>
+  pharaoh generate all scene <project_id> <scene_slug>
 ```
-
-**Pipeline stages for `pharaoh run`:**
-`story → storyboard → storyboard-rewrite → script → assets → qa → backfill → compose → render → final`
-
-Each stage checks prerequisites before running. A failed stage exits with the
-appropriate code and leaves the project in a resumable state.
-
----
 
 ## BUILD PHASES
 
