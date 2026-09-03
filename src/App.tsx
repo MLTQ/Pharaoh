@@ -20,6 +20,7 @@ import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ProjectChooser } from "./components/launcher/ProjectChooser";
 import { ToastHost } from "./components/shared/ToastHost";
 import { SetupBanner } from "./components/shared/SetupBanner";
+import { ErrorBoundary } from "./components/shared/ErrorBoundary";
 import { useProjectStore } from "./store/projectStore";
 import { useJobStore } from "./store/jobStore";
 import { useUiStore } from "./store/uiStore";
@@ -692,6 +693,7 @@ export default function App() {
         )}
 
         <div style={{ flex: 1, position: "relative", overflow: "hidden" }}>
+        <ErrorBoundary label="This view" resetKey={view}>
         {view === "settings" && <SettingsView />}
         {view === "models"   && <ModelsView />}
         {view === "clip-studio" && <ClipStudioView />}
@@ -744,6 +746,7 @@ export default function App() {
             </div>
           </>
         )}
+        </ErrorBoundary>
         </div>
       </div>
 
@@ -761,9 +764,11 @@ export default function App() {
           ))}
         </div>
         <div className="right-body">
+          <ErrorBoundary label="This panel" resetKey={rightTab}>
           {rightTab === "agent"  && <AgentFeed log={[]} />}
           {rightTab === "assets" && <AssetBrowser assets={assets} />}
           {rightTab === "jobs"   && <JobQueue jobs={jobs} />}
+          </ErrorBoundary>
         </div>
       </div>
 
