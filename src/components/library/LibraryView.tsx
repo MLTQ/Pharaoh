@@ -157,6 +157,15 @@ export const LibraryView: React.FC = () => {
     }
   };
 
+  // Selecting another character replaces the edit buffer, so it needs the same
+  // guard as creating one. Without it, typing a voice description and clicking
+  // a different name in the sidebar discarded the edit with no warning.
+  const handleSelect = (id: string | null) => {
+    if (id === selectedId) return;
+    if (dirty && !window.confirm("Discard unsaved changes to the current character?")) return;
+    setSelectedId(id);
+  };
+
   const handleCreate = async () => {
     if (dirty && !window.confirm("Discard unsaved changes to the current character?")) return;
     setSaving(true);
@@ -297,7 +306,7 @@ export const LibraryView: React.FC = () => {
         importing={importing}
         saving={saving}
         dirty={dirty}
-        onSelect={setSelectedId}
+        onSelect={handleSelect}
         onCreate={handleCreate}
         onImportFile={handleImportFile}
       />
