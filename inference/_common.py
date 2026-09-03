@@ -73,6 +73,24 @@ def new_job_id() -> str:
     return str(uuid.uuid4())
 
 
+def is_server_owned(path: str) -> bool:
+    """
+    Whether `path` lives under this server's own scratch directory.
+
+    GET /files/{job_id} deletes what it serves so the server-output dir does not
+    grow without bound. That is only correct for files the server itself
+    created: in local (same-machine) mode `output_path` is the project asset,
+    so an unconditional delete destroyed the take and its sidecar.
+    """
+    if not path:
+        return False
+    try:
+        Path(path).resolve().relative_to(SERVER_OUTPUT_DIR.resolve())
+        return True
+    except (ValueError, OSError):
+        return False
+
+
 def register_upload_route(app) -> None:
     """Register POST /upload on a FastAPI app.
 
@@ -83,12 +101,18 @@ def register_upload_route(app) -> None:
     Called by every inference server so that remote clients can upload
     input files (ref audio, source audio, etc.) before submitting a job.
     """
-    from fastapi import Query, Request as _Request
+    from fastapi import HTTPException, Query, Request as _Request
 
     @app.post("/upload")
     async def upload_file(request: _Request, filename: str = Query(...)):
         content = await request.body()
-        dest = SERVER_OUTPUT_DIR / "uploads" / filename
+        # Use only the final component of whatever the client sent. Joining the
+        # raw query value let "../../x" escape the uploads directory and write
+        # anywhere the server process could reach.
+        safe = Path(filename).name
+        if not safe or safe in (".", ".."):
+            raise HTTPException(status_code=400, detail="invalid filename")
+        dest = SERVER_OUTPUT_DIR / "uploads" / safe
         dest.parent.mkdir(parents=True, exist_ok=True)
         dest.write_bytes(content)
         return {"server_path": str(dest)}

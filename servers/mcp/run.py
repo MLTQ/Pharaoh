@@ -60,7 +60,13 @@ def main() -> None:
     log.info("Pharaoh MCP server starting (transport=%s, projects=%s)", args.transport, PROJECTS_DIR)
     if args.transport == "sse":
         _add_health_route(mcp)
-        mcp.run(transport="sse", host=args.host, port=args.port)
+        # FastMCP.run() takes only (transport, mount_path) — passing host/port
+        # raised TypeError and the SSE mode never started. Host and port live
+        # on the instance settings, which the transport reads when it builds
+        # its uvicorn config.
+        mcp.settings.host = args.host
+        mcp.settings.port = args.port
+        mcp.run(transport="sse")
     else:
         mcp.run()
 

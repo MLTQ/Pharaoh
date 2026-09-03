@@ -87,15 +87,46 @@ def _script_rows(project_id: str, scene_slug: str) -> list[dict]:
     return [row for row in reader]
 
 
+# Canonical script.csv column order. Must match the Rust `ScriptRow` struct in
+# src-tauri/src/models.rs — the GUI reads and writes all 22 columns, so an
+# MCP-authored script that omits the tail (emotion, gain_envelope, spatial_*)
+# loses those values the moment either side round-trips it.
+SCRIPT_FIELDS = [
+    "scene", "track", "type", "character", "prompt", "file",
+    "start_ms", "duration_ms", "loop", "pan", "gain_db", "instruct",
+    "fade_in_ms", "fade_out_ms", "reverb_send", "emotion", "notes",
+    "gain_envelope", "spatial_azimuth", "spatial_elevation",
+    "spatial_path", "spatial_space",
+]
+
+
 def _write_script_rows(project_id: str, scene_slug: str, rows: list[dict]) -> None:
     path = _scene_dir(project_id, scene_slug) / "script.csv"
     if not rows:
         return
     path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", newline="", encoding="utf-8") as f:
-        writer = csv.DictWriter(f, fieldnames=rows[0].keys())
+
+    # Use the canonical field list, not rows[0].keys(). Keying the header off
+    # the first row meant that update_script_row/spatialize_row adding a column
+    # to any row past the first (spatial_azimuth, emotion, ...) made DictWriter
+    # raise on a key the header lacked — after the file had already been opened
+    # for writing, truncating script.csv to a bare header. Unknown extras are
+    # ignored rather than fatal for the same reason.
+    fieldnames = list(SCRIPT_FIELDS)
+    for row in rows:
+        for key in row:
+            if key not in fieldnames:
+                fieldnames.append(key)
+
+    # Write via a temp file in the same directory and rename, so an error or a
+    # crash mid-write leaves the previous script.csv intact.
+    tmp = path.with_suffix(".csv.tmp")
+    with open(tmp, "w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction="ignore")
         writer.writeheader()
-        writer.writerows(rows)
+        for row in rows:
+            writer.writerow({k: row.get(k, "") for k in fieldnames})
+    tmp.replace(path)
 
 
 def _spatial_space_slugs() -> set[str] | None:

@@ -18,12 +18,22 @@ mcp = FastMCP("pharaoh")
 # FastMCP's SSE app is a Starlette app — mount a health route on it.
 
 def _add_health_route(app_instance: FastMCP) -> None:
-    """Attach a /health GET route to the underlying Starlette app."""
+    """
+    Register a plain GET /health route on the FastMCP app.
+
+    This used to call `app_instance.get_asgi_app()`, which does not exist on the
+    SDK (`sse_app()` is the accessor), and mutate the returned app's route list.
+    Both halves were wrong: the AttributeError was swallowed by the except
+    below, so /health was never mounted, and `sse_app()` builds a fresh
+    Starlette instance per call anyway, so the mutation would have been
+    discarded even if the name had been right. `custom_route` registers on the
+    FastMCP instance itself, which every transport builds its app from.
+    """
     try:
-        from starlette.routing import Route
         from starlette.responses import JSONResponse
 
-        async def health(request):  # noqa: ANN001
+        @app_instance.custom_route("/health", methods=["GET"])
+        async def health(request):  # noqa: ANN001, ARG001
             return JSONResponse({
                 "status": "ok",
                 "model_loaded": True,
@@ -31,8 +41,5 @@ def _add_health_route(app_instance: FastMCP) -> None:
                 "vram_mb": 0,
                 "stub": False,
             })
-
-        sse_app = app_instance.get_asgi_app()  # Starlette instance
-        sse_app.routes.insert(0, Route("/health", health))
     except Exception as exc:
         log.warning("Could not attach /health route: %s", exc)

@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from config import PROJECTS_DIR, log
 from projectfs import (
+    SCRIPT_FIELDS,
     _known_characters,
     _known_scene_slugs,
     _project_dir,
@@ -353,8 +354,7 @@ def create_scene(
     (scene_dir / "assets").mkdir(parents=True, exist_ok=True)
     (scene_dir / "render").mkdir(parents=True, exist_ok=True)
     (scene_dir / "script.csv").write_text(
-        "scene,track,type,character,prompt,file,start_ms,duration_ms,"
-        "loop,pan,gain_db,instruct,fade_in_ms,fade_out_ms,reverb_send,notes\n",
+        ",".join(SCRIPT_FIELDS) + "\n",
         encoding="utf-8",
     )
 
@@ -396,14 +396,9 @@ def write_script(
 
     Returns: {"ok": true, "rows_written": N}
     """
-    FIELDS = [
-        "scene", "track", "type", "character", "prompt", "file",
-        "start_ms", "duration_ms", "loop", "pan", "gain_db", "instruct",
-        "fade_in_ms", "fade_out_ms", "reverb_send", "notes",
-    ]
     normalized = []
     for r in rows:
-        row = {f: r.get(f, "") for f in FIELDS}
+        row = {f: r.get(f, "") for f in SCRIPT_FIELDS}
         if not row["scene"]:
             row["scene"] = scene_slug
         normalized.append(row)

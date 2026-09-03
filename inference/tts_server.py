@@ -26,7 +26,7 @@ from pydantic import BaseModel
 import datetime
 import json
 
-from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path
+from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned
 
 log = logging.getLogger(__name__)
 
@@ -455,6 +455,12 @@ async def download_file(job_id: str) -> FileResponse:
         raise HTTPException(status_code=404, detail="output file not available")
 
     def _cleanup():
+        # Only reap files this server created under server-output/. In local
+        # (same-machine) mode output_path IS the project asset, and deleting it
+        # here destroyed the take and its sidecar the moment anything fetched
+        # /files.
+        if not is_server_owned(output_path):
+            return
         for p in [output_path, output_path + ".meta.json"]:
             try:
                 Path(p).unlink(missing_ok=True)
