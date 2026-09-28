@@ -12,6 +12,7 @@ export interface ChatterboxRvcCardsProps {
   onCheckChatterboxHealth: () => void;
   onChatterboxUrlBlur: () => void;
   onRvcUrlBlur: () => void;
+  onDissectUrlBlur: () => void;
 }
 
 export function ChatterboxRvcCards({
@@ -23,6 +24,7 @@ export function ChatterboxRvcCards({
   onCheckChatterboxHealth,
   onChatterboxUrlBlur,
   onRvcUrlBlur,
+  onDissectUrlBlur,
 }: ChatterboxRvcCardsProps) {
   return (
     <>
@@ -117,38 +119,66 @@ export function ChatterboxRvcCards({
         </div>
       </div>
 
-      {/* ── RVC card ──────────────────────────────────────────────────── */}
+      {/* ── RVC + Dissect cards (split mode only; unified mode derives from host) ── */}
       {splitServers && (
-        <div style={{
-          border: "1px solid var(--line-1)", background: "var(--bg-1)",
-          borderRadius: 3, marginBottom: 14, overflow: "hidden",
-        }}>
-          <div style={{
-            borderBottom: "1px solid var(--line-1)", padding: "12px 16px",
-            display: "flex", alignItems: "center", gap: 10,
-          }}>
-            <span style={{ fontWeight: 600, fontSize: 13 }}>RVC</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:18006</span>
-            <span style={{ flex: 1 }} />
-            <span style={{ fontSize: 11, color: "var(--fg-3)" }}>Voice conversion · Applio v2</span>
-          </div>
-          <div style={{ padding: "14px 16px" }}>
-            <Label>Server URL</Label>
-            <input
-              type="text"
-              value={urls.rvc}
-              onChange={(e) => setUrls((prev) => ({ ...prev, rvc: e.target.value }))}
-              onBlur={onRvcUrlBlur}
-              style={{
-                width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
-                background: "var(--bg-0)", border: "1px solid var(--line-1)",
-                borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
-                boxSizing: "border-box",
-              }}
-            />
-          </div>
-        </div>
+        <>
+          <UrlCard
+            title="RVC" port={18006} subtitle="Voice conversion · Applio v2"
+            value={urls.rvc}
+            onChange={(v) => setUrls((prev) => ({ ...prev, rvc: v }))}
+            onBlur={onRvcUrlBlur}
+          />
+          <UrlCard
+            title="Dissect" port={18007}
+            subtitle="Separation · diarization · ASR — voices from existing recordings"
+            value={urls.dissect}
+            onChange={(v) => setUrls((prev) => ({ ...prev, dissect: v }))}
+            onBlur={onDissectUrlBlur}
+          />
+        </>
       )}
     </>
+  );
+}
+
+/** A server card that only carries a URL field (used in split-servers mode). */
+function UrlCard({ title, port, subtitle, value, onChange, onBlur }: {
+  title: string;
+  port: number;
+  subtitle: string;
+  value: string | undefined;
+  onChange: (v: string) => void;
+  onBlur: () => void;
+}) {
+  return (
+    <div style={{
+      border: "1px solid var(--line-1)", background: "var(--bg-1)",
+      borderRadius: 3, marginBottom: 14, overflow: "hidden",
+    }}>
+      <div style={{
+        borderBottom: "1px solid var(--line-1)", padding: "12px 16px",
+        display: "flex", alignItems: "center", gap: 10,
+      }}>
+        <span style={{ fontWeight: 600, fontSize: 13 }}>{title}</span>
+        <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:{port}</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ fontSize: 11, color: "var(--fg-3)" }}>{subtitle}</span>
+      </div>
+      <div style={{ padding: "14px 16px" }}>
+        <Label>Server URL</Label>
+        <input
+          type="text"
+          value={value ?? ""}
+          onChange={(e) => onChange(e.target.value)}
+          onBlur={onBlur}
+          style={{
+            width: "100%", fontFamily: "var(--font-mono)", fontSize: 11,
+            background: "var(--bg-0)", border: "1px solid var(--line-1)",
+            borderRadius: 2, padding: "5px 8px", color: "var(--fg-1)",
+            boxSizing: "border-box",
+          }}
+        />
+      </div>
+    </div>
   );
 }

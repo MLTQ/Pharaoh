@@ -506,6 +506,7 @@ pub(super) async fn script_import(
             schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
             library_id: None,
             library_version: None,
+            voice_provenance: vec![],
         });
     }
 

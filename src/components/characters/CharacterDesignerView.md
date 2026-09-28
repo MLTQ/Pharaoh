@@ -37,6 +37,9 @@ Per-episode **Cast manifest** (Pharaoh-8xu) — a read-only browser of who's in 
 - **Interacts with**: `listLibraryCharacters`, `importCharacterFromLibrary`, `projectStore.reloadProjectFromDisk`.
 - **Rationale**: Replaces the old inline-form `+` flow. Library-already-imported entries are shown disabled so you can't accidentally add the same character twice.
 
+### Cast modal: "From an existing recording" (`dissectOpen`)
+- **Does**: Third option in the Add-character modal. Opens [DissectImportModal](../dissect/DissectImportModal.md) with `projectId = realProjectId`, so newly created library characters can be dropped straight into this episode's cast; reloads the project from disk when that happens.
+
 ### `handleSaveToLibrary`
 - **Does**: Header button that copies the current character bundle to the library via `saveCharacterToLibrary`. Labelled "Save to library" for project-only characters and "Update library" for library-linked ones — same backend call.
 - **Interacts with**: `saveCharacterToLibrary`, `reloadProjectFromDisk` (so the new `library_id` + `library_version` appear on the character).

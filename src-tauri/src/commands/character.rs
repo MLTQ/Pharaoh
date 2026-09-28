@@ -211,7 +211,19 @@ pub fn import_character_from_library(
     library_id: String,
     new_name: Option<String>,
 ) -> Result<Character> {
-    let projects_dir = app_projects_dir(&app)?;
+    import_into_project(&app_projects_dir(&app)?, &project_id, &library_id, new_name)
+}
+
+/// Core of [`import_character_from_library`], callable without an AppHandle
+/// (CLI `dissect assign --project`).
+pub fn import_into_project(
+    projects_dir: &Path,
+    project_id: &str,
+    library_id: &str,
+    new_name: Option<String>,
+) -> Result<Character> {
+    let projects_dir = projects_dir.to_path_buf();
+    let (project_id, library_id) = (project_id.to_string(), library_id.to_string());
     let library_bundle = library_character_dir(&projects_dir, &library_id);
     let library_bundle_file = library_bundle.join(LIBRARY_BUNDLE_FILE);
     if !library_bundle_file.exists() {

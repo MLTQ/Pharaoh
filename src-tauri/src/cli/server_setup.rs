@@ -39,15 +39,17 @@ pub(super) async fn server_health(
         "sfx" => fetch("sfx", config.sfx_url.clone()).await,
         "music" => fetch("music", config.music_url.clone()).await,
         "post" | "audiosr" => fetch("post", config.post_url.clone()).await,
+        "dissect" => fetch("dissect", config.dissect_url.clone()).await,
         "all" => json!({
             "tts": fetch("tts", config.tts_url.clone()).await,
             "sfx": fetch("sfx", config.sfx_url.clone()).await,
             "music": fetch("music", config.music_url.clone()).await,
             "post": fetch("post", config.post_url.clone()).await,
+            "dissect": fetch("dissect", config.dissect_url.clone()).await,
         }),
         other => {
             return Err(Error::Other(format!(
-                "unknown server kind: {} — expected tts, sfx, music, post, or all",
+                "unknown server kind: {} — expected tts, sfx, music, post, dissect, or all",
                 other
             )))
         }
@@ -84,6 +86,9 @@ pub(super) async fn server_config_set(
     }
     if let Some(value) = flag_opt(&flags, "post_url") {
         config.post_url = value;
+    }
+    if let Some(value) = flag_opt(&flags, "dissect_url") {
+        config.dissect_url = value;
     }
     if let Some(value) = flag_opt(&flags, "projects_dir") {
         config.projects_dir = value;

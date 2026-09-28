@@ -193,6 +193,19 @@ export interface Character {
    * Used by the drift indicator (Pharaoh-wpk) to flag project ↔ library divergence.
    */
   library_version?: string | null;
+  /** Present when reference audio was lifted from an existing recording (dissect). */
+  voice_provenance?: VoiceProvenance[];
+}
+
+/** Record of reference audio taken from an existing recording, with the rights confirmation given. */
+export interface VoiceProvenance {
+  kind: "dissect" | string;
+  source_name: string;
+  import_id: string;
+  speaker_id: string;
+  clips: string[];
+  rights_statement: string;
+  rights_confirmed_at: string;
 }
 
 /**
@@ -238,6 +251,7 @@ export interface AppConfig {
   post_url: string;
   chatterbox_url: string;
   rvc_url: string;
+  dissect_url: string;
   tts_public: boolean;
   sfx_public: boolean;
   music_public: boolean;
@@ -265,6 +279,7 @@ export interface AllServerHealth {
   post: ServerHealth | null;
   chatterbox: ServerHealth | null;
   rvc: ServerHealth | null;
+  dissect: ServerHealth | null;
 }
 
 export interface ServerHealth {
@@ -591,4 +606,94 @@ export interface MockAssets {
   dialogue: AssetItem[];
   sfx: AssetItem[];
   music: AssetItem[];
+}
+
+// ── Dissect (voices from an existing recording) ──────────────────────────────
+
+export interface DissectOptions {
+  separate?: boolean;
+  transcribe?: boolean;
+  max_candidates?: number;
+  min_clip_s?: number;
+  max_clip_s?: number;
+  chunk_minutes?: number;
+  link_threshold?: number;
+}
+
+export interface DissectImport {
+  import_id: string;
+  job_id: string;
+  source_path: string;
+  source_name: string;
+  server_url: string;
+  remote: boolean;
+  status: "running" | "complete" | "failed";
+  error?: string | null;
+  created_at: string;
+}
+
+export interface DissectCandidate {
+  id: string;
+  /** Relative to the import dir. */
+  path: string;
+  start: number;
+  end: number;
+  duration: number;
+  transcript: string;
+  level_db: number;
+  /** Dialogue level over music+effects in this span; null when unseparated. */
+  bleed_db: number | null;
+  /** Cosine similarity to the speaker's voice centroid; null in stub mode. */
+  similarity: number | null;
+  score: number;
+}
+
+export interface DissectSpeaker {
+  id: string;
+  label: string;
+  total_speech_s: number;
+  turn_count: number;
+  first_heard_s: number;
+  sample_text: string;
+  candidates: DissectCandidate[];
+}
+
+export interface DissectTurn {
+  speaker: string;
+  start: number;
+  end: number;
+  text: string;
+  overlap: boolean;
+}
+
+export interface DissectManifest {
+  version: number;
+  source_name: string;
+  duration_s: number;
+  stub: boolean;
+  separated: boolean;
+  models: Record<string, string | null>;
+  warnings: string[];
+  stems: Record<string, string>;
+  speakers: DissectSpeaker[];
+  turns: DissectTurn[];
+}
+
+export interface DissectStatus {
+  import_id: string;
+  status: "running" | "complete" | "failed";
+  progress: number;
+  message: string | null;
+  error: string | null;
+  import_dir: string;
+  manifest: DissectManifest | null;
+}
+
+export interface DissectImportSummary {
+  import_id: string;
+  source_name: string;
+  status: string;
+  created_at: string;
+  speaker_count: number | null;
+  duration_s: number | null;
 }

@@ -29,6 +29,11 @@ INSTALL_AUDIOSR="${PHARAOH_INSTALL_AUDIOSR:-0}"
 RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
+DISSECT_VENV="${SCRIPT_DIR}/.venv-dissect"
+INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-0}"
+DISSECT_MODEL_DIR="${PHARAOH_DISSECT_MODEL_DIR:-$HOME/pharaoh-models/dissect}"
+MSST_COMMIT="84b1eac0887756b4f1a9d7a1ff49105939749ed2"
+MSST_RELEASE="https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download/v.1.0.3"
 AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/pharaoh-models/sfx/audioldm}}"
 APPLIO_VENV="${SCRIPT_DIR}/.venv-applio"
 APPLIO_DIR="${PHARAOH_APPLIO_DIR:-${SCRIPT_DIR}/.applio}"
@@ -213,6 +218,41 @@ if [ "${INSTALL_AUDIOSR}" = "1" ]; then
     ok "AudioSR deps synced"
 else
     hint "Optional neural upscaling: PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh"
+fi
+
+# ── Optional dissect (separation + diarization + ASR) ───────────────────────
+step "Dissect env (.venv-dissect, voices from existing recordings)"
+if [ "${INSTALL_DISSECT}" = "1" ]; then
+    if [ ! -d "${DISSECT_VENV}" ]; then
+        uv venv --python 3.12 "${DISSECT_VENV}"
+        ok "Created ${DISSECT_VENV}"
+    else
+        ok "Reusing ${DISSECT_VENV}"
+    fi
+    uv pip install --python "${DISSECT_VENV}/bin/python" \
+        "torch==2.8.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128
+    uv pip install --python "${DISSECT_VENV}/bin/python" Cython packaging
+    uv pip install --python "${DISSECT_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-dissect.txt" \
+        "torch==2.8.0" "torchaudio==2.8.0" \
+        --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
+    ok "Dissect deps synced"
+
+    mkdir -p "${DISSECT_MODEL_DIR}"
+    if [ ! -d "${DISSECT_MODEL_DIR}/msst" ]; then
+        git clone -q https://github.com/ZFTurbo/Music-Source-Separation-Training "${DISSECT_MODEL_DIR}/msst"
+        git -C "${DISSECT_MODEL_DIR}/msst" checkout -q "${MSST_COMMIT}"
+        ok "Cloned separator code → ${DISSECT_MODEL_DIR}/msst"
+    fi
+    for f in config_dnr_bandit_bsrnn_multi_mus64.yaml model_bandit_plus_dnr_sdr_11.47.chpt; do
+        if [ ! -f "${DISSECT_MODEL_DIR}/${f}" ]; then
+            curl -fsSL -o "${DISSECT_MODEL_DIR}/${f}" "${MSST_RELEASE}/${f}"
+            ok "Downloaded ${f}"
+        fi
+    done
+    hint "NeMo models (diarizer, TitaNet, Parakeet) download from Hugging Face on first job."
+    command -v ffmpeg >/dev/null 2>&1 || warn "ffmpeg not found — the dissect server needs it to decode sources."
+else
+    hint "Optional voices-from-recordings: PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh (Linux + NVIDIA GPU)"
 fi
 
 # ── Optional Applio (RVC model training) ────────────────────────────────────

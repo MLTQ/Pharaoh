@@ -11,6 +11,10 @@ import type {
   Character,
   LibraryCharacterSummary,
   SpatialSpace,
+  DissectOptions,
+  DissectImport,
+  DissectStatus,
+  DissectImportSummary,
 } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
@@ -796,3 +800,33 @@ export const importAudioFilesIntoCorpus = (args: {
  */
 export const listSpatialSpaces = (): Promise<SpatialSpace[]> =>
   invoke("list_spatial_spaces");
+
+// ── Dissect: voices from an existing recording ──────────────────────────────
+
+/** Start separating + diarizing a recording. Poll `dissectStatus` with the returned import id. */
+export const dissectSubmit = (sourcePath: string, options?: DissectOptions): Promise<DissectImport> =>
+  invoke("dissect_submit", { sourcePath, options: options ?? null });
+
+export const dissectStatus = (importId: string): Promise<DissectStatus> =>
+  invoke("dissect_status", { importId });
+
+export const listDissectImports = (): Promise<DissectImportSummary[]> =>
+  invoke("list_dissect_imports");
+
+export const deleteDissectImport = (importId: string): Promise<void> =>
+  invoke("delete_dissect_import", { importId });
+
+/**
+ * Copy a speaker's chosen clips into a Library character (existing via
+ * `library_id`, or new via `new_name`). Rejected unless `rights_confirmed`.
+ */
+export const dissectAssignSpeaker = (request: {
+  import_id: string;
+  speaker_id: string;
+  candidate_ids: string[];
+  gold_candidate_id?: string | null;
+  library_id?: string | null;
+  new_name?: string | null;
+  rights_confirmed: boolean;
+  rights_statement?: string | null;
+}): Promise<Character> => invoke("dissect_assign_speaker", { request });

@@ -1,13 +1,13 @@
 # ChatterboxRvcCards.tsx
 
 ## Purpose
-Cards for the two servers that are not part of the core `MODELS` lifecycle: Chatterbox Turbo (manual ping health + start instructions) and RVC (URL only, shown in split mode). Pure presentation; state and persistence come from `SettingsView.tsx` via props.
+Cards for the two servers that are not part of the core `MODELS` lifecycle: Chatterbox Turbo (manual ping health + start instructions), and RVC and Dissect (URL only, shown in split mode via the shared `UrlCard`). Pure presentation; state and persistence come from `SettingsView.tsx` via props.
 
 ## Components
 
 ### `ChatterboxRvcCards` / `ChatterboxRvcCardsProps`
 - **Does**: Chatterbox card with click-to-ping health (split mode: URL input + health button; unified: derived URL + ping link) and startup commands; RVC card with a URL input, rendered only when `splitServers` is true.
-- **Interacts with**: `Label` from `settingsShared.tsx`; URL persistence via `onChatterboxUrlBlur`/`onRvcUrlBlur` callbacks; health ping via `onCheckChatterboxHealth`.
+- **Interacts with**: `Label` from `settingsShared.tsx`; URL persistence via `onChatterboxUrlBlur`/`onRvcUrlBlur`/`onDissectUrlBlur` callbacks; health ping via `onCheckChatterboxHealth`.
 - **Rationale**: Chatterbox/RVC are not in `modelStore`'s polled health loop, so their health is manual (`ChatterboxHealth` state owned by `SettingsView.tsx`).
 
 ### `ChatterboxHealth`

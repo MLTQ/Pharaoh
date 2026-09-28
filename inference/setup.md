@@ -28,6 +28,11 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Interacts with**: `post_server.py`, `audio_enhance.rs`, `UpscaleView.tsx`, `requirements-audiosr.txt`.
 - **Rationale**: Neural upscaling is ML work and must stay on the inference host, but it needs its own dependency stack.
 
+### Dissect env section
+- **Does**: With `PHARAOH_INSTALL_DISSECT=1`, creates `.venv-dissect` (Python 3.12), installs torch 2.8 cu128 then `requirements-dissect.txt` (NeMo from a pinned source commit), clones the pinned MSST checkout and downloads the BandIt Plus DnR config + weights into `~/pharaoh-models/dissect`.
+- **Interacts with**: `dissect_server.py`, `dissect_pipeline.py`, `PHARAOH_DISSECT_MODEL_DIR`.
+- **Rationale**: Nemotron-3-Diarization needs NeMo newer than the 3.0.0 wheel, which in turn needs torch ≥ 2.7 — incompatible with the torch 2.6 pins in the other envs.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

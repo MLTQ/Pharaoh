@@ -46,7 +46,7 @@ Pharaoh/
 ├── src-tauri/                  # Rust backend (Tauri 2) — also the CLI binary
 │   ├── src/
 │   │   ├── main.rs             # entry: args → CLI, no args → GUI
-│   │   ├── lib.rs              # Tauri builder + generate_handler! (78 commands)
+│   │   ├── lib.rs              # Tauri builder + generate_handler! (83 commands)
 │   │   ├── models.rs           # every serialized type + AppState
 │   │   ├── app_support.rs      # paths, project/script I/O, wav_info, asset binding
 │   │   ├── fountain.rs         # Fountain parse/serialize
@@ -74,6 +74,8 @@ Pharaoh/
 │   ├── post_server.py          # 18004 — AudioSR
 │   ├── chatterbox_server.py    # 18005 — Chatterbox clone
 │   ├── rvc_server.py           # 18006 — RVC convert/train (Applio workers)
+│   ├── dissect_server.py       # 18007 — voices from existing recordings
+│   ├── dissect_pipeline.py     #         separate → diarize → transcribe → pick clips
 │   ├── setup.sh  start_servers.sh  download_spatial_assets.sh
 │   └── requirements*.txt
 │
@@ -281,7 +283,7 @@ with identical parameters, and provides full take lineage.
 
 ## INFERENCE SERVER SPEC
 
-Six persistent FastAPI servers, one per model family, plus the MCP control
+Seven persistent FastAPI servers, one per model family, plus the MCP control
 plane. They are started out of band by `./inference/start_servers.sh` — the Rust
 backend does not spawn them, it only health-polls and drives them over HTTP.
 Model weights load once; subsequent generations pay only inference cost.
@@ -297,6 +299,7 @@ Model weights load once; subsequent generations pay only inference cost.
 | Post        | 18004        | AudioSR upscale |
 | Chatterbox  | 18005        | Chatterbox clone |
 | RVC         | 18006        | Applio convert + train |
+| Dissect     | 18007        | BandIt Plus (DnR) + Nemotron-3-Diarization + TitaNet + Parakeet TDT v3 |
 
 ### Common endpoints (every generation server)
 
@@ -593,12 +596,57 @@ Larger = better planning, slower. Disable for direct control when you know exact
 - LM planner is bypassed automatically for cover/repaint/extract (source audio replaces planning)
 - Vocal synthesis quality is coarse — use for underscore and ambience, not sung dialogue
 
+### Dissect server — port 18007
+
+Takes an existing audio drama apart so its voices can be cloned into Library
+characters. Lives at `inference/dissect_server.py` (HTTP/job shell) and
+`inference/dissect_pipeline.py` (the stages). Isolated venv:
+`inference/.venv-dissect` — Python 3.12, NeMo **from source** (the
+Nemotron-3-Diarization RoPE encoder is not in the nemo-toolkit 3.0.0 wheel),
+torch 2.8 cu128. Install with `PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh`.
+
+```
+POST /generate/dissect
+     body: { input_path, output_path?, separate?, transcribe?, max_candidates?,
+             min_clip_s?, max_clip_s?, chunk_minutes?, link_threshold?, job_id? }
+GET  /jobs/{job_id}        → adds `message` (current stage, human-readable)
+GET  /files/{job_id}       → zip of the import directory (remote clients)
+POST /load / POST /unload / GET /health (+ stub, separator_ready, loaded)
+```
+
+**Pipeline:** decode (ffmpeg) → BandIt Plus dialogue / music / effects
+separation at 44.1 kHz → Nemotron-3-Diarization on the 16 kHz dialogue stem in
+`chunk_minutes` chunks (≤ 8 speakers per chunk) → TitaNet centroids link
+chunk-local speakers → Parakeet TDT 0.6B v3 transcribes every turn with word
+timestamps → per speaker, the best non-overlapping 3–15 s *solo* windows, cut
+at word gaps, scored on length, dialogue-over-bed level, speech rate and voice
+similarity → exported 48 kHz / 24-bit.
+
+**Output** (an *import*, relocatable — every path relative):
+`manifest.json` · `stems/{dialogue,music,effects}.wav` · `candidates/S{n}_c{k}.wav`.
+Imports live at `<projects_dir>/_library/imports/<import_id>/` with an
+`import.json` written by the Rust side.
+
+**Rights gate:** `dissect_assign_speaker` (Rust) refuses unless
+`rights_confirmed = true`, and stamps a `voice_provenance` entry (source file,
+import, speaker, clips, the exact statement confirmed, timestamp) on the
+character. The GUI and `pharaoh dissect assign --confirm-rights yes` both go
+through it.
+
+**Known gotchas:**
+- Linux + NVIDIA. ~5.5 GB VRAM for the NeMo models plus the separator.
+- A narrator who also reads a character is usually one speaker to both the
+  diarizer and TitaNet; the user picks clips by hand. Split/merge tools are a follow-up.
+- License: Nemotron-3-Diarization is OpenMDW-1.1. The BandIt Plus checkpoint is
+  trained on Divide-and-Remaster — verify its terms before commercial use, as with Woosh.
+- ufw on the inference host must allow 18007 for LAN clients.
+
 ---
 
 ## RUST BACKEND
 
 > Command inventory below is generated from `generate_handler!` in
-> `src-tauri/src/lib.rs` (78 commands). Run `npm run check:commands` to verify
+> `src-tauri/src/lib.rs` (83 commands). Run `npm run check:commands` to verify
 > the frontend never calls a name that is not registered there.
 
 ### Module map
@@ -618,6 +666,7 @@ Larger = better planning, slower. Disable for direct control when you know exact
 | `commands/corpus.rs` | Chatterbox corpus build for RVC training (stage 3) |
 | `commands/rvc.rs` | RVC convert/train proxies, corpus and model status (stage 4) |
 | `commands/character.rs` | Character library: save, import, export, corpus import |
+| `commands/dissect.rs` | Dissect imports: submit/poll (upload + bundle download when remote), list/delete, assign speaker → Library character behind the rights gate |
 | `commands/llm.rs` | Anthropic scene drafting and storyboard review |
 | `commands/settings.rs` | App config and aggregate server health |
 | `commands/setup.rs`, `setup_check.rs` | Installer invocation and integrity checks |
@@ -628,7 +677,7 @@ Larger = better planning, slower. Disable for direct control when you know exact
 
 There is no `model_manager.rs` or `ipc.rs`. VRAM is not budgeted or LRU-offloaded
 in Rust; each inference server reports its own `vram_mb` from `/health`, and
-`settings::get_server_health_all` aggregates the seven servers for the status
+`settings::get_server_health_all` aggregates the eight servers for the status
 bar. Model load/unload is explicit, driven from the Models view.
 
 ### audio_engine.rs
@@ -815,7 +864,12 @@ Lifecycle commands are tracked as Pharaoh-wnf.
   pharaoh character voice-set <project_id> <character_id> [--model CustomVoice|VoiceDesign|VoiceClone] [--instruct <text>]
   pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
   pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
-  pharaoh server health [tts|sfx|music|post|all]
+  pharaoh dissect run <audio> [--separate true|false] [--max-candidates <n>] [--chunk-minutes <n>] [--wait true|false]
+  pharaoh dissect status <import_id>
+  pharaoh dissect list
+  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--project <project_id>]
+  pharaoh dissect delete <import_id>
+  pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config
   pharaoh server config-set [--tts-url <url>] [--sfx-url <url>] [--music-url <url>] [--post-url <url>]
   pharaoh model load <tts|sfx|music|post> [--variant <name>]
@@ -918,6 +972,7 @@ All composition and rendering operates at 48kHz / 24-bit.
 | Model            | VRAM (small)    | VRAM (large)  |
 |------------------|-----------------|---------------|
 | Chatterbox Turbo | ~3GB (0.5B)     | —             |
+| Dissect (all four models) | ~5.5GB  | —             |
 | Qwen3-TTS        | ~4GB (0.6B)     | ~6GB (1.7B)   |
 | Woosh            | ~2GB (DFlow)    | ~4GB (Flow)   |
 | ACE-Step         | ~4GB (base)     | ~12–20GB (XL) |

@@ -9,6 +9,7 @@
 mod asset_post;
 mod character;
 mod compose;
+mod dissect;
 mod generate;
 mod generate_scene;
 mod helpers;
@@ -94,6 +95,19 @@ pub async fn run(args: Vec<String>) -> Result<()> {
             if group == "script" && action == "import" =>
         {
             scene_script::script_import(&config, project_id, fountain_path, rest).await
+        }
+        [group, action, source, rest @ ..] if group == "dissect" && action == "run" => {
+            dissect::run(&config, source, rest).await
+        }
+        [group, action, import_id] if group == "dissect" && action == "status" => {
+            dissect::status(&config, import_id).await
+        }
+        [group, action] if group == "dissect" && action == "list" => dissect::list(&config),
+        [group, action, import_id, speaker_id, rest @ ..] if group == "dissect" && action == "assign" => {
+            dissect::assign(&config, import_id, speaker_id, rest).await
+        }
+        [group, action, import_id] if group == "dissect" && action == "delete" => {
+            dissect::delete(&config, import_id)
         }
         [group, action, rest @ ..] if group == "server" && action == "health" => {
             server_setup::server_health(&config, rest).await
@@ -276,9 +290,14 @@ fn usage() -> &'static str {
   pharaoh character voice-set <project_id> <character_id> [--model CustomVoice|VoiceDesign|VoiceClone] [--instruct <text>]
   pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
   pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
-  pharaoh server health [tts|sfx|music|post|all]
+  pharaoh dissect run <audio> [--separate true|false] [--max-candidates <n>] [--chunk-minutes <n>] [--wait true|false]
+  pharaoh dissect status <import_id>
+  pharaoh dissect list
+  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--project <project_id>]
+  pharaoh dissect delete <import_id>
+  pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config
-  pharaoh server config-set [--tts-url <url>] [--sfx-url <url>] [--music-url <url>] [--post-url <url>]
+  pharaoh server config-set [--tts-url <url>] [--sfx-url <url>] [--music-url <url>] [--post-url <url>] [--dissect-url <url>]
   pharaoh model load <tts|sfx|music|post> [--variant <name>]
   pharaoh model unload <tts|sfx|music|post>
   pharaoh asset list <project_id> [--kind tts|sfx|music] [--scene <slug>]

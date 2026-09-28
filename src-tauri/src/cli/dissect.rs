@@ -1,0 +1,133 @@
+//! `pharaoh dissect …` — voices from an existing recording, headless.
+//!
+//! Thin wrappers over `commands::dissect`'s shared core, so the CLI and the
+//! GUI produce identical imports and identical characters.
+
+use std::path::PathBuf;
+use std::time::Duration;
+
+use crate::commands::dissect::{
+    self, AssignSpeakerRequest, DissectOptions, DEFAULT_RIGHTS_STATEMENT,
+};
+use crate::error::{Error, Result};
+use crate::models::AppConfig;
+
+use super::helpers::{flag_opt, flag_parse, parse_flags, print_json};
+
+fn projects_dir(config: &AppConfig) -> PathBuf {
+    PathBuf::from(&config.projects_dir)
+}
+
+/// `dissect run <audio> [--separate true|false] [--max-candidates n] [--wait true|false]`
+pub(super) async fn run(config: &AppConfig, source: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let options = DissectOptions {
+        separate: Some(flag_parse(&flags, "separate", true)?),
+        max_candidates: flags.get("max_candidates").map(|v| v.parse()).transpose()
+            .map_err(|_| Error::Other("invalid --max-candidates".into()))?,
+        chunk_minutes: flags.get("chunk_minutes").map(|v| v.parse()).transpose()
+            .map_err(|_| Error::Other("invalid --chunk-minutes".into()))?,
+        ..Default::default()
+    };
+    let source = std::fs::canonicalize(source)
+        .map_err(|e| Error::Other(format!("source {}: {}", source, e)))?;
+    let http = reqwest::Client::new();
+    let import = dissect::submit(
+        &http,
+        &config.dissect_url,
+        &projects_dir(config),
+        &source.to_string_lossy(),
+        options,
+    )
+    .await?;
+    if !flag_parse(&flags, "wait", true)? {
+        return print_json(&import);
+    }
+    let mut last = String::new();
+    loop {
+        let status = dissect::poll(&http, &projects_dir(config), &import.import_id).await?;
+        let line = format!(
+            "{:>3}% {}",
+            (status.progress * 100.0) as u32,
+            status.message.clone().unwrap_or_default()
+        );
+        if line != last {
+            eprintln!("{}", line);
+            last = line;
+        }
+        if status.status != "running" {
+            if status.status == "failed" {
+                return Err(Error::Other(status.error.unwrap_or_else(|| "dissect failed".into())));
+            }
+            return print_json(&status);
+        }
+        tokio::time::sleep(Duration::from_millis(1500)).await;
+    }
+}
+
+/// `dissect status <import_id>`
+pub(super) async fn status(config: &AppConfig, import_id: &str) -> Result<()> {
+    let s = dissect::poll(&reqwest::Client::new(), &projects_dir(config), import_id).await?;
+    print_json(&s)
+}
+
+/// `dissect list`
+pub(super) fn list(config: &AppConfig) -> Result<()> {
+    print_json(&dissect::list_imports(&projects_dir(config))?)
+}
+
+/// `dissect assign <import_id> <speaker_id> --clips S1_c1,S1_c2 [--gold S1_c1]
+///  (--name <new> | --library-id <id>) --confirm-rights yes [--project <id>]`
+pub(super) async fn assign(
+    config: &AppConfig,
+    import_id: &str,
+    speaker_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let confirmed = matches!(
+        flags.get("confirm_rights").map(String::as_str),
+        Some("yes" | "true")
+    );
+    if !confirmed {
+        return Err(Error::Other(format!(
+            "pass --confirm-rights yes to affirm: \"{}\"",
+            DEFAULT_RIGHTS_STATEMENT
+        )));
+    }
+    let clips: Vec<String> = flag_opt(&flags, "clips")
+        .ok_or_else(|| Error::Other("missing --clips".into()))?
+        .split(',')
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect();
+    let character = dissect::assign_speaker(
+        &projects_dir(config),
+        AssignSpeakerRequest {
+            import_id: import_id.into(),
+            speaker_id: speaker_id.into(),
+            candidate_ids: clips,
+            gold_candidate_id: flag_opt(&flags, "gold"),
+            library_id: flag_opt(&flags, "library_id"),
+            new_name: flag_opt(&flags, "name"),
+            rights_confirmed: true,
+            rights_statement: None,
+        },
+    )?;
+    if let (Some(project_id), Some(library_id)) = (flag_opt(&flags, "project"), character.library_id.clone()) {
+        let imported = crate::commands::character::import_into_project(
+            &projects_dir(config),
+            &project_id,
+            &library_id,
+            None,
+        )?;
+        return print_json(&serde_json::json!({ "library": character, "project_character": imported }));
+    }
+    print_json(&character)
+}
+
+/// `dissect delete <import_id>`
+pub(super) fn delete(config: &AppConfig, import_id: &str) -> Result<()> {
+    dissect::delete_import(&projects_dir(config), import_id)?;
+    print_json(&serde_json::json!({ "deleted": import_id }))
+}

@@ -1,7 +1,7 @@
 /**
  * LibrarySidebar.tsx
  *
- * Left sidebar of the Character Library: header with Import… / + New actions
+ * Left sidebar of the Character Library: header with From recording… / Import… / + New actions
  * and the scrollable list of library character summaries. Purely
  * presentational — all state and mutations live in LibraryView.
  */
@@ -21,7 +21,8 @@ export const LibrarySidebar: React.FC<{
   onSelect: (libraryId: string) => void;
   onCreate: () => void;
   onImportFile: () => void;
-}> = ({ summaries, selectedId, loading, importing, saving, dirty, onSelect, onCreate, onImportFile }) => {
+  onImportRecording: () => void;
+}> = ({ summaries, selectedId, loading, importing, saving, dirty, onSelect, onCreate, onImportFile, onImportRecording }) => {
   return (
     <div style={{
       width: 240, flexShrink: 0,
@@ -41,6 +42,12 @@ export const LibrarySidebar: React.FC<{
           Library · {summaries.length}
         </span>
         <div style={{ display: "flex", gap: 4 }}>
+          <button
+            className="btn btn-sm"
+            style={{ padding: "2px 8px" }}
+            onClick={onImportRecording}
+            title="Lift voices out of an existing audio drama (separate, diarize, pick clone clips)"
+          >From audio…</button>
           <button
             className="btn btn-sm"
             style={{ padding: "2px 8px" }}

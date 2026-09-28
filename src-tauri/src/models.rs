@@ -189,6 +189,30 @@ pub struct Character {
     /// to decide whether the project version diverges from the library.
     #[serde(default)]
     pub library_version: Option<String>,
+    /// Where this character's voice came from when it was lifted out of an
+    /// existing recording rather than designed. Each entry records the rights
+    /// confirmation the user gave at import time.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub voice_provenance: Vec<VoiceProvenance>,
+}
+
+/// Record of reference audio taken from an existing recording (see
+/// `commands::dissect`). Written once at import and never edited, so the
+/// character carries the answer to "whose voice is this, and were we allowed?"
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct VoiceProvenance {
+    /// "dissect" — the only producer today.
+    pub kind: String,
+    /// File name of the source recording (the full path is machine-specific).
+    pub source_name: String,
+    pub import_id: String,
+    /// Speaker id within that import ("S1", "S2", ...).
+    pub speaker_id: String,
+    /// Bundle-relative clip files copied in from this import.
+    pub clips: Vec<String>,
+    /// The exact statement the user confirmed.
+    pub rights_statement: String,
+    pub rights_confirmed_at: String,
 }
 
 /// Lightweight summary of a library character used by `list_library_characters`.
@@ -297,6 +321,8 @@ pub struct ServerConfig {
     pub mcp_url: String,
     /// Base URL of the RVC voice-conversion server (default port 18006).
     pub rvc_url: String,
+    /// Base URL of the dissect (separate + diarize + transcribe) server (default port 18007).
+    pub dissect_url: String,
 }
 
 impl Default for ServerConfig {
@@ -309,6 +335,7 @@ impl Default for ServerConfig {
             chatterbox_url: "http://127.0.0.1:18005".to_string(),
             mcp_url: "http://127.0.0.1:18000".to_string(),
             rvc_url: "http://127.0.0.1:18006".to_string(),
+            dissect_url: default_dissect_url(),
         }
     }
 }
@@ -327,6 +354,10 @@ fn default_mcp_url() -> String {
 
 fn default_rvc_url() -> String {
     "http://127.0.0.1:18006".to_string()
+}
+
+fn default_dissect_url() -> String {
+    "http://127.0.0.1:18007".to_string()
 }
 
 fn default_rvc_index_rate() -> f32 {
@@ -377,6 +408,9 @@ pub struct AppConfig {
     /// Base URL of the RVC voice-conversion server (default port 18006).
     #[serde(default = "default_rvc_url")]
     pub rvc_url: String,
+    /// Base URL of the dissect server (default port 18007).
+    #[serde(default = "default_dissect_url")]
+    pub dissect_url: String,
     /// Bind inference servers to 0.0.0.0 (LAN) vs 127.0.0.1 (local only)
     pub tts_public: bool,
     pub sfx_public: bool,
@@ -423,6 +457,7 @@ impl AppConfig {
             chatterbox_url: default_chatterbox_url(),
             mcp_url: default_mcp_url(),
             rvc_url: default_rvc_url(),
+            dissect_url: default_dissect_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
@@ -454,6 +489,8 @@ pub struct AllServerHealth {
     pub mcp: Option<ServerHealth>,
     /// Health of the RVC voice-conversion server.
     pub rvc: Option<ServerHealth>,
+    /// Health of the dissect server.
+    pub dissect: Option<ServerHealth>,
 }
 
 pub struct AppState {
@@ -473,6 +510,7 @@ impl AppState {
             chatterbox_url: app_config.chatterbox_url.clone(),
             mcp_url: app_config.mcp_url.clone(),
             rvc_url: app_config.rvc_url.clone(),
+            dissect_url: app_config.dissect_url.clone(),
         };
         Self {
             http: reqwest::Client::new(),

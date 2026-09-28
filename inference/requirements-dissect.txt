@@ -1,0 +1,16 @@
+# Dissect server (port 18007) — separation + diarization + ASR.
+# Installed into inference/.venv-dissect by setup.sh when:
+#   PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh
+#
+# Python 3.12+ and NeMo from source: Nemotron-3-Diarization's RoPE encoder is
+# not in the nemo-toolkit 3.0.0 wheel. That source tree needs torch>=2.7.
+# setup.sh installs torch from the CUDA 12.8 index before this file.
+nemo-toolkit[asr] @ git+https://github.com/NVIDIA-NeMo/Speech.git@cf724ac337d1ebc7d0dda1e23fb80916f52927a5
+fastapi>=0.110
+uvicorn[standard]>=0.29
+soundfile>=0.12
+pyyaml>=6
+# BandIt Plus (loaded from a pinned Music-Source-Separation-Training checkout)
+einops>=0.8
+spafe>=0.3.3
+ml-collections>=1.0

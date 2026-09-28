@@ -203,7 +203,7 @@ export function formatBytes(n: number): string {
 // ── Port map (single source of truth) ─────────────────────────────────────────
 
 export const SERVER_PORTS: Record<string, number> = {
-  tts: 18001, sfx: 18002, music: 18003, post: 18004, chatterbox: 18005, rvc: 18006,
+  tts: 18001, sfx: 18002, music: 18003, post: 18004, chatterbox: 18005, rvc: 18006, dissect: 18007,
 };
 
 // HOST-side default: where the Rust backend finds its inference servers. The

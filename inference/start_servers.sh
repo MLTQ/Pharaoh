@@ -12,6 +12,7 @@
 #   Post       : inference/.venv-audiosr/bin/python3       (optional AudioSR)
 #   Chatterbox : inference/.venv-chatterbox/bin/python3    (PHARAOH_CHATTERBOX_PYTHON)
 #   RVC        : inference/.venv-rvc/bin/python3           (PHARAOH_RVC_PYTHON)
+#   Dissect    : inference/.venv-dissect/bin/python3       (PHARAOH_DISSECT_PYTHON)
 #
 # These envs MUST be separate — qwen-tts, ace-step, Woosh, AudioLDM,
 # chatterbox-tts, and rvc-python all pin or expect incompatible stacks.
@@ -33,6 +34,7 @@ MUSIC_PYTHON="${PHARAOH_MUSIC_PYTHON:-${SCRIPT_DIR}/.venv-music/bin/python3}"
 POST_PYTHON="${PHARAOH_POST_PYTHON:-${SCRIPT_DIR}/.venv-audiosr/bin/python3}"
 CHATTERBOX_PYTHON="${PHARAOH_CHATTERBOX_PYTHON:-${SCRIPT_DIR}/.venv-chatterbox/bin/python3}"
 RVC_PYTHON="${PHARAOH_RVC_PYTHON:-${SCRIPT_DIR}/.venv-rvc/bin/python3}"
+DISSECT_PYTHON="${PHARAOH_DISSECT_PYTHON:-${SCRIPT_DIR}/.venv-dissect/bin/python3}"
 WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
 
 missing=0
@@ -70,6 +72,11 @@ if [ -x "${RVC_PYTHON}" ]; then
 else
     echo "  RVC        : not installed (PHARAOH_INSTALL_RVC=1 ./inference/setup.sh)"
 fi
+if [ -x "${DISSECT_PYTHON}" ]; then
+    echo "  Dissect    : ${DISSECT_PYTHON}"
+else
+    echo "  Dissect    : not installed (PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh)"
+fi
 echo ""
 
 cd "$SCRIPT_DIR"
@@ -86,6 +93,9 @@ fi
 if [ -x "${RVC_PYTHON}" ]; then
     "${RVC_PYTHON}" rvc_server.py &
 fi
+if [ -x "${DISSECT_PYTHON}" ]; then
+    "${DISSECT_PYTHON}" dissect_server.py &
+fi
 
 echo "  TTS        → http://localhost:18001/health"
 echo "  SFX        → http://localhost:18002/health"
@@ -98,6 +108,9 @@ if [ -x "${CHATTERBOX_PYTHON}" ]; then
 fi
 if [ -x "${RVC_PYTHON}" ]; then
     echo "  RVC        → http://localhost:18006/health"
+fi
+if [ -x "${DISSECT_PYTHON}" ]; then
+    echo "  Dissect    → http://localhost:18007/health"
 fi
 echo ""
 echo "Press Ctrl-C to stop all servers."

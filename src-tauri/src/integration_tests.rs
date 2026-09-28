@@ -131,6 +131,7 @@ async fn end_to_end_render_pipeline() {
             schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
             library_id: None,
             library_version: None,
+            voice_provenance: vec![],
         }],
         llm_config: LlmConfig {
             provider: "anthropic".into(),

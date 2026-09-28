@@ -53,6 +53,7 @@ import { LibrarySidebar } from "./LibrarySidebar";
 import { LibraryDetailHeader } from "./LibraryDetailHeader";
 import { LibraryVoiceTab } from "./LibraryVoiceTab";
 import { LibraryPaletteTab } from "./LibraryPaletteTab";
+import { DissectImportModal } from "../dissect/DissectImportModal";
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -64,6 +65,7 @@ export const LibraryView: React.FC = () => {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [dissectOpen, setDissectOpen] = useState(false);
 
   // Tab state — full 4-stage pipeline (Pharaoh-37l)
   const [tab, setTab] = useState<LibraryTab>("voice");
@@ -309,7 +311,14 @@ export const LibraryView: React.FC = () => {
         onSelect={handleSelect}
         onCreate={handleCreate}
         onImportFile={handleImportFile}
+        onImportRecording={() => setDissectOpen(true)}
       />
+      {dissectOpen && (
+        <DissectImportModal
+          onClose={() => setDissectOpen(false)}
+          onAssigned={(c) => { void refreshList(c.library_id ?? null); }}
+        />
+      )}
 
       {/* ── Detail panel ─────────────────────────────────────────────── */}
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflow: "hidden" }}>

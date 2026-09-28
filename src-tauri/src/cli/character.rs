@@ -69,6 +69,7 @@ pub(super) async fn character_create(
         schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
         library_id: None,
         library_version: None,
+        voice_provenance: vec![],
     };
     project.characters.push(character.clone());
     save_project(config, project)?;

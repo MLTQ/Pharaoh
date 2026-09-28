@@ -119,6 +119,11 @@ pub fn run() {
             commands::corpus::get_corpus_job_status,
             commands::corpus::build_corpus,
             commands::corpus::clear_corpus,
+            commands::dissect::dissect_submit,
+            commands::dissect::dissect_status,
+            commands::dissect::list_dissect_imports,
+            commands::dissect::delete_dissect_import,
+            commands::dissect::dissect_assign_speaker,
             // Character library
             commands::character::list_library_characters,
             commands::character::save_character_to_library,

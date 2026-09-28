@@ -43,6 +43,7 @@ export const SettingsView: React.FC = () => {
         post:       cfg.post_url,
         chatterbox: cfg.chatterbox_url ?? defaultServerUrls().chatterbox,
         rvc:        cfg.rvc_url        ?? defaultServerUrls().rvc,
+        dissect:    cfg.dissect_url    ?? defaultServerUrls().dissect,
       });
       setInferenceHost(cfg.inference_host ?? hostFromUrl(cfg.tts_url));
       setSplitServers(cfg.split_inference_servers ?? false);
@@ -70,6 +71,7 @@ export const SettingsView: React.FC = () => {
           post_url:       derived.post,
           chatterbox_url: derived.chatterbox,
           rvc_url:        derived.rvc,
+          dissect_url:    derived.dissect,
         },
       });
       await updateServerConfig({
@@ -109,6 +111,15 @@ export const SettingsView: React.FC = () => {
     }
   };
 
+  const handleDissectUrlBlur = async () => {
+    try {
+      const cfg = await invoke<AppConfig>("get_app_config");
+      await invoke("save_app_config", { config: { ...cfg, dissect_url: urls.dissect } });
+    } catch (e) {
+      reportError("Save dissect URL", e);
+    }
+  };
+
   const handleSplitToggle = async (enabled: boolean) => {
     setSplitServers(enabled);
     try {
@@ -123,6 +134,7 @@ export const SettingsView: React.FC = () => {
             inference_host: inferenceHost,
             tts_url: derived.tts, sfx_url: derived.sfx, music_url: derived.music,
             post_url: derived.post, chatterbox_url: derived.chatterbox, rvc_url: derived.rvc,
+            dissect_url: derived.dissect,
           },
         });
       } else {
@@ -301,6 +313,7 @@ export const SettingsView: React.FC = () => {
           onCheckChatterboxHealth={checkChatterboxHealth}
           onChatterboxUrlBlur={handleChatterboxUrlBlur}
           onRvcUrlBlur={handleRvcUrlBlur}
+          onDissectUrlBlur={handleDissectUrlBlur}
         />
       </div>
     </div>
