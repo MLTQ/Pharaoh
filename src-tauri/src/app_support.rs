@@ -23,7 +23,37 @@ pub fn load_or_default_app_config(config_path: &Path) -> Result<AppConfig> {
     }
 
     let raw = std::fs::read_to_string(config_path)?;
-    serde_json::from_str(&raw).or_else(|_| Ok(AppConfig::with_home(&home)))
+    let Ok(value) = serde_json::from_str::<serde_json::Value>(&raw) else {
+        return Ok(AppConfig::with_home(&home));
+    };
+    let Ok(mut config) = serde_json::from_value::<AppConfig>(value.clone()) else {
+        return Ok(AppConfig::with_home(&home));
+    };
+    derive_missing_server_urls(&value, &mut config);
+    Ok(config)
+}
+
+/// Servers added after a config was written get a loopback serde default. In
+/// unified mode (`split_inference_servers = false`) every server lives on
+/// `inference_host`, so a URL the file doesn't mention must follow the host —
+/// otherwise a user pointed at a GPU box silently gets 127.0.0.1 for the new
+/// server.
+fn derive_missing_server_urls(raw: &serde_json::Value, config: &mut AppConfig) {
+    if config.split_inference_servers {
+        return;
+    }
+    let host = config.inference_host.trim_end_matches('/').to_string();
+    let slots: [(&str, u16, &mut String); 4] = [
+        ("post_url", 18004, &mut config.post_url),
+        ("chatterbox_url", 18005, &mut config.chatterbox_url),
+        ("rvc_url", 18006, &mut config.rvc_url),
+        ("dissect_url", 18007, &mut config.dissect_url),
+    ];
+    for (key, port, slot) in slots {
+        if raw.get(key).is_none() {
+            *slot = format!("{}:{}", host, port);
+        }
+    }
 }
 
 pub fn ensure_app_dirs(config: &AppConfig) -> Result<()> {
@@ -517,4 +547,41 @@ pub fn bind_generated_asset(
 
     write_script_rows(&path, &rows)?;
     Ok(true)
+}
+
+#[cfg(test)]
+mod config_tests {
+    use super::*;
+
+    fn load(json: &str) -> AppConfig {
+        let dir = std::env::temp_dir().join(format!("pharaoh-cfg-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.json");
+        let mut base = serde_json::to_value(AppConfig::with_home(&dir)).unwrap();
+        let patch: serde_json::Value = serde_json::from_str(json).unwrap();
+        for (k, v) in patch.as_object().unwrap() {
+            if v.is_null() {
+                base.as_object_mut().unwrap().remove(k);
+            } else {
+                base[k] = v.clone();
+            }
+        }
+        std::fs::write(&path, base.to_string()).unwrap();
+        load_or_default_app_config(&path).unwrap()
+    }
+
+    #[test]
+    fn missing_url_follows_unified_host() {
+        let c = load(r#"{"inference_host":"http://192.168.0.202","split_inference_servers":false,"dissect_url":null}"#);
+        assert_eq!(c.dissect_url, "http://192.168.0.202:18007");
+    }
+
+    #[test]
+    fn present_url_and_split_mode_are_left_alone() {
+        let c = load(r#"{"inference_host":"http://10.0.0.5","rvc_url":"http://custom:9","dissect_url":null,"split_inference_servers":true}"#);
+        assert_eq!(c.rvc_url, "http://custom:9");
+        assert_eq!(c.dissect_url, "http://127.0.0.1:18007");
+        let c = load(r#"{"inference_host":"http://10.0.0.5","rvc_url":"http://custom:9","split_inference_servers":false}"#);
+        assert_eq!(c.rvc_url, "http://custom:9");
+    }
 }
