@@ -108,3 +108,93 @@ def test_stub_run_writes_relocatable_manifest(tmp_path, monkeypatch):
             info = sf.info(str(out / c["path"]))
             assert info.samplerate == dp.CLIP_SR
             assert 3.0 <= c["duration"] <= 15.0
+
+
+class TestChunkBounds:
+    def test_no_chapters_splits_evenly(self):
+        b = dp.chunk_bounds(3000.0, 1200.0, [])
+        assert len(b) == 3 and b[0][0] == 0.0 and b[-1][1] == 3000.0
+        assert all(y - x <= 1200.0 + 1e-6 for x, y in b)
+
+    def test_cuts_land_on_chapter_starts(self):
+        # Five 7-minute chapters, 20-minute chunks → pack two chapters per chunk.
+        chapters = [{"index": i, "title": f"c{i}", "start": i * 420.0, "end": (i + 1) * 420.0} for i in range(5)]
+        b = dp.chunk_bounds(2100.0, 1200.0, chapters)
+        starts = {c["start"] for c in chapters}
+        assert [x for x, _ in b] == [0.0, 840.0, 1680.0]
+        assert all(x in starts for x, _ in b)
+        assert b[-1][1] == 2100.0
+
+    def test_overlong_chapter_is_split(self):
+        chapters = [{"index": 0, "title": "all", "start": 0.0, "end": 3000.0}]
+        b = dp.chunk_bounds(3000.0, 1200.0, chapters)
+        assert len(b) == 3 and all(y - x <= 1200.0 + 1e-6 for x, y in b)
+
+    def test_chapter_of(self):
+        chapters = [{"index": 0, "title": "a", "start": 0.0, "end": 5.0},
+                    {"index": 1, "title": "b", "start": 5.0, "end": 9.0}]
+        assert dp.chapter_of(chapters, 4.99) == 0
+        assert dp.chapter_of(chapters, 5.0) == 1
+        assert dp.chapter_of(chapters, 9.5) is None
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg required")
+def test_stub_run_on_m4b_keeps_chapters_tags_and_cover(tmp_path, monkeypatch):
+    monkeypatch.setenv("PHARAOH_DISSECT_STUB", "1")
+    import soundfile as sf
+    sr = 16000
+    burst = 0.3 * np.sin(2 * np.pi * 220 * np.arange(5 * sr) / sr)
+    gap = np.zeros(int(1.5 * sr))
+    wav = tmp_path / "src.wav"
+    sf.write(str(wav), np.concatenate([gap, burst, gap, burst, gap]).astype(np.float32), sr)
+    meta = tmp_path / "meta.txt"
+    meta.write_text(
+        ";FFMETADATA1\ntitle=Anne Test\nartist=LibriVox\n"
+        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=0\nEND=7000\ntitle=Bright River\n"
+        "[CHAPTER]\nTIMEBASE=1/1000\nSTART=7000\nEND=14500\ntitle=Green Gables\n"
+    )
+    cover = tmp_path / "c.jpg"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i",
+                    "color=c=red:s=64x64:d=1", "-frames:v", "1", str(cover)], check=True)
+    m4b = tmp_path / "book.m4b"
+    subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-i", str(wav), "-i", str(meta), "-i", str(cover),
+                    "-map", "0:a", "-map", "2:v", "-map_metadata", "1", "-map_chapters", "1",
+                    "-c:a", "aac", "-c:v", "copy", "-disposition:v:0", "attached_pic", str(m4b)], check=True)
+
+    out = tmp_path / "import"
+    m = dp.run(dp.Models(), str(m4b), out, DissectOptions(), lambda f, msg: None)
+
+    assert [c["title"] for c in m["chapters"]] == ["Bright River", "Green Gables"]
+    assert m["source_tags"]["title"] == "Anne Test" and m["source_tags"]["artist"] == "LibriVox"
+    assert m["cover"] == "cover.jpg" and (out / "cover.jpg").is_file()
+    # The cover stream must not have been decoded as audio.
+    assert 13.0 < m["duration_s"] < 16.0
+    chapters_seen = {t["chapter"] for t in m["turns"]}
+    assert chapters_seen <= {0, 1} and chapters_seen
+    for sp in m["speakers"]:
+        assert set(sp["chapters"]) <= {0, 1}
+        for c in sp["candidates"]:
+            assert c["chapter"] in (0, 1)
+
+
+def test_find_credits_from_a_real_dramatis_personae():
+    # Transcribed turns from the LibriVox "Anne of Green Gables" (DR) cast list,
+    # including a credit split across a pause and ASR's "Red by".
+    rows = [
+        ("S1", 17.8, "Dramatus personae."), ("S1", 20.4, "Anne and Narrator read by RL Lipshaw"),
+        ("S2", 24.9, "Marilla Cuthbert"), ("S2", 26.6, "Read by Elizabeth Clett"),
+        ("S4", 28.7, "Matthew Cuthbert, read by Bruce Perry."),
+        ("S5", 68.8, "The Doctor read by Phil Shinevere."),
+        ("S6", 43.6, "Mrs Spencer."), ("S6", 45.5, "Read by Sally McConnell"),
+        ("S6", 83.9, "Miss Lucilla Harris, read by Sally McConnell."),
+        ("S1", 101.0, "End of dramatis personae"),
+        ("S3", 300.0, "I said to Thomas, I said, and he just sat there."),
+    ]
+    turns = [{"speaker": s, "start": t, "end": t + 1.5, "text": x} for s, t, x in rows]
+    got = {k: [(c["character"], c["performer"]) for c in v] for k, v in dp.find_credits(turns).items()}
+    assert got["S1"] == [("Anne and Narrator", "RL Lipshaw")]
+    assert got["S2"] == [("Marilla Cuthbert", "Elizabeth Clett")]
+    assert got["S4"] == [("Matthew Cuthbert", "Bruce Perry")]
+    assert got["S5"] == [("The Doctor", "Phil Shinevere")]
+    assert got["S6"] == [("Mrs Spencer", "Sally McConnell"), ("Miss Lucilla Harris", "Sally McConnell")]
+    assert "S3" not in got

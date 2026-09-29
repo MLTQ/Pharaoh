@@ -22,6 +22,7 @@ import json
 import logging
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -53,6 +54,7 @@ SEPARATOR_ID = "bandit-plus-dnr"
 SEP_SR = 44100      # BandIt Plus native rate
 ML_SR = 16000       # diarizer / embedder / ASR rate
 CLIP_SR = 48000     # project-standard rate for exported reference clips
+BLEED_CAP_DB = 60.0 # dialogue-over-bed ratios above this all mean "nothing underneath"
 
 ProgressFn = Callable[[float, str], None]
 
@@ -85,12 +87,118 @@ class Turn:
 
 def decode(path: str, sr: int, channels: int) -> np.ndarray:
     """Decode any ffmpeg-readable file to float32, shape (samples, channels)."""
+    # -map 0:a:0 / -vn: audiobook containers (.m4b) carry a cover-art video
+    # stream and a chapter-text data track; only the first audio stream is audio.
     cmd = [
         "ffmpeg", "-nostdin", "-loglevel", "error", "-i", path,
+        "-map", "0:a:0", "-vn", "-sn", "-dn",
         "-f", "f32le", "-acodec", "pcm_f32le", "-ac", str(channels), "-ar", str(sr), "-",
     ]
     raw = subprocess.run(cmd, check=True, capture_output=True).stdout
     return np.frombuffer(raw, dtype=np.float32).reshape(-1, channels).copy()
+
+
+# Tags worth carrying from an audiobook / podcast container into the manifest.
+_KEPT_TAGS = ("title", "album", "artist", "album_artist", "composer", "genre", "date",
+              "comment", "description", "copyright")
+
+
+def probe_container(path: str) -> dict:
+    """Chapters, descriptive tags and embedded cover art of a source file.
+
+    Returns {"chapters": [{index, title, start, end}], "tags": {...},
+    "cover_stream": int|None, "cover_codec": str|None}. Empty on any probe
+    failure — metadata is a bonus, never a reason to fail the import.
+    """
+    out = {"chapters": [], "tags": {}, "cover_stream": None, "cover_codec": None}
+    try:
+        res = subprocess.run(
+            ["ffprobe", "-v", "error", "-print_format", "json", "-show_chapters",
+             "-show_format", "-show_streams", path],
+            check=True, capture_output=True, timeout=60,
+        )
+        info = json.loads(res.stdout or b"{}")
+    except Exception as exc:
+        log.warning("ffprobe failed for %s: %s", path, exc)
+        return out
+    for i, ch in enumerate(info.get("chapters") or []):
+        try:
+            start, end = float(ch["start_time"]), float(ch["end_time"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if end <= start:
+            continue
+        title = ((ch.get("tags") or {}).get("title") or "").strip() or f"Chapter {i + 1}"
+        out["chapters"].append({"index": len(out["chapters"]), "title": title,
+                                "start": round(start, 3), "end": round(end, 3)})
+    tags = {k.lower(): v for k, v in ((info.get("format") or {}).get("tags") or {}).items()}
+    out["tags"] = {k: str(tags[k])[:2000] for k in _KEPT_TAGS if tags.get(k)}
+    for st in info.get("streams") or []:
+        if st.get("codec_type") == "video" and (st.get("disposition") or {}).get("attached_pic"):
+            out["cover_stream"] = int(st["index"])
+            out["cover_codec"] = st.get("codec_name")
+            break
+    return out
+
+
+def extract_cover(path: str, stream: int, codec: Optional[str], out_dir: Path) -> Optional[str]:
+    """Copy an embedded cover image out as cover.jpg / cover.png. Returns the relative path."""
+    rel = "cover.png" if codec == "png" else "cover.jpg"
+    try:
+        subprocess.run(
+            ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", path,
+             "-map", f"0:{stream}", "-frames:v", "1", "-c:v", "copy", str(out_dir / rel)],
+            check=True, capture_output=True, timeout=60,
+        )
+    except Exception:
+        # Unusual codecs (bmp, gif) won't stream-copy into .jpg — re-encode.
+        try:
+            rel = "cover.jpg"
+            subprocess.run(
+                ["ffmpeg", "-nostdin", "-loglevel", "error", "-y", "-i", path,
+                 "-map", f"0:{stream}", "-frames:v", "1", str(out_dir / rel)],
+                check=True, capture_output=True, timeout=60,
+            )
+        except Exception as exc:
+            log.warning("cover extraction failed: %s", exc)
+            return None
+    return rel if (out_dir / rel).is_file() else None
+
+
+def chapter_of(chapters: list[dict], t: float) -> Optional[int]:
+    """Index of the chapter containing time `t` (seconds), or None."""
+    for ch in chapters:
+        if ch["start"] <= t < ch["end"]:
+            return ch["index"]
+    return None
+
+
+def chunk_bounds(duration: float, chunk_s: float, chapters: list[dict]) -> list[tuple[float, float]]:
+    """Diarization chunks of at most ~`chunk_s`, cut at chapter boundaries when possible.
+
+    Blind cuts can land mid-sentence and split one speaker's turn across two
+    chunks. Chapter starts are natural scene breaks, so chunks are built by
+    greedily packing whole chapters; a chapter longer than `chunk_s` is split
+    into equal parts.
+    """
+    chunk_s = max(60.0, chunk_s)
+    if not chapters:
+        n = max(1, math.ceil(duration / chunk_s))
+        step = duration / n
+        return [(i * step, min(duration, (i + 1) * step)) for i in range(n)]
+    cuts = sorted({0.0, duration, *[c["start"] for c in chapters if 0 < c["start"] < duration]})
+    pieces = []
+    for a, b in zip(cuts, cuts[1:]):
+        k = max(1, math.ceil((b - a) / chunk_s))
+        step = (b - a) / k
+        pieces += [(a + i * step, a + (i + 1) * step) for i in range(k)]
+    out: list[list[float]] = []
+    for a, b in pieces:
+        if out and b - out[-1][0] <= chunk_s:
+            out[-1][1] = b
+        else:
+            out.append([a, b])
+    return [(round(a, 3), round(b, 3)) for a, b in out]
 
 
 def resample(x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
@@ -296,15 +404,15 @@ def _parse_segment(seg) -> tuple[float, float, str]:
 
 
 def diarize(models: Models, mono16: np.ndarray, opts: DissectOptions, workdir: Path,
-            progress: ProgressFn) -> list[Turn]:
+            progress: ProgressFn, chapters: Optional[list[dict]] = None) -> list[Turn]:
     """Diarize in chunks; speaker labels are chunk-local ("c0:speaker_1")."""
     diar = models.load_diarizer()
-    chunk_n = max(60, int(opts.chunk_minutes * 60)) * ML_SR
+    bounds = chunk_bounds(len(mono16) / ML_SR, opts.chunk_minutes * 60, chapters or [])
     turns: list[Turn] = []
-    n_chunks = max(1, math.ceil(len(mono16) / chunk_n))
-    for ci in range(n_chunks):
-        offset = ci * chunk_n
-        piece = mono16[offset:offset + chunk_n]
+    n_chunks = len(bounds)
+    for ci, (a, b) in enumerate(bounds):
+        offset = int(a * ML_SR)
+        piece = mono16[offset:int(b * ML_SR)]
         if len(piece) < ML_SR:
             continue
         path = workdir / f"diar_{ci}.wav"
@@ -508,7 +616,9 @@ def pick_candidates(models: Optional[Models], turns: list[Turn], speaker: str,
                 continue
             bleed_db = None
             if bed is not None:
-                bleed_db = level - rms_db(bed[int(a * stems_sr):int(b * stems_sr)])
+                # Capped: on a dry source the music/effects stems are near
+                # silence and the raw ratio runs past 100 dB — meaningless detail.
+                bleed_db = min(BLEED_CAP_DB, level - rms_db(bed[int(a * stems_sr):int(b * stems_sr)]))
             wps = len(words) / d if words else 0.0
             score = 1.0 - min(1.0, abs(d - 8.0) / 8.0)
             if bleed_db is not None:
@@ -560,6 +670,54 @@ def export_clip(stem: np.ndarray, sr: int, a: float, b: float, path: Path) -> No
     write_wav(path, seg * min(gain, 10.0), CLIP_SR)
 
 
+# ── Cast credits ─────────────────────────────────────────────────────────────
+
+# "Matthew Cuthbert, read by Bruce Perry." / "Station Master played by X" — the
+# dramatis personae of a LibriVox reading, or a podcast's end credits. "red" is
+# a common ASR slip for "read".
+_CREDIT_RE = re.compile(
+    r"(?P<char>[A-Z][\w.'’\- ]{1,50}?)[,.:]?\s+(?i:is\s+)?(?i:read|red|played|voiced|performed)\s+(?i:by)\s+"
+    r"(?P<who>[A-Z][\w.'’\- ]{0,50}?)\s*(?:[.,;]|$)",
+)
+_CREDIT_SKIP = re.compile(r"^(?:and|this|end|dramatis|dramatus)\b", re.I)
+
+
+def find_credits(turns: list[dict], join_gap_s: float = 2.5) -> dict[str, list[dict]]:
+    """Cast credits heard in each speaker's own voice.
+
+    Consecutive turns by the same speaker are joined first because a credit is
+    often split across a pause ("Marilla Cuthbert" … "Read by Elizabeth").
+    Returns {speaker_id: [{character, performer, at}]}, deduplicated per
+    character. These are suggestions — diarization of rapid-fire credit lists
+    is the least reliable part of a recording.
+    """
+    blocks: list[dict] = []
+    for t in sorted(turns, key=lambda t: t["start"]):
+        text = (t.get("text") or "").strip()
+        if not text:
+            continue
+        if blocks and blocks[-1]["speaker"] == t["speaker"] and t["start"] - blocks[-1]["end"] <= join_gap_s:
+            blocks[-1]["text"] += " " + text
+            blocks[-1]["end"] = t["end"]
+        else:
+            blocks.append({"speaker": t["speaker"], "start": t["start"], "end": t["end"], "text": text})
+
+    out: dict[str, list[dict]] = {}
+    for b in blocks:
+        for m in _CREDIT_RE.finditer(b["text"]):
+            char = m.group("char").strip(" .,")
+            who = m.group("who").strip(" .,")
+            # Drop a leading clause the regex swallowed: "...personae. Anne" → "Anne".
+            char = re.split(r"[.!?]\s+", char)[-1]
+            if not char or not who or _CREDIT_SKIP.match(char) or len(char.split()) > 6:
+                continue
+            seen = out.setdefault(b["speaker"], [])
+            if any(c["character"].lower() == char.lower() for c in seen):
+                continue
+            seen.append({"character": char, "performer": who, "at": round(b["start"], 2)})
+    return out
+
+
 # ── Stub path ─────────────────────────────────────────────────────────────────
 
 def stub_turns(mono16: np.ndarray) -> list[Turn]:
@@ -600,6 +758,11 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         return lambda f, msg: progress(lo + (hi - lo) * max(0.0, min(1.0, f)), msg)
 
     progress(0.01, "Decoding source")
+    container = probe_container(input_path)
+    chapters = container["chapters"]
+    cover = None
+    if container["cover_stream"] is not None:
+        cover = extract_cover(input_path, container["cover_stream"], container["cover_codec"], out_dir)
     mix = decode(input_path, SEP_SR, 2)
     duration = len(mix) / SEP_SR
     if duration < 1.0:
@@ -630,7 +793,7 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
             centroids: dict[str, np.ndarray] = {}
             mapping = {s: s for s in {t.speaker for t in turns}}
         else:
-            turns = diarize(models, mono16, opts, tmp, stage(0.35, 0.5))
+            turns = diarize(models, mono16, opts, tmp, stage(0.35, 0.5), chapters)
             progress(0.52, "Matching voices across the recording")
             centroids = speaker_centroids(models, turns, mono16)
             mapping = link_speakers(centroids, opts.link_threshold)
@@ -664,6 +827,7 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         sid = final_id[spk]
         for k, c in enumerate(cands, 1):
             c["id"] = f"{sid}_c{k}"
+            c["chapter"] = chapter_of(chapters, c["start"])
             c["path"] = f"candidates/{c['id']}.wav"
             export_clip(stems["dialogue"], SEP_SR, c["start"], c["end"], out_dir / c["path"])
         own = [t for t in turns if t.speaker == spk]
@@ -675,8 +839,20 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
             "turn_count": len(own),
             "first_heard_s": round(min(t.start for t in own), 2),
             "sample_text": sample[:240],
+            # Chapters this voice appears in — "the narrator is in all 12".
+            "chapters": sorted({ci for t in own if (ci := chapter_of(chapters, t.start)) is not None}),
             "candidates": cands,
         })
+
+    turn_rows = [
+        {"speaker": final_id[t.speaker], "start": round(t.start, 3), "end": round(t.end, 3),
+         "text": t.text, "overlap": t.overlap, "chapter": chapter_of(chapters, t.start),
+         "words": t.words}
+        for t in turns
+    ]
+    credits = find_credits(turn_rows)
+    for sp in speakers:
+        sp["credits"] = credits.get(sp["id"], [])
 
     manifest = {
         "version": MANIFEST_VERSION,
@@ -695,12 +871,11 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         "options": opts.__dict__,
         "warnings": warnings,
         "stems": stem_paths,
+        "chapters": chapters,
+        "source_tags": container["tags"],
+        "cover": cover,
         "speakers": speakers,
-        "turns": [
-            {"speaker": final_id[t.speaker], "start": round(t.start, 3), "end": round(t.end, 3),
-             "text": t.text, "overlap": t.overlap, "words": t.words}
-            for t in turns
-        ],
+        "turns": turn_rows,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     progress(1.0, "Done")

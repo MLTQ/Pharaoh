@@ -16,6 +16,9 @@
 ### `handleAssign`
 - **Does**: Calls `dissectAssignSpeaker`; for a *new* character with a `projectId` and "Also add to cast" ticked, follows with `importCharacterFromLibrary`.
 
+### Audiobook sources
+- **Does**: The file picker leads with `.m4b` / `.m4a`. When the manifest carries `cover`, `source_tags` and `chapters`, the header shows the cover, album/title, author and chapter count, and each speaker card gets the chapter list.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

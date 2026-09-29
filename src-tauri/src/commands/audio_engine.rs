@@ -962,7 +962,12 @@ pub async fn render_episode_with_projects_dir(
         )));
     }
 
-    // Measure and write meta
+    // Measure and write meta. Chapters record where each scene lands (after
+    // crossfade overlap) so the audiobook export can mark them.
+    let chapters = crate::commands::audiobook::chapters_from_scene_renders(
+        projects_dir, project_id, &scene_slugs, crossfade_ms,
+    )
+    .unwrap_or_default();
     let meta_path = output_path.with_file_name("final.wav.meta.json");
     if let Ok(meas) = measure_render_loudness(&output_path).await {
         let meta = serde_json::json!({
@@ -976,6 +981,7 @@ pub async fn render_episode_with_projects_dir(
             "measured_at": chrono::Utc::now().to_rfc3339(),
             "scene_slugs": scene_slugs,
             "crossfade_ms": crossfade_ms,
+            "chapters": chapters,
         });
         let _ = std::fs::write(&meta_path, serde_json::to_string_pretty(&meta).unwrap_or_default());
     }

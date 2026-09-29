@@ -29,13 +29,15 @@ import {
   listLibraryCharacters,
 } from "../../lib/tauriCommands";
 import { reportError } from "../../lib/errors";
+import { fileSrc } from "../../lib/transport";
 import { DissectSpeakerCard, type AssignChoice } from "./DissectSpeakerCard";
 
 export const RIGHTS_STATEMENT =
   "I own this recording or have permission from the performer to clone this voice, " +
   "and I will not use it to impersonate them.";
 
-const AUDIO_EXTENSIONS = ["wav", "mp3", "flac", "ogg", "opus", "m4a", "aac", "mp4", "mkv", "webm"];
+// .m4b / .m4a audiobooks bring chapters, tags and cover art along with the audio.
+const AUDIO_EXTENSIONS = ["m4b", "m4a", "mp3", "wav", "flac", "ogg", "opus", "aac", "mp4", "mkv", "webm"];
 const POLL_MS = 1500;
 
 type Stage = "pick" | "running" | "review";
@@ -152,6 +154,7 @@ export const DissectImportModal: React.FC<{
         new_name: choice.newName,
         rights_confirmed: true,
         rights_statement: RIGHTS_STATEMENT,
+        performer: choice.performer,
       });
       // Only brand-new characters go into the cast; an existing library
       // character is either already there or deliberately not.
@@ -196,14 +199,31 @@ export const DissectImportModal: React.FC<{
           padding: "14px 18px", borderBottom: "1px solid var(--line-1)",
           display: "flex", alignItems: "center", gap: 10,
         }}>
-          <span style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-0)" }}>
-            Import voices from a recording
-          </span>
-          {manifest && (
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)" }}>
-              {manifest.source_name} · {Math.round(manifest.duration_s / 60)} min · {manifest.speakers.length} speakers
-            </span>
+          {manifest?.cover && status && (
+            <img
+              src={fileSrc(`${status.import_dir}/${manifest.cover}`)}
+              alt=""
+              style={{ width: 36, height: 36, objectFit: "cover", borderRadius: 2, border: "1px solid var(--line-2)" }}
+            />
           )}
+          <span style={{ display: "flex", flexDirection: "column", gap: 2, minWidth: 0 }}>
+            <span style={{ fontSize: 14, fontWeight: 600, color: "var(--fg-0)" }}>
+              {manifest
+                ? (manifest.source_tags?.album || manifest.source_tags?.title || "Import voices from a recording")
+                : "Import voices from a recording"}
+            </span>
+            {manifest && (
+              <span style={{
+                fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)",
+                overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+              }}>
+                {manifest.source_tags?.artist ? `${manifest.source_tags.artist} · ` : ""}
+                {manifest.source_name} · {Math.round(manifest.duration_s / 60)} min
+                {(manifest.chapters?.length ?? 0) > 0 ? ` · ${manifest.chapters!.length} chapters` : ""}
+                {" "}· {manifest.speakers.length} speakers
+              </span>
+            )}
+          </span>
           <span style={{ flex: 1 }} />
           {stage === "review" && (
             <button className="btn btn-sm" onClick={() => { setStage("pick"); setStatus(null); }}>
@@ -326,6 +346,7 @@ export const DissectImportModal: React.FC<{
                   key={sp.id}
                   speaker={sp}
                   importDir={status.import_dir}
+                  chapters={manifest.chapters ?? []}
                   library={library}
                   assignedTo={assigned[sp.id] ?? null}
                   busy={busySpeaker === sp.id}

@@ -210,6 +210,10 @@ pub struct VoiceProvenance {
     pub speaker_id: String,
     /// Bundle-relative clip files copied in from this import.
     pub clips: Vec<String>,
+    /// The performer whose voice this is, when known (e.g. from the cast
+    /// credits read out in the recording). The rights confirmation is about them.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub performer: Option<String>,
     /// The exact statement the user confirmed.
     pub rights_statement: String,
     pub rights_confirmed_at: String,

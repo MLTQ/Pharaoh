@@ -204,6 +204,8 @@ export interface VoiceProvenance {
   import_id: string;
   speaker_id: string;
   clips: string[];
+  /** Performer of the voice when known (e.g. from spoken cast credits). */
+  performer?: string | null;
   rights_statement: string;
   rights_confirmed_at: string;
 }
@@ -646,6 +648,22 @@ export interface DissectCandidate {
   /** Cosine similarity to the speaker's voice centroid; null in stub mode. */
   similarity: number | null;
   score: number;
+  /** Index into manifest.chapters; absent/null when the source has none. */
+  chapter?: number | null;
+}
+
+/** "X, read by Y" heard in this speaker's own voice (dramatis personae, end credits). */
+export interface DissectCredit {
+  character: string;
+  performer: string;
+  at: number;
+}
+
+export interface DissectChapter {
+  index: number;
+  title: string;
+  start: number;
+  end: number;
 }
 
 export interface DissectSpeaker {
@@ -655,6 +673,9 @@ export interface DissectSpeaker {
   turn_count: number;
   first_heard_s: number;
   sample_text: string;
+  /** Chapter indices this voice is heard in. */
+  chapters?: number[];
+  credits?: DissectCredit[];
   candidates: DissectCandidate[];
 }
 
@@ -664,6 +685,7 @@ export interface DissectTurn {
   end: number;
   text: string;
   overlap: boolean;
+  chapter?: number | null;
 }
 
 export interface DissectManifest {
@@ -675,6 +697,12 @@ export interface DissectManifest {
   models: Record<string, string | null>;
   warnings: string[];
   stems: Record<string, string>;
+  /** From the container (.m4b / .m4a / .mp3 with chapters). Empty when none. */
+  chapters?: DissectChapter[];
+  /** title / album / artist / … tags from the source file. */
+  source_tags?: Record<string, string>;
+  /** Embedded cover art copied out, relative to the import dir. */
+  cover?: string | null;
   speakers: DissectSpeaker[];
   turns: DissectTurn[];
 }
@@ -696,4 +724,29 @@ export interface DissectImportSummary {
   created_at: string;
   speaker_count: number | null;
   duration_s: number | null;
+}
+
+// ── Audiobook (.m4b) export ──────────────────────────────────────────────────
+
+export interface EpisodeChapter {
+  slug: string;
+  title: string;
+  start_s: number;
+  end_s: number;
+}
+
+export interface M4bOptions {
+  /** New cover image (jpg/png); remembered as the project's cover. */
+  cover_path?: string | null;
+  author?: string | null;
+  narrator?: string | null;
+  bitrate_kbps?: number | null;
+}
+
+export interface M4bExport {
+  output_path: string;
+  bytes: number;
+  duration_s: number;
+  chapters: EpisodeChapter[];
+  cover_path: string | null;
 }

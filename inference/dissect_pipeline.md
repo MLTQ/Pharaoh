@@ -26,6 +26,14 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 ### `run`
 - **Does**: Orchestrates the stages, writes `stems/`, `candidates/`, and `manifest.json` (all paths relative to the output dir). Speaker ids are `S1…` ordered by total speech, so the narrator is usually `S1`.
 
+### `probe_container`, `extract_cover`, `chapter_of`, `chunk_bounds`
+- **Does**: ffprobe the source for chapters, descriptive tags (title / album / artist / …) and an attached cover picture; copy the cover out as `cover.jpg|png`; tag every turn and candidate with its chapter; and build diarization chunks from whole chapters (splitting only chapters longer than `chunk_minutes`).
+- **Rationale**: `.m4b` / `.m4a` audiobooks carry this for free. Chapter starts are scene breaks, so cutting diarization chunks there avoids splitting a speaker's turn across two chunks. `decode` maps only `0:a:0` — the cover is a video stream and chapter titles are a data track.
+
+### `find_credits`
+- **Does**: Finds "X, read by Y" / "played by" / "voiced by" credits in each speaker's own turns (joining turns split by a pause) → `speakers[].credits`. Suggestions only; the UI offers them as name chips and records the performer with the rights confirmation.
+- **Rationale**: LibriVox dramatic readings open with a dramatis personae in which every performer reads their own credit — the recording labels its own voices.
+
 ### `stub_turns`
 - **Does**: Energy-gated segmentation with alternating fake speakers, used when NeMo is missing or `PHARAOH_DISSECT_STUB=1`.
 
@@ -38,6 +46,7 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 | `tests/test_dissect_pipeline.py` | Stub run works with only numpy + soundfile + ffmpeg | Hard torch imports at module load |
 
 ## Notes
+- Real `.m4b` test: the first 44 min (4 chapters) of LibriVox's *Anne of Green Gables* (DR) processed in 122 s cold on an RTX 4090; chunks cut at chapter starts; the narrator was linked across all chunks; 16 cast credits recovered from the dramatis personae.
 - Measured on a 5-min LibriVox dramatic reading mixed with a Brahms underscore and synthetic rain/knocks: dialogue SDR 16.8 dB (4.9 dB unseparated); 31 s end to end on an RTX 4090 including model load; 5.5 GB VRAM for the NeMo models.
 - Voices that both the diarizer and TitaNet hear as one (e.g. a narrator who also reads a character) stay merged; the UI lets the user pick clips by hand. A split tool is a follow-up.
 - License check pending for the BandIt Plus weights (trained on DnR) before any commercial release — see ARCHITECTURE.md.

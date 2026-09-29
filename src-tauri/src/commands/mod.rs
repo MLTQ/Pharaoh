@@ -2,6 +2,7 @@ pub mod audio;
 pub mod audio_engine;
 pub mod audio_enhance;
 pub mod audio_spatial;
+pub mod audiobook;
 pub mod archive;
 pub mod character;
 pub mod corpus;

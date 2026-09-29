@@ -125,6 +125,9 @@ pub struct AssignSpeakerRequest {
     pub rights_confirmed: bool,
     #[serde(default)]
     pub rights_statement: Option<String>,
+    /// Performer of this voice, if known — recorded on the provenance entry.
+    #[serde(default)]
+    pub performer: Option<String>,
 }
 
 // ── Paths + helpers ───────────────────────────────────────────────────────
@@ -558,6 +561,11 @@ pub fn assign_speaker(projects_dir: &Path, req: AssignSpeakerRequest) -> Result<
             .iter()
             .map(|(_, d, _)| format!("imports/{}", d.file_name().unwrap().to_string_lossy()))
             .collect(),
+        performer: req
+            .performer
+            .clone()
+            .map(|p| p.trim().to_string())
+            .filter(|p| !p.is_empty()),
         rights_statement: req
             .rights_statement
             .clone()
@@ -653,6 +661,7 @@ mod tests {
             new_name: Some("Matthew".into()),
             rights_confirmed: true,
             rights_statement: None,
+            performer: Some("Bruce Perry".into()),
         }
     }
 
@@ -687,6 +696,7 @@ mod tests {
         assert_eq!(c.voice_provenance.len(), 1);
         assert_eq!(c.voice_provenance[0].source_name, "ep1.mp3");
         assert_eq!(c.voice_provenance[0].rights_statement, DEFAULT_RIGHTS_STATEMENT);
+        assert_eq!(c.voice_provenance[0].performer.as_deref(), Some("Bruce Perry"));
 
         // On disk, paths are bundle-relative like every other library entry.
         let bundle = library_character_dir(&root, c.library_id.as_ref().unwrap());

@@ -46,7 +46,7 @@ Pharaoh/
 ├── src-tauri/                  # Rust backend (Tauri 2) — also the CLI binary
 │   ├── src/
 │   │   ├── main.rs             # entry: args → CLI, no args → GUI
-│   │   ├── lib.rs              # Tauri builder + generate_handler! (83 commands)
+│   │   ├── lib.rs              # Tauri builder + generate_handler! (86 commands)
 │   │   ├── models.rs           # every serialized type + AppState
 │   │   ├── app_support.rs      # paths, project/script I/O, wav_info, asset binding
 │   │   ├── fountain.rs         # Fountain parse/serialize
@@ -623,7 +623,14 @@ at word gaps, scored on length, dialogue-over-bed level, speech rate and voice
 similarity → exported 48 kHz / 24-bit.
 
 **Output** (an *import*, relocatable — every path relative):
-`manifest.json` · `stems/{dialogue,music,effects}.wav` · `candidates/S{n}_c{k}.wav`.
+`manifest.json` · `stems/{dialogue,music,effects}.wav` · `candidates/S{n}_c{k}.wav` · `cover.jpg|png`.
+
+**Audiobook sources (.m4b / .m4a):** chapters, tags and embedded cover art are
+read with ffprobe into `manifest.chapters`, `source_tags` and `cover`; turns
+and clips carry their chapter; diarization chunks are cut at chapter starts.
+Spoken cast credits ("Marilla Cuthbert, read by …") become
+`speakers[].credits`, offered as name chips, and the chosen performer is
+recorded on the character's `voice_provenance.performer`.
 Imports live at `<projects_dir>/_library/imports/<import_id>/` with an
 `import.json` written by the Rust side.
 
@@ -646,7 +653,7 @@ through it.
 ## RUST BACKEND
 
 > Command inventory below is generated from `generate_handler!` in
-> `src-tauri/src/lib.rs` (83 commands). Run `npm run check:commands` to verify
+> `src-tauri/src/lib.rs` (86 commands). Run `npm run check:commands` to verify
 > the frontend never calls a name that is not registered there.
 
 ### Module map
@@ -666,6 +673,7 @@ through it.
 | `commands/corpus.rs` | Chatterbox corpus build for RVC training (stage 3) |
 | `commands/rvc.rs` | RVC convert/train proxies, corpus and model status (stage 4) |
 | `commands/character.rs` | Character library: save, import, export, corpus import |
+| `commands/audiobook.rs` | Episode → chaptered `.m4b` (AAC, one chapter per scene, project tags, iTunes audiobook `stik`, remembered cover art); chapter math shared with `render_episode` |
 | `commands/dissect.rs` | Dissect imports: submit/poll (upload + bundle download when remote), list/delete, assign speaker → Library character behind the rights gate |
 | `commands/llm.rs` | Anthropic scene drafting and storyboard review |
 | `commands/settings.rs` | App config and aggregate server health |
@@ -867,7 +875,7 @@ Lifecycle commands are tracked as Pharaoh-wnf.
   pharaoh dissect run <audio> [--separate true|false] [--max-candidates <n>] [--chunk-minutes <n>] [--wait true|false]
   pharaoh dissect status <import_id>
   pharaoh dissect list
-  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--project <project_id>]
+  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
   pharaoh dissect delete <import_id>
   pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config
@@ -887,6 +895,7 @@ Lifecycle commands are tracked as Pharaoh-wnf.
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh compose meta <render_wav>
   pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
+  pharaoh compose m4b <project_id> --output <path.m4b> [--cover <jpg|png>] [--author <name>] [--narrator <names>] [--bitrate <kbps>]
   pharaoh llm draft-scene <project_id> <scene_slug> [--model <name>] [--api-key-env <var>] [--write-fountain true|false] [--compile true|false]
   pharaoh storyboard review <project_id> [--model <name>] [--api-key-env <var>]
   pharaoh storyboard rewrite <project_id> [--model <name>] [--api-key-env <var>]

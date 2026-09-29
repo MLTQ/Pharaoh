@@ -15,6 +15,9 @@ import type {
   DissectImport,
   DissectStatus,
   DissectImportSummary,
+  EpisodeChapter,
+  M4bOptions,
+  M4bExport,
 } from "./types";
 
 // ── Project ──────────────────────────────────────────────────────────────────
@@ -829,4 +832,23 @@ export const dissectAssignSpeaker = (request: {
   new_name?: string | null;
   rights_confirmed: boolean;
   rights_statement?: string | null;
+  performer?: string | null;
 }): Promise<Character> => invoke("dissect_assign_speaker", { request });
+
+// ── Audiobook (.m4b) export ──────────────────────────────────────────────────
+
+/** Chapters (one per scene) the next .m4b export will write, from the last episode render. */
+export const getEpisodeChapters = (projectId: string): Promise<EpisodeChapter[]> =>
+  invoke("get_episode_chapters", { projectId });
+
+/** The project's remembered cover image, if one has been set. */
+export const getProjectCover = (projectId: string): Promise<string | null> =>
+  invoke("get_project_cover", { projectId });
+
+/** Encode output/final.wav as a chaptered .m4b audiobook with tags and cover art. */
+export const exportEpisodeM4b = (args: {
+  projectId: string;
+  outputPath: string;
+  options?: M4bOptions;
+}): Promise<M4bExport> =>
+  invoke("export_episode_m4b", { projectId: args.projectId, outputPath: args.outputPath, options: args.options ?? null });

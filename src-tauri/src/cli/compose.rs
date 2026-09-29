@@ -91,3 +91,33 @@ pub(super) async fn audio_zero_crossings(audio_path: &str, near_ms: u64) -> Resu
         "crossings_ms": crossings_ms,
     }))
 }
+
+/// `compose m4b <project_id> --output <path> [--cover <img>] [--author <name>]
+///  [--narrator <names>] [--bitrate <kbps>]` — the rendered episode as a
+/// chaptered audiobook (one chapter per scene).
+pub(super) async fn compose_m4b(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let output = flag_opt(&flags, "output").ok_or_else(|| Error::Other("missing --output".into()))?;
+    let opts = crate::commands::audiobook::M4bOptions {
+        cover_path: flag_opt(&flags, "cover"),
+        author: flag_opt(&flags, "author"),
+        narrator: flag_opt(&flags, "narrator"),
+        bitrate_kbps: flags
+            .get("bitrate")
+            .map(|v| v.parse())
+            .transpose()
+            .map_err(|_| Error::Other("invalid --bitrate".into()))?,
+    };
+    let result = crate::commands::audiobook::export_m4b(
+        std::path::Path::new(&config.projects_dir),
+        project_id,
+        &output,
+        opts,
+    )
+    .await?;
+    print_json(&result)
+}

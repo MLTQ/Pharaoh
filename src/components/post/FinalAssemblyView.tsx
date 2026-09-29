@@ -5,6 +5,7 @@ import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useToastStore } from "../../store/toastStore";
 import { usePeaksStore } from "../../store/peaksStore";
 import { renderEpisode, readRenderMeta, type RenderMeta } from "../../lib/tauriCommands";
+import { M4bExportPanel } from "./M4bExportPanel";
 import type { MockScene } from "../../lib/types";
 
 // Episode-level master targets, mirrors the per-scene set in CompositionView
@@ -148,7 +149,7 @@ const SceneStrip: React.FC<SceneStripProps> = ({
 };
 
 export const FinalAssemblyView: React.FC = () => {
-  const { realProjectId, projectsDir, scenes: storeScenes } = useProjectStore();
+  const { realProjectId, projectsDir, scenes: storeScenes, project } = useProjectStore();
   const pushToast = useToastStore((s) => s.push);
   const fetchPeaks = usePeaksStore((s) => s.fetchPeaks);
   // toast helper not needed yet; pushToast is used directly below
@@ -162,6 +163,8 @@ export const FinalAssemblyView: React.FC = () => {
   const [finalMeta, setFinalMeta] = useState<RenderMeta | null>(null);
   const [sceneMetaBySlug, setSceneMetaBySlug] = useState<Record<string, RenderMeta | null>>({});
   const [sceneRenderPathBySlug, setSceneRenderPathBySlug] = useState<Record<string, string | null>>({});
+  // Bumped after each render so the audiobook panel re-reads chapters.
+  const [renderVersion, setRenderVersion] = useState(0);
 
   // Initialize order from the store; only re-seed when the set of scenes
   // changes (additions/removals), preserving any user-applied reorderings.
@@ -284,6 +287,7 @@ export const FinalAssemblyView: React.FC = () => {
       setFinalPath(path);
       const meta = await readRenderMeta(path);
       setFinalMeta(meta);
+      setRenderVersion((v) => v + 1);
       // Refresh per-scene meta — render_episode renders any missing scenes.
       const metaEntries: Record<string, RenderMeta | null> = {};
       const pathEntries: Record<string, string | null> = {};
@@ -443,6 +447,15 @@ export const FinalAssemblyView: React.FC = () => {
             {rendering ? "Rendering…" : finalPath ? "Re-render episode" : "Render episode"}
           </button>
         </div>
+
+        {realProjectId && (
+          <M4bExportPanel
+            projectId={realProjectId}
+            projectTitle={project?.title ?? "episode"}
+            finalReady={Boolean(finalPath)}
+            renderVersion={renderVersion}
+          />
+        )}
 
         {/* Scene strip list */}
         <div style={{ background: "var(--bg-1)", border: "1px solid var(--line-1)", borderRadius: 4, overflow: "hidden" }}>

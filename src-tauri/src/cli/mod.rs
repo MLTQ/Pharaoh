@@ -178,6 +178,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         {
             compose::compose_render_scene(&config, project_id, scene_slug).await
         }
+        [group, action, project_id, rest @ ..] if group == "compose" && action == "m4b" => {
+            compose::compose_m4b(&config, project_id, rest).await
+        }
         [group, action, project_id, rest @ ..] if group == "compose" && action == "final" => {
             compose::compose_final(&config, project_id, rest).await
         }
@@ -293,7 +296,7 @@ fn usage() -> &'static str {
   pharaoh dissect run <audio> [--separate true|false] [--max-candidates <n>] [--chunk-minutes <n>] [--wait true|false]
   pharaoh dissect status <import_id>
   pharaoh dissect list
-  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--project <project_id>]
+  pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
   pharaoh dissect delete <import_id>
   pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config
@@ -313,6 +316,7 @@ fn usage() -> &'static str {
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh compose meta <render_wav>
   pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
+  pharaoh compose m4b <project_id> --output <path.m4b> [--cover <jpg|png>] [--author <name>] [--narrator <names>] [--bitrate <kbps>]
   pharaoh llm draft-scene <project_id> <scene_slug> [--model <name>] [--api-key-env <var>] [--write-fountain true|false] [--compile true|false]
   pharaoh storyboard review <project_id> [--model <name>] [--api-key-env <var>]
   pharaoh storyboard rewrite <project_id> [--model <name>] [--api-key-env <var>]

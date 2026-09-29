@@ -57,3 +57,12 @@ to `storyboard.json` — the active order is passed as `sceneSlugs` to
 - Not a publishing/export gateway (no MP3/AAC encode, no cover art, no
   metadata embedding). final.wav is the master; encoding for a delivery
   target is a follow-up.
+
+## Audiobook export (.m4b)
+
+Below the controls, [M4bExportPanel](./M4bExportPanel.md) exports the last
+render as a chaptered `.m4b` (one chapter per scene, cover art, author /
+narrator tags). `render_episode` now records `chapters` in
+`final.wav.meta.json` — each scene's start is pulled back by the crossfade so
+skipping to a chapter lands at the start of the transition into it. The view
+bumps `renderVersion` after each render so the panel's chapter preview refreshes.

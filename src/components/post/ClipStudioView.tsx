@@ -44,7 +44,7 @@ async function pickAudioFile(): Promise<string | null> {
     const { open } = await import("@tauri-apps/plugin-dialog");
     const result = await open({
       multiple: false,
-      filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a"] }],
+      filters: [{ name: "Audio", extensions: ["wav", "mp3", "aac", "ogg", "flac", "m4a", "m4b"] }],
     });
     return typeof result === "string" ? result : null;
   } catch {

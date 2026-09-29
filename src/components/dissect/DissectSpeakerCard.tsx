@@ -9,7 +9,7 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import type { DissectSpeaker, LibraryCharacterSummary } from "../../lib/types";
+import type { DissectChapter, DissectSpeaker, LibraryCharacterSummary } from "../../lib/types";
 import { PlayButton } from "../shared/PlayButton";
 import { CHAR_HUE } from "../library/libraryShared";
 
@@ -18,26 +18,36 @@ export interface AssignChoice {
   goldId: string | null;
   libraryId: string | null;
   newName: string | null;
+  /** From a clicked cast credit; recorded on the character's provenance. */
+  performer: string | null;
 }
 
 const NEW = "__new__";
 
 function fmtTime(s: number): string {
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  const pad = (n: number) => String(Math.floor(n)).padStart(2, "0");
+  if (s >= 3600) return `${Math.floor(s / 3600)}:${pad((s % 3600) / 60)}:${pad(s % 60)}`;
+  return `${Math.floor(s / 60)}:${pad(s % 60)}`;
+}
+
+/** "02 - Matthew Cuthbert is Surprised" → "Matthew Cuthbert is Surprised" for tight chips. */
+function shortChapter(title: string): string {
+  return title.replace(/^\s*(?:chapter\s*)?\d+\s*[-–—:.]\s*/i, "") || title;
 }
 
 export const DissectSpeakerCard: React.FC<{
   speaker: DissectSpeaker;
   importDir: string;
   library: LibraryCharacterSummary[];
+  /** The source's chapters (empty when it has none). */
+  chapters: DissectChapter[];
   /** Name of the character this speaker was already added to, if any. */
   assignedTo: string | null;
   busy: boolean;
   /** False until the rights box is ticked — the Add button stays disabled. */
   rightsConfirmed: boolean;
   onAssign: (choice: AssignChoice) => void;
-}> = ({ speaker, importDir, library, assignedTo, busy, rightsConfirmed, onAssign }) => {
+}> = ({ speaker, importDir, library, chapters, assignedTo, busy, rightsConfirmed, onAssign }) => {
   // Default: keep the top three clips, best one as gold.
   const [picked, setPicked] = useState<Set<string>>(
     () => new Set(speaker.candidates.slice(0, 3).map((c) => c.id)),
@@ -45,6 +55,11 @@ export const DissectSpeakerCard: React.FC<{
   const [gold, setGold] = useState<string | null>(speaker.candidates[0]?.id ?? null);
   const [target, setTarget] = useState<string>(NEW);
   const [name, setName] = useState("");
+  const [performer, setPerformer] = useState<string | null>(null);
+  const credits = speaker.credits ?? [];
+  const inChapters = speaker.chapters ?? [];
+  const chapterTitle = (i: number | null | undefined) =>
+    i === null || i === undefined ? null : chapters[i]?.title ?? null;
 
   // Gold must always be one of the picked clips.
   useEffect(() => {
@@ -88,6 +103,11 @@ export const DissectSpeakerCard: React.FC<{
         <span style={{ fontWeight: 600, fontSize: 13, color: "var(--fg-0)" }}>{speaker.label}</span>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)" }}>
           {fmtTime(speaker.total_speech_s)} of speech · {speaker.turn_count} turns · first at {fmtTime(speaker.first_heard_s)}
+          {chapters.length > 1 && inChapters.length > 0 && (
+            <span title={inChapters.map((i) => chapters[i]?.title).join("\n")}>
+              {" "}· in {inChapters.length} of {chapters.length} chapters
+            </span>
+          )}
         </span>
         <span style={{ flex: 1 }} />
         {assignedTo && (
@@ -101,6 +121,33 @@ export const DissectSpeakerCard: React.FC<{
           fontStyle: "italic", borderBottom: "1px solid var(--line-1)",
         }}>
           “{speaker.sample_text}”
+        </div>
+      )}
+
+      {/* Cast credits heard in this voice — click to use as the character name */}
+      {credits.length > 0 && !assignedTo && (
+        <div style={{
+          padding: "7px 14px", borderBottom: "1px solid var(--line-1)",
+          display: "flex", flexWrap: "wrap", gap: 6, alignItems: "center",
+        }}>
+          <span style={{ fontSize: 10.5, color: "var(--fg-3)" }}>Credits heard:</span>
+          {credits.map((cr) => {
+            const on = target === NEW && name === cr.character;
+            return (
+              <button
+                key={`${cr.character}-${cr.at}`}
+                className="btn btn-sm"
+                onClick={() => { setTarget(NEW); setName(cr.character); setPerformer(cr.performer); }}
+                title={`Heard at ${fmtTime(cr.at)} — use as the character name`}
+                style={{
+                  padding: "2px 8px", fontSize: 10.5, textTransform: "none", letterSpacing: 0,
+                  borderColor: on ? "var(--tts)" : undefined, color: on ? "var(--tts)" : undefined,
+                }}
+              >
+                {cr.character} <span style={{ color: "var(--fg-3)" }}>· {cr.performer}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
@@ -145,13 +192,18 @@ export const DissectSpeakerCard: React.FC<{
                   display: "flex", gap: 8, whiteSpace: "nowrap",
                 }}>
                   <span>{c.duration.toFixed(1)}s</span>
-                  <span title="Where in the source">@{fmtTime(c.start)}</span>
+                  <span title={chapterTitle(c.chapter) ?? "Where in the source"}>
+                    @{fmtTime(c.start)}
+                    {chapters.length > 1 && c.chapter !== null && c.chapter !== undefined && (
+                      <> · {shortChapter(chapters[c.chapter]?.title ?? "").slice(0, 18)}</>
+                    )}
+                  </span>
                   {c.bleed_db !== null && (
                     <span
                       title="Dialogue level above music + effects in this span. Higher is cleaner."
                       style={{ color: c.bleed_db >= 12 ? "var(--st-rendered)" : c.bleed_db >= 6 ? "var(--fg-2)" : "var(--tts)" }}
                     >
-                      {c.bleed_db > 0 ? "+" : ""}{c.bleed_db.toFixed(0)} dB
+                      {c.bleed_db >= 40 ? "clean" : `${c.bleed_db > 0 ? "+" : ""}${c.bleed_db.toFixed(0)} dB`}
                     </span>
                   )}
                   {c.similarity !== null && (
@@ -188,7 +240,7 @@ export const DissectSpeakerCard: React.FC<{
           {target === NEW && (
             <input
               type="text" placeholder="Character name" value={name}
-              onChange={(e) => setName(e.target.value)}
+              onChange={(e) => { setName(e.target.value); setPerformer(null); }}
               style={{
                 flex: 1, fontSize: 11.5, background: "var(--bg-0)", color: "var(--fg-1)",
                 border: "1px solid var(--line-2)", borderRadius: 2, padding: "4px 8px",
@@ -196,6 +248,18 @@ export const DissectSpeakerCard: React.FC<{
             />
           )}
           {target !== NEW && <span style={{ flex: 1 }} />}
+          {performer && (
+            <span
+              title="Recorded with your rights confirmation on this character"
+              style={{ fontSize: 10.5, color: "var(--fg-2)", whiteSpace: "nowrap" }}
+            >
+              performer: {performer}
+              <button
+                className="btn btn-sm" onClick={() => setPerformer(null)}
+                style={{ padding: "0 5px", marginLeft: 4, lineHeight: 1.2 }} title="Clear performer"
+              >×</button>
+            </span>
+          )}
           <button
             className="btn btn-sm btn-primary"
             disabled={!canAdd}
@@ -206,6 +270,7 @@ export const DissectSpeakerCard: React.FC<{
               goldId: gold,
               libraryId: target === NEW ? null : target,
               newName: target === NEW ? name.trim() : null,
+              performer,
             })}
           >
             {busy ? "Adding…" : `Add ${picked.size} clip${picked.size === 1 ? "" : "s"}`}

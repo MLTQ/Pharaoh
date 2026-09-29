@@ -77,7 +77,7 @@ pub(super) fn list(config: &AppConfig) -> Result<()> {
 }
 
 /// `dissect assign <import_id> <speaker_id> --clips S1_c1,S1_c2 [--gold S1_c1]
-///  (--name <new> | --library-id <id>) --confirm-rights yes [--project <id>]`
+///  (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <id>]`
 pub(super) async fn assign(
     config: &AppConfig,
     import_id: &str,
@@ -112,6 +112,7 @@ pub(super) async fn assign(
             new_name: flag_opt(&flags, "name"),
             rights_confirmed: true,
             rights_statement: None,
+            performer: flag_opt(&flags, "performer"),
         },
     )?;
     if let (Some(project_id), Some(library_id)) = (flag_opt(&flags, "project"), character.library_id.clone()) {
