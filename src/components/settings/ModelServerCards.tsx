@@ -326,10 +326,24 @@ export function ModelServerCards({
                 ) : m.kind === "dissect" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
-                      Linux + NVIDIA only (NeMo from source, Python 3.12, CUDA 12.8). Run on the GPU host,
-                      then restart <code>start_servers.sh</code>; open port 18007 if the host has a firewall.
+                      Linux + NVIDIA only (NeMo from source, Python 3.12, CUDA 12.8). Sets up the env, the
+                      separator and ~2.5 GB of model weights, then verifies them. Restart
+                      {" "}<code>start_servers.sh</code> afterwards; open port 18007 if the host has a firewall.
                     </div>
-                    <CopyableCommand command={m.install!} />
+                    {/127\.0\.0\.1|localhost|\[::1\]/.test(effectiveUrl(m.kind)) ? (
+                      <ServerSetupPanel
+                        profile="dissect"
+                        wooshDir={wooshDir}
+                        buttonLabel="Install dissect"
+                        detail="Runs setup.sh dissect on this machine"
+                        accent={accent}
+                      />
+                    ) : (
+                      <div style={{ fontSize: 10.5, color: "var(--fg-4)" }}>
+                        The dissect server is remote — run this on that host:
+                      </div>
+                    )}
+                    <CopyableCommand command="./inference/setup.sh dissect" />
                   </div>
                 ) : m.kind === "post" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>

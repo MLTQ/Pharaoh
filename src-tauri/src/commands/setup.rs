@@ -226,6 +226,7 @@ pub async fn setup_woosh(app: AppHandle, dest_dir: String) -> Result<()> {
 /// - `audioldm`: Core + optional AudioLDM SFX+ dependencies.
 /// - `audiosr`: Core + optional AudioSR Post dependencies.
 /// - `all`: Core + both optional dependency stacks.
+/// - `dissect`: only the dissect env, separator and NeMo weights (GPU host).
 #[tauri::command]
 pub async fn setup_inference_servers(
     app: AppHandle,
@@ -264,6 +265,11 @@ pub async fn setup_inference_servers(
         "all" => {
             command.env("PHARAOH_INSTALL_AUDIOLDM", "1");
             command.env("PHARAOH_INSTALL_AUDIOSR", "1");
+        }
+        // Only the dissect section; setup.sh itself checks for Linux + NVIDIA
+        // and explains the skip on other machines.
+        "dissect" => {
+            command.arg("dissect");
         }
         other => {
             let msg = format!("unknown setup profile: {}", other);

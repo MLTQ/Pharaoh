@@ -69,7 +69,7 @@ export const MODELS = [
     description: "Voices from existing recordings — separate · diarize · transcribe",
     port: 18007,
     variants: null as null,
-    install: "PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh",
+    install: "./inference/setup.sh dissect",
   },
 ];
 

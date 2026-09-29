@@ -59,6 +59,10 @@ BLEED_CAP_DB = 60.0 # dialogue-over-bed ratios above this all mean "nothing unde
 ProgressFn = Callable[[float, str], None]
 
 
+class DissectCancelled(Exception):
+    """Raised from a progress callback to stop a run at the next checkpoint."""
+
+
 @dataclass
 class DissectOptions:
     separate: bool = True
@@ -224,6 +228,7 @@ def to_mono(x: np.ndarray) -> np.ndarray:
 
 
 def write_wav(path: Path, x: np.ndarray, sr: int) -> None:
+    """24-bit PCM; the container follows the suffix (.wav clips, .flac stems)."""
     path.parent.mkdir(parents=True, exist_ok=True)
     peak = float(np.max(np.abs(x))) if x.size else 0.0
     if peak > 0.999:
@@ -778,9 +783,12 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
             warnings.append(f"Separation skipped: {sep_reason}")
         stems = {"dialogue": mix}
 
+    # Stems are FLAC: lossless 24-bit at roughly half the size — a third or
+    # less for near-silent music/effects stems of a dry source. An hour of
+    # three WAV stems is ~2.8 GB, which dominated remote imports' download.
     stem_paths = {}
     for name, audio in stems.items():
-        rel = f"stems/{name}.wav"
+        rel = f"stems/{name}.flac"
         write_wav(out_dir / rel, audio, SEP_SR)
         stem_paths[name] = rel
 
@@ -880,3 +888,67 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
     progress(1.0, "Done")
     return manifest
+
+
+# ── Setup helpers (called by setup.sh) ───────────────────────────────────────
+
+def prefetch() -> None:
+    """Download the NeMo checkpoints into the Hugging Face cache NeMo reads.
+
+    Only the .nemo files — the model repos also carry demo videos and GIFs.
+    """
+    from huggingface_hub import snapshot_download
+    for repo in (DIARIZER_ID, EMBEDDER_ID, ASR_ID):
+        path = snapshot_download(repo, allow_patterns=["*.nemo"])
+        print(f"  ✓ {repo} → {path}", flush=True)
+
+
+def check(deep: bool = True) -> bool:
+    """Report whether this environment can run a real (non-stub) dissect.
+
+    `deep` instantiates the diarizer on CPU — the model whose RoPE encoder
+    needs NeMo newer than the 3.0.0 wheel, i.e. the likeliest thing to break.
+    """
+    ok = True
+    ml_ok, reason = Models.ml_available()
+    print(f"  {'✓' if ml_ok else '✗'} NeMo / torch importable{'' if ml_ok else f' — {reason}'}")
+    ok &= ml_ok
+    sep_ok, sep_reason = Models.separator_available()
+    print(f"  {'✓' if sep_ok else '✗'} separator code + weights{'' if sep_ok else f' — {sep_reason}'}")
+    ok &= sep_ok
+    for tool in ("ffmpeg", "ffprobe"):
+        found = shutil.which(tool) is not None
+        print(f"  {'✓' if found else '✗'} {tool} on PATH")
+        ok &= found
+    if ml_ok:
+        import torch
+        cuda = torch.cuda.is_available()
+        name = torch.cuda.get_device_name(0) if cuda else "none"
+        print(f"  {'✓' if cuda else '!'} CUDA: {name}{'' if cuda else ' (CPU-only will be very slow)'}")
+    if ml_ok and deep:
+        try:
+            from nemo.utils import logging as nemo_logging
+            nemo_logging.setLevel(logging.ERROR)  # it prints the whole training config
+            from nemo.collections.asr.models import SortformerEncLabelModel
+            SortformerEncLabelModel.from_pretrained(DIARIZER_ID, map_location="cpu")
+            print("  ✓ diarizer loads (NeMo supports its encoder)")
+        except Exception as exc:
+            print(f"  ✗ diarizer failed to load — {exc.__class__.__name__}: {str(exc)[:200]}")
+            ok = False
+    return ok
+
+
+if __name__ == "__main__":
+    import argparse
+    ap = argparse.ArgumentParser(description="Dissect pipeline setup helpers")
+    ap.add_argument("--prefetch", action="store_true", help="download the NeMo checkpoints")
+    ap.add_argument("--check", action="store_true", help="verify this environment")
+    ap.add_argument("--quick", action="store_true", help="with --check: skip loading the diarizer")
+    a = ap.parse_args()
+    if not (a.prefetch or a.check):
+        ap.error("pass --prefetch and/or --check")
+    logging.basicConfig(level=logging.ERROR)
+    if a.prefetch:
+        prefetch()
+    if a.check and not check(deep=not a.quick):
+        sys.exit(1)

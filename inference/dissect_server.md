@@ -18,6 +18,9 @@ FastAPI shell on port 18007 around `dissect_pipeline.py`: takes an existing audi
 - **Interacts with**: `commands/dissect.rs::poll`, which unpacks it.
 - **Rationale**: One job produces many files (stems + candidates + manifest); a zip keeps the single-download contract of the other servers.
 
+### `/cancel/{job_id}`
+- **Does**: Flags a queued or running job; `_run`'s progress callback raises `DissectCancelled` at the next checkpoint (every separation batch, diarization chunk, transcription batch — decode is the one uninterruptible step). A job cancelled while waiting for the GPU never starts. Status becomes `cancelled`; server-owned scratch and the uploaded source are removed.
+
 ### `/health`, `/load`, `/unload`
 - **Does**: Standard server surface. `/health` also reports `stub`, `stub_reason`, `separator_ready`, and which models are resident.
 

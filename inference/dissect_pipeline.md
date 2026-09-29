@@ -24,7 +24,7 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 - **Does**: Cuts each speaker's solo spans into 3–15 s windows at word gaps, trims to the words, scores on length (≈ 8 s ideal), dialogue-over-bed level (`bleed_db`), speech rate, and TitaNet similarity to the speaker centroid; keeps the top non-overlapping `max_candidates`. Exports 48 kHz / 24-bit mono at ≈ −20 dBFS RMS with 12 ms fades.
 
 ### `run`
-- **Does**: Orchestrates the stages, writes `stems/`, `candidates/`, and `manifest.json` (all paths relative to the output dir). Speaker ids are `S1…` ordered by total speech, so the narrator is usually `S1`.
+- **Does**: Orchestrates the stages, writes `stems/*.flac` (24-bit lossless — WAV stems were 2 GB per 44 min and dominated remote downloads), `candidates/*.wav`, and `manifest.json` (all paths relative to the output dir). Speaker ids are `S1…` ordered by total speech, so the narrator is usually `S1`.
 
 ### `probe_container`, `extract_cover`, `chapter_of`, `chunk_bounds`
 - **Does**: ffprobe the source for chapters, descriptive tags (title / album / artist / …) and an attached cover picture; copy the cover out as `cover.jpg|png`; tag every turn and candidate with its chapter; and build diarization chunks from whole chapters (splitting only chapters longer than `chunk_minutes`).
@@ -33,6 +33,13 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 ### `find_credits`
 - **Does**: Finds "X, read by Y" / "played by" / "voiced by" credits in each speaker's own turns (joining turns split by a pause) → `speakers[].credits`. Suggestions only; the UI offers them as name chips and records the performer with the rights confirmation.
 - **Rationale**: LibriVox dramatic readings open with a dramatis personae in which every performer reads their own credit — the recording labels its own voices.
+
+### `prefetch`, `check` (`python dissect_pipeline.py --prefetch | --check [--quick]`)
+- **Does**: Setup helpers for `setup.sh`: download only the three `.nemo` checkpoints into the Hugging Face cache NeMo reads; verify NeMo/torch, separator files, ffmpeg/ffprobe and CUDA, and (unless `--quick`) load the diarizer on CPU. `--check` exits 1 on any ✗.
+- **Rationale**: The diarizer is the version-sensitive piece (its RoPE encoder is missing from the nemo-toolkit 3.0.0 wheel), so loading it is the check that matters.
+
+### `DissectCancelled`
+- **Does**: Raised from a progress callback to abandon a run; `dissect_server` owns the flag.
 
 ### `stub_turns`
 - **Does**: Energy-gated segmentation with alternating fake speakers, used when NeMo is missing or `PHARAOH_DISSECT_STUB=1`.

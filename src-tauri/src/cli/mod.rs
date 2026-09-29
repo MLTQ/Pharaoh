@@ -106,6 +106,12 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speaker_id, rest @ ..] if group == "dissect" && action == "assign" => {
             dissect::assign(&config, import_id, speaker_id, rest).await
         }
+        [group, action, import_id] if group == "dissect" && action == "cancel" => {
+            dissect::cancel(&config, import_id).await
+        }
+        [group, action, import_id, rest @ ..] if group == "dissect" && action == "retry" => {
+            dissect::retry(&config, import_id, rest).await
+        }
         [group, action, import_id] if group == "dissect" && action == "delete" => {
             dissect::delete(&config, import_id)
         }
@@ -297,6 +303,8 @@ fn usage() -> &'static str {
   pharaoh dissect status <import_id>
   pharaoh dissect list
   pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
+  pharaoh dissect cancel <import_id>
+  pharaoh dissect retry <import_id> [--wait true|false]
   pharaoh dissect delete <import_id>
   pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config

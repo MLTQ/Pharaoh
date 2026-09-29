@@ -75,11 +75,14 @@ pub struct DissectImport {
     pub source_name: String,
     pub server_url: String,
     pub remote: bool,
-    /// "running" | "complete" | "failed"
+    /// "running" | "complete" | "failed" | "cancelled"
     pub status: String,
     #[serde(default)]
     pub error: Option<String>,
     pub created_at: String,
+    /// What the run was started with, so a retry repeats it exactly.
+    #[serde(default)]
+    pub options: DissectOptions,
 }
 
 /// Poll result for `dissect_status`.
@@ -253,12 +256,47 @@ pub async fn submit(
     std::fs::create_dir_all(&dir)?;
 
     let base = base.trim_end_matches('/').to_string();
-    let remote = is_remote_url(&base);
+    let (job_id, remote) = match start_job(http, &base, &dir, &source_path, &options).await {
+        Ok(v) => v,
+        Err(e) => {
+            // Nothing was started; don't leave an empty import behind.
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+    };
 
+    let import = DissectImport {
+        import_id,
+        job_id,
+        source_name: src
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
+        source_path,
+        server_url: base,
+        remote,
+        status: "running".into(),
+        error: None,
+        created_at: Utc::now().to_rfc3339(),
+        options,
+    };
+    write_json(&dir.join(IMPORT_FILE), &import)?;
+    Ok(import)
+}
+
+/// Upload (when remote) and POST /generate/dissect. Returns (job_id, remote).
+async fn start_job(
+    http: &reqwest::Client,
+    base: &str,
+    dir: &Path,
+    source_path: &str,
+    options: &DissectOptions,
+) -> Result<(String, bool)> {
+    let remote = is_remote_url(base);
     let (input_path, output_path) = if remote {
-        (upload_source(http, &base, &source_path).await?, String::new())
+        (upload_source(http, base, source_path).await?, String::new())
     } else {
-        (source_path.clone(), dir.to_string_lossy().into_owned())
+        (source_path.to_string(), dir.to_string_lossy().into_owned())
     };
 
     let mut body = serde_json::to_value(options)?;
@@ -289,22 +327,69 @@ pub async fn submit(
         .as_str()
         .ok_or_else(|| Error::Other("dissect server returned no job_id".into()))?
         .to_string();
+    Ok((job_id, remote))
+}
 
-    let import = DissectImport {
-        import_id,
-        job_id,
-        source_name: src
-            .file_name()
-            .map(|n| n.to_string_lossy().into_owned())
-            .unwrap_or_default(),
-        source_path,
-        server_url: base,
-        remote,
-        status: "running".into(),
-        error: None,
-        created_at: Utc::now().to_rfc3339(),
-    };
-    write_json(&dir.join(IMPORT_FILE), &import)?;
+/// Stop a running import. The server stops at its next checkpoint; the import
+/// is marked cancelled locally right away so the UI doesn't wait on it, and a
+/// server that can't be reached doesn't block the cancel.
+#[tauri::command]
+pub async fn dissect_cancel(app: AppHandle, import_id: String) -> Result<DissectImport> {
+    cancel(&http(&app), &app_projects_dir(&app)?, &import_id).await
+}
+
+pub async fn cancel(http: &reqwest::Client, projects_dir: &Path, import_id: &str) -> Result<DissectImport> {
+    let dir = import_dir(projects_dir, import_id)?;
+    let path = dir.join(IMPORT_FILE);
+    let mut import: DissectImport = read_json(&path)?;
+    if import.status != "running" {
+        return Err(Error::Other(format!("import is {}, not running", import.status)));
+    }
+    let _ = http
+        .post(format!("{}/cancel/{}", import.server_url, import.job_id))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await;
+    import.status = "cancelled".into();
+    import.error = None;
+    write_json(&path, &import)?;
+    Ok(import)
+}
+
+/// Re-run a failed or cancelled import from its original source and options,
+/// in place (same import id and directory), against the currently configured
+/// dissect server.
+#[tauri::command]
+pub async fn dissect_retry(app: AppHandle, import_id: String) -> Result<DissectImport> {
+    retry(&http(&app), &dissect_url(&app)?, &app_projects_dir(&app)?, &import_id).await
+}
+
+pub async fn retry(
+    http: &reqwest::Client,
+    base: &str,
+    projects_dir: &Path,
+    import_id: &str,
+) -> Result<DissectImport> {
+    let dir = import_dir(projects_dir, import_id)?;
+    let path = dir.join(IMPORT_FILE);
+    let mut import: DissectImport = read_json(&path)?;
+    if !matches!(import.status.as_str(), "failed" | "cancelled") {
+        return Err(Error::Other(format!("only failed or cancelled imports can be retried (this one is {})", import.status)));
+    }
+    if !Path::new(&import.source_path).is_file() {
+        return Err(Error::Other(format!(
+            "the original recording is no longer at {} — start a new import instead",
+            import.source_path
+        )));
+    }
+    let base = base.trim_end_matches('/').to_string();
+    let (job_id, remote) = start_job(http, &base, &dir, &import.source_path, &import.options).await?;
+    import.job_id = job_id;
+    import.remote = remote;
+    import.server_url = base;
+    import.status = "running".into();
+    import.error = None;
+    write_json(&path, &import)?;
     Ok(import)
 }
 
@@ -338,7 +423,7 @@ pub async fn poll(http: &reqwest::Client, projects_dir: &Path, import_id: &str) 
 
     match import.status.as_str() {
         "complete" => return Ok(status(&import, 1.0, None, read_manifest(&dir)?)),
-        "failed" => return Ok(status(&import, 0.0, None, None)),
+        "failed" | "cancelled" => return Ok(status(&import, 0.0, None, None)),
         _ => {}
     }
 
@@ -397,6 +482,11 @@ pub async fn poll(http: &reqwest::Client, projects_dir: &Path, import_id: &str) 
             import.status = "complete".into();
             write_json(&import_path, &import)?;
             Ok(status(&import, 1.0, message, Some(manifest)))
+        }
+        "cancelled" => {
+            import.status = "cancelled".into();
+            write_json(&import_path, &import)?;
+            Ok(status(&import, progress, message, None))
         }
         "failed" => {
             import.status = "failed".into();
@@ -638,6 +728,7 @@ mod tests {
                 status: "complete".into(),
                 error: None,
                 created_at: Utc::now().to_rfc3339(),
+                options: DissectOptions::default(),
             },
         )
         .unwrap();
@@ -713,6 +804,53 @@ mod tests {
         assert_eq!(c2.voice_assignment.ref_audio_sources.len(), 2);
         assert_eq!(c2.voice_assignment.ref_audio_path.unwrap(), gold);
         assert_eq!(c2.voice_provenance.len(), 2);
+    }
+
+    fn set_status(root: &Path, id: &str, status: &str, source: &str) {
+        let path = imports_root(root).join(id).join(IMPORT_FILE);
+        let mut imp: DissectImport = read_json(&path).unwrap();
+        imp.status = status.into();
+        imp.source_path = source.into();
+        // Port 9 (discard) refuses fast: a stand-in for a dead server.
+        imp.server_url = "http://127.0.0.1:9".into();
+        write_json(&path, &imp).unwrap();
+    }
+
+    #[tokio::test]
+    async fn cancel_marks_cancelled_even_if_server_is_unreachable() {
+        let root = tmp();
+        let id = fixture(&root);
+        set_status(&root, &id, "running", "/nope.mp3");
+        let http = reqwest::Client::new();
+        let imp = cancel(&http, &root, &id).await.unwrap();
+        assert_eq!(imp.status, "cancelled");
+        // Terminal from then on: poll doesn't contact the server.
+        let s = poll(&http, &root, &id).await.unwrap();
+        assert_eq!(s.status, "cancelled");
+        // And a second cancel is refused.
+        assert!(cancel(&http, &root, &id).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn retry_only_from_failed_or_cancelled_with_source_present() {
+        let root = tmp();
+        let id = fixture(&root);
+        let http = reqwest::Client::new();
+        set_status(&root, &id, "running", "/nope.mp3");
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        assert!(e.contains("only failed or cancelled"), "{}", e);
+
+        set_status(&root, &id, "failed", "/definitely/not/here.m4b");
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        assert!(e.contains("no longer at"), "{}", e);
+
+        // Source present but server down: error, and the import stays failed.
+        let src = root.join("ep.wav");
+        std::fs::write(&src, b"RIFF").unwrap();
+        set_status(&root, &id, "failed", &src.to_string_lossy());
+        assert!(retry(&http, "http://127.0.0.1:9", &root, &id).await.is_err());
+        let imp: DissectImport = read_json(&imports_root(&root).join(&id).join(IMPORT_FILE)).unwrap();
+        assert_eq!(imp.status, "failed");
     }
 
     #[test]

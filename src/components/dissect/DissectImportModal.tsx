@@ -66,6 +66,8 @@ export const DissectImportModal: React.FC<{
   const [busySpeaker, setBusySpeaker] = useState<string | null>(null);
   const tracked = useDissectStore((s) => (importId ? s.statuses[importId] : undefined));
   const track = useDissectStore((s) => s.track);
+  const cancelRun = useDissectStore((s) => s.cancel);
+  const retryRun = useDissectStore((s) => s.retry);
 
   const refreshImports = useCallback(() => {
     listDissectImports().then(setImports).catch((e) => reportError("List imports", e));
@@ -82,6 +84,7 @@ export const DissectImportModal: React.FC<{
     setStatus(tracked);
     if (tracked.status === "complete") { setStage("review"); refreshImports(); }
     if (tracked.status === "failed") { setError(tracked.error ?? "Dissect failed"); setStage("pick"); refreshImports(); }
+    if (tracked.status === "cancelled") { setStage("pick"); refreshImports(); }
   }, [stage, tracked, refreshImports]);
 
   // A finished import is read once; a running one is handed to the tracker
@@ -283,10 +286,25 @@ export const DissectImportModal: React.FC<{
                           : imp.status}
                         {" · "}{new Date(imp.created_at).toLocaleDateString()}
                       </span>
-                      {imp.status !== "failed" && (
+                      {(imp.status === "running" || imp.status === "complete") && (
                         <button className="btn btn-sm" onClick={() => openImport(imp.import_id, imp.source_name)}>
                           {imp.status === "running" ? "Resume" : "Open"}
                         </button>
+                      )}
+                      {(imp.status === "failed" || imp.status === "cancelled") && (
+                        <button
+                          className="btn btn-sm"
+                          title="Run again with the same settings"
+                          onClick={async () => {
+                            setError(null);
+                            setImportId(imp.import_id);
+                            setAssigned({});
+                            setStatus(null);
+                            setStage("running");
+                            if (!(await retryRun(imp.import_id, imp.source_name))) setStage("pick");
+                            refreshImports();
+                          }}
+                        >Retry</button>
                       )}
                       <button className="btn btn-sm" onClick={() => handleDeleteImport(imp.import_id)} title="Delete import">×</button>
                     </div>
@@ -305,6 +323,14 @@ export const DissectImportModal: React.FC<{
               <div style={{ height: 4, background: "var(--bg-3)", borderRadius: 2, overflow: "hidden", maxWidth: 420, margin: "0 auto" }}>
                 <div style={{ width: `${pct}%`, height: "100%", background: "var(--tts)", transition: "width 0.4s" }} />
               </div>
+              {importId && (
+                <button
+                  className="btn btn-sm"
+                  style={{ marginTop: 14 }}
+                  disabled={status?.message === "Cancelling…"}
+                  onClick={() => cancelRun(importId)}
+                >Cancel import</button>
+              )}
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)", marginTop: 8 }}>
                 {pct}% · runs in the background — it's in the job queue, and you'll get a toast when it's done
               </div>

@@ -124,6 +124,8 @@ pub fn run() {
             commands::audiobook::export_episode_m4b,
             commands::dissect::dissect_submit,
             commands::dissect::dissect_status,
+            commands::dissect::dissect_cancel,
+            commands::dissect::dissect_retry,
             commands::dissect::list_dissect_imports,
             commands::dissect::delete_dissect_import,
             commands::dissect::dissect_assign_speaker,

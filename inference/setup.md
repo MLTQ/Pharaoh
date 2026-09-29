@@ -29,9 +29,13 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Rationale**: Neural upscaling is ML work and must stay on the inference host, but it needs its own dependency stack.
 
 ### Dissect env section
-- **Does**: With `PHARAOH_INSTALL_DISSECT=1`, creates `.venv-dissect` (Python 3.12), installs torch 2.8 cu128 then `requirements-dissect.txt` (NeMo from a pinned source commit), clones the pinned MSST checkout and downloads the BandIt Plus DnR config + weights into `~/pharaoh-models/dissect`.
+- **Does**: Runs automatically when Linux + an NVIDIA GPU are detected (`PHARAOH_INSTALL_DISSECT=auto`, the default; `0` skips, `1` forces). Checks ffmpeg/ffprobe and free disk; creates `.venv-dissect` (Python 3.12) with torch 2.8 cu128 and `requirements-dissect.txt` (NeMo from a pinned source commit); moves the MSST checkout to its pinned commit; downloads the BandIt Plus weights via `.part` files with a size sanity check; prefetches the three NeMo checkpoints (`dissect_pipeline.py --prefetch`, skip with `PHARAOH_DISSECT_PREFETCH=0`); then verifies with `dissect_pipeline.py --check`.
 - **Interacts with**: `dissect_server.py`, `dissect_pipeline.py`, `PHARAOH_DISSECT_MODEL_DIR`.
 - **Rationale**: Nemotron-3-Diarization needs NeMo newer than the 3.0.0 wheel, which in turn needs torch ≥ 2.7 — incompatible with the torch 2.6 pins in the other envs.
+
+### Section arguments
+- **Does**: `./inference/setup.sh <section…>` runs only the named sections (`core chatterbox rvc audioldm audiosr dissect applio`) and switches named optional ones on; no arguments runs everything as before. `--help` prints the header.
+- **Rationale**: Installing one optional server used to re-sync every core env. Naming `dissect` still honours GPU auto-detection so it can't half-install CUDA wheels on a Mac.
 
 ## Contracts
 

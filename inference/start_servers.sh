@@ -75,7 +75,7 @@ fi
 if [ -x "${DISSECT_PYTHON}" ]; then
     echo "  Dissect    : ${DISSECT_PYTHON}"
 else
-    echo "  Dissect    : not installed (PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh)"
+    echo "  Dissect    : not installed (./inference/setup.sh dissect — Linux + NVIDIA)"
 fi
 echo ""
 

@@ -442,7 +442,7 @@ export interface GeneratedAudioAsset {
 // ── Jobs (frontend state) ───────────────────────────────────────────────────
 
 export type ModelKind = "tts" | "sfx" | "music" | "post" | "dissect";
-export type JobStatus = "pending" | "running" | "complete" | "failed";
+export type JobStatus = "pending" | "running" | "complete" | "failed" | "cancelled";
 
 export type QaJobStatus = "unreviewed" | "approved" | "rejected";
 
@@ -629,9 +629,10 @@ export interface DissectImport {
   source_name: string;
   server_url: string;
   remote: boolean;
-  status: "running" | "complete" | "failed";
+  status: "running" | "complete" | "failed" | "cancelled";
   error?: string | null;
   created_at: string;
+  options?: DissectOptions;
 }
 
 export interface DissectCandidate {
@@ -709,7 +710,7 @@ export interface DissectManifest {
 
 export interface DissectStatus {
   import_id: string;
-  status: "running" | "complete" | "failed";
+  status: "running" | "complete" | "failed" | "cancelled";
   progress: number;
   message: string | null;
   error: string | null;

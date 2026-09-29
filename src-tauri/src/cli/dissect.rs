@@ -43,9 +43,14 @@ pub(super) async fn run(config: &AppConfig, source: &str, rest: &[String]) -> Re
     if !flag_parse(&flags, "wait", true)? {
         return print_json(&import);
     }
+    wait_for(&http, config, &import.import_id).await
+}
+
+/// Poll to a terminal state, echoing stage changes to stderr.
+async fn wait_for(http: &reqwest::Client, config: &AppConfig, import_id: &str) -> Result<()> {
     let mut last = String::new();
     loop {
-        let status = dissect::poll(&http, &projects_dir(config), &import.import_id).await?;
+        let status = dissect::poll(http, &projects_dir(config), import_id).await?;
         let line = format!(
             "{:>3}% {}",
             (status.progress * 100.0) as u32,
@@ -58,6 +63,9 @@ pub(super) async fn run(config: &AppConfig, source: &str, rest: &[String]) -> Re
         if status.status != "running" {
             if status.status == "failed" {
                 return Err(Error::Other(status.error.unwrap_or_else(|| "dissect failed".into())));
+            }
+            if status.status == "cancelled" {
+                return Err(Error::Other("dissect was cancelled".into()));
             }
             return print_json(&status);
         }
@@ -131,4 +139,20 @@ pub(super) async fn assign(
 pub(super) fn delete(config: &AppConfig, import_id: &str) -> Result<()> {
     dissect::delete_import(&projects_dir(config), import_id)?;
     print_json(&serde_json::json!({ "deleted": import_id }))
+}
+
+/// `dissect cancel <import_id>`
+pub(super) async fn cancel(config: &AppConfig, import_id: &str) -> Result<()> {
+    print_json(&dissect::cancel(&reqwest::Client::new(), &projects_dir(config), import_id).await?)
+}
+
+/// `dissect retry <import_id> [--wait true|false]`
+pub(super) async fn retry(config: &AppConfig, import_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let http = reqwest::Client::new();
+    let import = dissect::retry(&http, &config.dissect_url, &projects_dir(config), import_id).await?;
+    if !flag_parse(&flags, "wait", true)? {
+        return print_json(&import);
+    }
+    wait_for(&http, config, import_id).await
 }

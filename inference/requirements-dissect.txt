@@ -1,6 +1,6 @@
 # Dissect server (port 18007) — separation + diarization + ASR.
 # Installed into inference/.venv-dissect by setup.sh when:
-#   PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh
+#   ./inference/setup.sh dissect      (or any full run on a Linux + NVIDIA host)
 #
 # Python 3.12+ and NeMo from source: Nemotron-3-Diarization's RoPE encoder is
 # not in the nemo-toolkit 3.0.0 wheel. That source tree needs torch>=2.7.

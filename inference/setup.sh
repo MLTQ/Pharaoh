@@ -8,6 +8,20 @@
 #   inference/.venv-audiosr    → optional AudioSR upscaler
 #   inference/.venv-rvc        → rvc-python for voice conversion (Python 3.9)
 #   inference/.venv-applio     → Applio for RVC model training (Python 3.11)
+#   inference/.venv-dissect    → voices from existing recordings: NeMo (source),
+#                                BandIt Plus separator, Nemotron / TitaNet /
+#                                Parakeet weights (Python 3.12, Linux + NVIDIA)
+#
+# Usage:
+#   ./inference/setup.sh                 core envs + any optional ones enabled below
+#   ./inference/setup.sh dissect         ONLY the named sections (forces them on);
+#   ./inference/setup.sh core dissect    sections: core chatterbox rvc audioldm
+#                                        audiosr dissect applio
+#
+# Optional sections are switched on with PHARAOH_INSTALL_<NAME>=1. Dissect
+# defaults to "auto": installed when an NVIDIA GPU is found on Linux, skipped
+# elsewhere (PHARAOH_INSTALL_DISSECT=0 to skip, =1 to force).
+# PHARAOH_DISSECT_PREFETCH=0 skips downloading its ~2.5 GB of model weights.
 #
 # SFX continues to use the existing ~/Code/Woosh/.venv (which Woosh manages).
 # AudioLDM long-soundscape support is optional and isolated from Woosh because
@@ -30,7 +44,8 @@ RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 DISSECT_VENV="${SCRIPT_DIR}/.venv-dissect"
-INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-0}"
+INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-auto}"
+DISSECT_PREFETCH="${PHARAOH_DISSECT_PREFETCH:-1}"
 DISSECT_MODEL_DIR="${PHARAOH_DISSECT_MODEL_DIR:-$HOME/pharaoh-models/dissect}"
 MSST_COMMIT="84b1eac0887756b4f1a9d7a1ff49105939749ed2"
 MSST_RELEASE="https://github.com/ZFTurbo/Music-Source-Separation-Training/releases/download/v.1.0.3"
@@ -38,6 +53,32 @@ AUDIOLDM_CACHE_DIR="${PHARAOH_AUDIOLDM_CACHE_DIR:-${AUDIOLDM_CACHE_DIR:-$HOME/ph
 APPLIO_VENV="${SCRIPT_DIR}/.venv-applio"
 APPLIO_DIR="${PHARAOH_APPLIO_DIR:-${SCRIPT_DIR}/.applio}"
 INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
+
+# ── Sections ─────────────────────────────────────────────────────────────────
+# With no arguments every section runs (optional ones per their flags). Naming
+# sections runs only those and switches the named optional ones on.
+KNOWN_SECTIONS="core chatterbox rvc audioldm audiosr dissect applio"
+SECTIONS=" "
+for arg in "$@"; do
+    case "${arg}" in
+        -h|--help)
+            sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
+            exit 0 ;;
+        core) ;;
+        chatterbox) INSTALL_CHATTERBOX=1 ;;
+        rvc) INSTALL_RVC=1 ;;
+        audioldm) INSTALL_AUDIOLDM=1 ;;
+        audiosr) INSTALL_AUDIOSR=1 ;;
+        # Naming dissect still honours GPU auto-detection; only an explicit
+        # PHARAOH_INSTALL_DISSECT=1 forces it onto a machine without one.
+        dissect) INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-auto}" ;;
+        applio) INSTALL_APPLIO=1 ;;
+        *) echo "unknown section '${arg}' (known: ${KNOWN_SECTIONS})" >&2; exit 2 ;;
+    esac
+    SECTIONS="${SECTIONS}${arg} "
+done
+# True when this run includes section $1.
+only() { [ "${SECTIONS}" = " " ] || [[ "${SECTIONS}" == *" $1 "* ]]; }
 
 # ── Colors ───────────────────────────────────────────────────────────────────
 if [ -t 1 ]; then
@@ -63,6 +104,7 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 ok "uv $(uv --version | awk '{print $2}')"
 
+if only core; then
 step "Checking audio tools"
 if command -v sox >/dev/null 2>&1; then
     ok "SoX found at $(command -v sox)"
@@ -130,7 +172,10 @@ else
     hint "Then re-run this script to apply the CUDA PyTorch patch."
 fi
 
+fi  # core
+
 # ── Optional Chatterbox Turbo ────────────────────────────────────────────────
+if only chatterbox; then
 step "Chatterbox env (.venv-chatterbox)"
 if [ "${INSTALL_CHATTERBOX}" = "1" ]; then
     if [ ! -d "${CHATTERBOX_VENV}" ]; then
@@ -148,8 +193,10 @@ if [ "${INSTALL_CHATTERBOX}" = "1" ]; then
 else
     hint "Optional 0-shot voice cloning + paralinguistic tags: PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh"
 fi
+fi  # chatterbox
 
 # ── Optional RVC voice conversion ────────────────────────────────────────────
+if only rvc; then
 step "RVC env (.venv-rvc)"
 if [ "${INSTALL_RVC}" = "1" ]; then
     # IMPORTANT: rvc-python's transitive deps (fairseq, hydra) have a
@@ -183,8 +230,10 @@ if [ "${INSTALL_RVC}" = "1" ]; then
 else
     hint "Optional RVC voice conversion: PHARAOH_INSTALL_RVC=1 ./inference/setup.sh"
 fi
+fi  # rvc
 
 # ── Optional SFX+ (AudioLDM) ─────────────────────────────────────────────────
+if only audioldm; then
 step "SFX+ env (AudioLDM)"
 if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
     if [ ! -d "${AUDIOLDM_VENV}" ]; then
@@ -204,8 +253,10 @@ if [ "${INSTALL_AUDIOLDM}" = "1" ]; then
 else
     hint "Optional long soundscapes: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
 fi
+fi  # audioldm
 
 # ── Optional post (AudioSR) ──────────────────────────────────────────────────
+if only audiosr; then
 step "Post env (AudioSR)"
 if [ "${INSTALL_AUDIOSR}" = "1" ]; then
     if [ ! -d "${AUDIOSR_VENV}" ]; then
@@ -219,16 +270,53 @@ if [ "${INSTALL_AUDIOSR}" = "1" ]; then
 else
     hint "Optional neural upscaling: PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh"
 fi
+fi  # audiosr
 
-# ── Optional dissect (separation + diarization + ASR) ───────────────────────
+# ── Dissect (separation + diarization + ASR) ────────────────────────────────
+dissect_gpu() {
+    [ "$(uname -s)" = "Linux" ] && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1
+}
+# Free GiB on the filesystem holding $1 (0 if unknown).
+free_gib() { df -Pk "$1" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1048576}'; }
+
+if only dissect; then
 step "Dissect env (.venv-dissect, voices from existing recordings)"
+if [ "${INSTALL_DISSECT}" = "auto" ]; then
+    if dissect_gpu; then
+        INSTALL_DISSECT=1
+        ok "NVIDIA GPU found — installing dissect (PHARAOH_INSTALL_DISSECT=0 to skip)"
+    else
+        INSTALL_DISSECT=0
+        hint "Skipped: dissect needs Linux + an NVIDIA GPU. Run this on your GPU host,"
+        hint "or force with: PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh dissect"
+    fi
+fi
 if [ "${INSTALL_DISSECT}" = "1" ]; then
+    DISSECT_OK=1
+    dissect_gpu || warn "No NVIDIA GPU detected — dissect will install but run very slowly (or not at all)."
+    if ! command -v ffmpeg >/dev/null 2>&1 || ! command -v ffprobe >/dev/null 2>&1; then
+        fail "ffmpeg/ffprobe not found — the dissect server decodes every source with them."
+        hint "Install with your package manager (e.g. sudo apt install ffmpeg / sudo pacman -S ffmpeg), then re-run."
+        DISSECT_OK=0
+    fi
+    HF_CACHE="${HF_HOME:-$HOME/.cache/huggingface}"
+    mkdir -p "${DISSECT_MODEL_DIR}" "${HF_CACHE}"
+    for d in "${SCRIPT_DIR}" "${DISSECT_MODEL_DIR}" "${HF_CACHE}"; do
+        g="$(free_gib "$d")"
+        if [ -n "$g" ] && [ "$g" -lt 20 ]; then
+            warn "Only ${g} GiB free under ${d} — dissect needs ~12 GiB (venv) + ~3 GiB (weights)."
+        fi
+    done
+fi
+if [ "${INSTALL_DISSECT}" = "1" ] && [ "${DISSECT_OK}" = "1" ]; then
     if [ ! -d "${DISSECT_VENV}" ]; then
         uv venv --python 3.12 "${DISSECT_VENV}"
         ok "Created ${DISSECT_VENV}"
     else
         ok "Reusing ${DISSECT_VENV}"
     fi
+    # Nemotron-3-Diarization's RoPE encoder is only in NeMo from source, which
+    # needs torch >= 2.7 — hence torch 2.8 / CUDA 12.8 here, unlike other envs.
     uv pip install --python "${DISSECT_VENV}/bin/python" \
         "torch==2.8.0" "torchaudio==2.8.0" --index-url https://download.pytorch.org/whl/cu128
     uv pip install --python "${DISSECT_VENV}/bin/python" Cython packaging
@@ -237,25 +325,57 @@ if [ "${INSTALL_DISSECT}" = "1" ]; then
         --extra-index-url https://download.pytorch.org/whl/cu128 --index-strategy unsafe-best-match
     ok "Dissect deps synced"
 
-    mkdir -p "${DISSECT_MODEL_DIR}"
-    if [ ! -d "${DISSECT_MODEL_DIR}/msst" ]; then
-        git clone -q https://github.com/ZFTurbo/Music-Source-Separation-Training "${DISSECT_MODEL_DIR}/msst"
-        git -C "${DISSECT_MODEL_DIR}/msst" checkout -q "${MSST_COMMIT}"
-        ok "Cloned separator code → ${DISSECT_MODEL_DIR}/msst"
+    # Separator code, pinned. An existing checkout is moved to the pin.
+    MSST_DIR="${DISSECT_MODEL_DIR}/msst"
+    if [ ! -d "${MSST_DIR}/.git" ]; then
+        rm -rf "${MSST_DIR}"
+        git clone -q https://github.com/ZFTurbo/Music-Source-Separation-Training "${MSST_DIR}"
     fi
+    if [ "$(git -C "${MSST_DIR}" rev-parse HEAD)" != "${MSST_COMMIT}" ]; then
+        git -C "${MSST_DIR}" fetch -q origin
+        git -C "${MSST_DIR}" checkout -q "${MSST_COMMIT}"
+    fi
+    ok "Separator code at ${MSST_COMMIT:0:8} → ${MSST_DIR}"
+
+    # Separator weights: download to .part, keep only if non-trivial.
     for f in config_dnr_bandit_bsrnn_multi_mus64.yaml model_bandit_plus_dnr_sdr_11.47.chpt; do
-        if [ ! -f "${DISSECT_MODEL_DIR}/${f}" ]; then
-            curl -fsSL -o "${DISSECT_MODEL_DIR}/${f}" "${MSST_RELEASE}/${f}"
-            ok "Downloaded ${f}"
+        dest="${DISSECT_MODEL_DIR}/${f}"
+        if [ ! -s "${dest}" ]; then
+            curl -fL --retry 3 -o "${dest}.part" "${MSST_RELEASE}/${f}"
+            mv "${dest}.part" "${dest}"
         fi
     done
-    hint "NeMo models (diarizer, TitaNet, Parakeet) download from Hugging Face on first job."
-    command -v ffmpeg >/dev/null 2>&1 || warn "ffmpeg not found — the dissect server needs it to decode sources."
-else
-    hint "Optional voices-from-recordings: PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh (Linux + NVIDIA GPU)"
+    SEP_MB=$(( $(wc -c < "${DISSECT_MODEL_DIR}/model_bandit_plus_dnr_sdr_11.47.chpt") / 1048576 ))
+    if [ "${SEP_MB}" -lt 100 ]; then
+        fail "Separator checkpoint is only ${SEP_MB} MB — the download looks truncated. Delete it and re-run."
+    else
+        ok "BandIt Plus separator weights (${SEP_MB} MB)"
+    fi
+
+    # NeMo checkpoints: fetch now so the first import doesn't stall on ~2.5 GB.
+    if [ "${DISSECT_PREFETCH}" = "1" ]; then
+        echo "  Downloading Nemotron-3-Diarization, TitaNet-large, Parakeet TDT 0.6B v3 …"
+        if (cd "${SCRIPT_DIR}" && "${DISSECT_VENV}/bin/python" dissect_pipeline.py --prefetch); then
+            ok "NeMo model weights cached in ${HF_CACHE}"
+        else
+            warn "Weight prefetch failed — they will download on the first import instead."
+        fi
+    else
+        hint "Skipped weight prefetch (PHARAOH_DISSECT_PREFETCH=0); they download on the first import."
+    fi
+
+    echo "  Verifying …"
+    if (cd "${SCRIPT_DIR}" && "${DISSECT_VENV}/bin/python" dissect_pipeline.py --check); then
+        ok "Dissect ready — start it with ./inference/start_servers.sh (port 18007)"
+        hint "Remote clients: open the port on this host's firewall (e.g. sudo ufw allow 18007/tcp)."
+    else
+        fail "Dissect verification failed (see ✗ lines above). The server would fall back to stub mode."
+    fi
 fi
+fi  # dissect
 
 # ── Optional Applio (RVC model training) ────────────────────────────────────
+if only applio; then
 step "Applio env (.venv-applio, for RVC model training)"
 if [ "${INSTALL_APPLIO}" = "1" ]; then
     # Clone Applio (shallow) if not already present.
@@ -303,6 +423,7 @@ if [ "${INSTALL_APPLIO}" = "1" ]; then
 else
     hint "Optional RVC training: PHARAOH_INSTALL_APPLIO=1 ./inference/setup.sh"
 fi
+fi  # applio
 
 # ── Done ─────────────────────────────────────────────────────────────────────
 step "Done"
@@ -317,5 +438,6 @@ echo "  Post   → AudioSR server runs on :18004; checkpoints download on first 
 echo "  Chatterbox → model weights download from HuggingFace on first /load call"
 echo "  RVC        → HuBERT weights download on first /convert call; .pth/.index from Applio training"
 echo "  Applio     → pretrained G/D + HuBERT download on first training run (auto, ~1 GB)"
+echo "  Dissect    → separator + NeMo weights fetched above (PHARAOH_DISSECT_PREFETCH=0 defers them to the first import)"
 echo ""
 echo "See the Models page in the app for the exact model download commands."

@@ -44,6 +44,9 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], all
 register_upload_route(app)
 jobs = JobStore()
 models = dp.Models()
+# Job ids whose cancel was requested. Checked at every progress checkpoint
+# (every separation batch, diarization chunk and transcription batch).
+_cancel: set = set()
 
 
 class DissectParams(BaseModel):
@@ -85,19 +88,28 @@ async def _run(job_id: str, p: DissectParams) -> None:
     )
 
     def progress(frac: float, message: str) -> None:
+        if job_id in _cancel:
+            raise dp.DissectCancelled()
         jobs.update(job_id, status="running", progress=round(frac, 3), message=message)
 
     jobs.update(job_id, message="Queued behind another job")
     async with inference_lock():
-        jobs.update(job_id, status="running", progress=0.0, message="Starting")
         try:
+            if job_id in _cancel:  # cancelled while waiting for the GPU
+                raise dp.DissectCancelled()
+            jobs.update(job_id, status="running", progress=0.0, message="Starting")
             await asyncio.to_thread(dp.run, models, input_path, out_dir, opts, progress)
             jobs.update(job_id, status="complete", progress=1.0, message="Done",
                         output_path=str(out_dir / "manifest.json"))
+        except dp.DissectCancelled:
+            jobs.update(job_id, status="cancelled", message="Cancelled")
+            if is_server_owned(str(out_dir)):
+                shutil.rmtree(out_dir, ignore_errors=True)
         except Exception as exc:
             log.exception("dissect failed")
             jobs.update(job_id, status="failed", error=f"{exc.__class__.__name__}: {exc}")
         finally:
+            _cancel.discard(job_id)
             # A remote client's upload is a whole episode; don't let them pile up.
             if is_server_owned(input_path) and "uploads" in Path(input_path).parts:
                 Path(input_path).unlink(missing_ok=True)
@@ -136,6 +148,19 @@ async def generate_dissect(p: DissectParams) -> dict:
     jobs.create(job_id, "dissect", "dissect", _model_dump(p))
     spawn_job(_run(job_id, p))
     return {"job_id": job_id, "status": "queued"}
+
+
+@app.post("/cancel/{job_id}")
+async def cancel(job_id: str) -> dict:
+    """Ask a queued or running dissect to stop at its next checkpoint."""
+    job = jobs.get(job_id)
+    if job is None:
+        raise HTTPException(status_code=404, detail="job not found")
+    if job["status"] in ("complete", "failed", "cancelled"):
+        return {"status": job["status"]}
+    _cancel.add(job_id)
+    jobs.update(job_id, message="Cancelling…")
+    return {"status": "cancelling"}
 
 
 @app.get("/jobs/{job_id}")

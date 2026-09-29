@@ -262,7 +262,7 @@ export const ModelsView: React.FC = () => {
                     {h?.stub && (
                       <div style={{ color: "var(--tts)", fontSize: 10.5, marginTop: 6 }}>
                         Stub mode{h.stub_reason ? ` — ${h.stub_reason}` : ""}. Imports produce placeholder speakers.
-                        Install with <code style={{ fontFamily: "var(--font-mono)" }}>PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh</code> (Linux + NVIDIA).
+                        Install with <code style={{ fontFamily: "var(--font-mono)" }}>./inference/setup.sh dissect</code> on the GPU host (Linux + NVIDIA).
                       </div>
                     )}
                     <div style={{ color: "var(--fg-4)", fontSize: 10.5, marginTop: 6 }}>

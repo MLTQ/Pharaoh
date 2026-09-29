@@ -9,11 +9,12 @@
  *
  * On completion a toast offers "Review →", which switches to the Library and
  * asks it (via `openRequest`) to open the modal straight at that import.
+ * `cancel` / `retry` back the queue row's buttons.
  */
 
 import { create } from "zustand";
 import type { DissectStatus, Job } from "../lib/types";
-import { dissectStatus, listDissectImports } from "../lib/tauriCommands";
+import { dissectCancel, dissectRetry, dissectStatus, listDissectImports } from "../lib/tauriCommands";
 import { useJobStore } from "./jobStore";
 import { useToastStore } from "./toastStore";
 import { useUiStore } from "./uiStore";
@@ -25,6 +26,12 @@ export const dissectJobId = (importId: string) => `dissect-${importId}`;
 
 // Imports with a live poll loop, so track() is idempotent.
 const polling = new Set<string>();
+// Source names by import, so retry can re-label and re-track.
+const names = new Map<string, string>();
+
+/** Import id behind a queue row, or null for non-dissect rows. */
+export const importIdOfJob = (jobId: string): string | null =>
+  jobId.startsWith("dissect-") ? jobId.slice("dissect-".length) : null;
 
 interface DissectState {
   /** Latest status per tracked import. */
@@ -33,6 +40,9 @@ interface DissectState {
   openRequest: string | null;
   track: (importId: string, sourceName: string) => void;
   resumeRunning: () => Promise<void>;
+  cancel: (importId: string) => Promise<void>;
+  /** Resolves false (with the queue row failed and a toast) if the re-run couldn't start. */
+  retry: (importId: string, sourceName?: string) => Promise<boolean>;
   requestOpen: (importId: string | null) => void;
 }
 
@@ -45,10 +55,14 @@ export const useDissectStore = create<DissectState>((set, get) => ({
   track: (importId, sourceName) => {
     if (polling.has(importId)) return;
     polling.add(importId);
+    names.set(importId, sourceName);
 
     const jobs = useJobStore.getState();
     const id = dissectJobId(importId);
-    if (!jobs.jobs.some((j) => j.id === id)) {
+    if (jobs.jobs.some((j) => j.id === id)) {
+      // Retrying: reuse the row rather than stacking a second one.
+      jobs.updateJob(id, { status: "running", progress: 0, eta: "starting", error: null });
+    } else {
       const job: Job = {
         id,
         model: "dissect",
@@ -104,6 +118,11 @@ export const useDissectStore = create<DissectState>((set, get) => ({
         });
         return;
       }
+      if (s.status === "cancelled") {
+        polling.delete(importId);
+        update(id, { status: "cancelled", eta: "cancelled", error: null });
+        return;
+      }
       if (s.status === "failed") {
         polling.delete(importId);
         update(id, { status: "failed", eta: "failed", error: s.error ?? "dissect failed" });
@@ -120,6 +139,34 @@ export const useDissectStore = create<DissectState>((set, get) => ({
       window.setTimeout(tick, POLL_MS);
     };
     void tick();
+  },
+
+  cancel: async (importId) => {
+    const id = dissectJobId(importId);
+    useJobStore.getState().updateJob(id, { eta: "cancelling…" });
+    try {
+      await dissectCancel(importId);
+      // The poll loop sees "cancelled" on its next tick and finalises the row.
+    } catch (e) {
+      useToastStore.getState().push({ kind: "error", title: "Cancel failed", body: String(e) });
+    }
+  },
+
+  retry: async (importId, sourceName) => {
+    const id = dissectJobId(importId);
+    const name = sourceName ?? names.get(importId)
+      ?? useJobStore.getState().jobs.find((j) => j.id === id)?.description.replace(/^Dissect · /, "")
+      ?? "recording";
+    useJobStore.getState().updateJob(id, { status: "running", progress: 0, eta: "resubmitting", error: null });
+    try {
+      await dissectRetry(importId);
+      get().track(importId, name);
+      return true;
+    } catch (e) {
+      useJobStore.getState().updateJob(id, { status: "failed", eta: "failed", error: String(e) });
+      useToastStore.getState().push({ kind: "error", title: "Retry failed", body: String(e) });
+      return false;
+    }
   },
 
   resumeRunning: async () => {

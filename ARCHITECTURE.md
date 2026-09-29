@@ -603,7 +603,17 @@ characters. Lives at `inference/dissect_server.py` (HTTP/job shell) and
 `inference/dissect_pipeline.py` (the stages). Isolated venv:
 `inference/.venv-dissect` — Python 3.12, NeMo **from source** (the
 Nemotron-3-Diarization RoPE encoder is not in the nemo-toolkit 3.0.0 wheel),
-torch 2.8 cu128. Install with `PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh`.
+torch 2.8 cu128. `./inference/setup.sh` installs it automatically on Linux +
+NVIDIA (`./inference/setup.sh dissect` for just this section): venv, pinned
+separator code + weights, a prefetch of the three NeMo checkpoints (~2.5 GB),
+and a verification pass (`dissect_pipeline.py --check`, which loads the
+diarizer). Settings → Dissect has an Install button when the server is local.
+
+**Cancel / retry:** `POST /cancel/{job_id}` stops a run at its next progress
+checkpoint (every separation batch, diarization chunk, transcription batch);
+Rust `dissect_cancel` / `dissect_retry` (and `pharaoh dissect cancel|retry`)
+mark the import and re-run it in place with its saved options. Stems are
+24-bit FLAC (2 GB of WAV per 44 min → ~190 MB).
 
 ```
 POST /generate/dissect
@@ -623,7 +633,7 @@ at word gaps, scored on length, dialogue-over-bed level, speech rate and voice
 similarity → exported 48 kHz / 24-bit.
 
 **Output** (an *import*, relocatable — every path relative):
-`manifest.json` · `stems/{dialogue,music,effects}.wav` · `candidates/S{n}_c{k}.wav` · `cover.jpg|png`.
+`manifest.json` · `stems/{dialogue,music,effects}.flac` · `candidates/S{n}_c{k}.wav` · `cover.jpg|png`.
 
 **Audiobook sources (.m4b / .m4a):** chapters, tags and embedded cover art are
 read with ffprobe into `manifest.chapters`, `source_tags` and `cover`; turns
@@ -881,6 +891,8 @@ Lifecycle commands are tracked as Pharaoh-wnf.
   pharaoh dissect status <import_id>
   pharaoh dissect list
   pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
+  pharaoh dissect cancel <import_id>
+  pharaoh dissect retry <import_id> [--wait true|false]
   pharaoh dissect delete <import_id>
   pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config

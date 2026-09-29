@@ -9,6 +9,9 @@ Background tracker for running dissect imports. Owns the job-queue row for each 
 - **Does**: Adds the queue row (once) and polls `dissectStatus` every 1.5 s until complete/failed. Idempotent per import. On completion: row → 100 % with the speaker count, and a toast with **Review →** (switches to the Library and sets `openRequest`). On failure: row → failed, error toast.
 - **Rationale**: The modal used to own the poll loop, so closing it froze the job and nothing else knew the import existed.
 
+### `cancel(importId)`, `retry(importId, sourceName?)`
+- **Does**: Back the job-queue row's Cancel / Retry buttons and the modal's. Cancel calls `dissect_cancel` and lets the poll loop finalise the row as `cancelled`. Retry calls `dissect_retry` (same import, same options, current server) and re-tracks, reusing the existing row; it resolves `false` — row failed, toast shown — when the re-run couldn't start (e.g. the source file moved).
+
 ### `resumeRunning()`
 - **Does**: Called once at app start (`App.tsx`); re-tracks every import whose `import.json` says `running`, so the queue survives a restart. No-op for mesh viewers.
 

@@ -813,6 +813,14 @@ export const dissectSubmit = (sourcePath: string, options?: DissectOptions): Pro
 export const dissectStatus = (importId: string): Promise<DissectStatus> =>
   invoke("dissect_status", { importId });
 
+/** Stop a running import (the server stops at its next checkpoint). */
+export const dissectCancel = (importId: string): Promise<DissectImport> =>
+  invoke("dissect_cancel", { importId });
+
+/** Re-run a failed or cancelled import in place with its original options. */
+export const dissectRetry = (importId: string): Promise<DissectImport> =>
+  invoke("dissect_retry", { importId });
+
 export const listDissectImports = (): Promise<DissectImportSummary[]> =>
   invoke("list_dissect_imports");
 

@@ -95,7 +95,9 @@ def test_stub_run_writes_relocatable_manifest(tmp_path, monkeypatch):
     assert manifest["stub"] is True
     assert manifest["warnings"] and "Stub mode" in manifest["warnings"][0]
     assert progress[-1] == 1.0
-    assert manifest["stems"] == {"dialogue": "stems/dialogue.wav"}
+    assert manifest["stems"] == {"dialogue": "stems/dialogue.flac"}
+    stem = sf.info(str(out / "stems" / "dialogue.flac"))
+    assert stem.format == "FLAC" and stem.subtype == "PCM_24"
     on_disk = json.loads((out / "manifest.json").read_text())
     assert on_disk["speakers"] == manifest["speakers"]
     assert manifest["speakers"], "stub segmenter should find the tone bursts"
