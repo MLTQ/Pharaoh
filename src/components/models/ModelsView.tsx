@@ -19,10 +19,29 @@ const SFX_VARIANTS = [
 ];
 
 const SERVERS = [
-  { kind: "tts"   as const, label: "Qwen3-TTS",          color: "var(--tts)",   port: 18001 },
-  { kind: "sfx"   as const, label: "Woosh + AudioLDM",    color: "var(--sfx)",   port: 18002 },
-  { kind: "music" as const, label: "ACE-Step v1 (3.5B)",  color: "var(--music)", port: 18003 },
+  { kind: "tts"     as const, label: "Qwen3-TTS",          color: "var(--tts)",      port: 18001 },
+  { kind: "sfx"     as const, label: "Woosh + AudioLDM",    color: "var(--sfx)",      port: 18002 },
+  { kind: "music"   as const, label: "ACE-Step v1 (3.5B)",  color: "var(--music)",    port: 18003 },
+  { kind: "dissect" as const, label: "Dissect",             color: "var(--st-ready)", port: 18007 },
 ];
+
+type CardKind = (typeof SERVERS)[number]["kind"];
+
+// The four models behind one Load on the dissect server, keyed by the names
+// its /health `loaded` list uses.
+const DISSECT_MODELS = [
+  { key: "separator", name: "BandIt Plus (DnR)",       role: "dialogue / music / effects separation" },
+  { key: "diarizer",  name: "Nemotron-3-Diarization", role: "who speaks when · up to 8 per pass" },
+  { key: "embedder",  name: "TitaNet-large",          role: "links voices across a long recording" },
+  { key: "asr",       name: "Parakeet TDT 0.6B v3",   role: "transcripts with word timestamps" },
+];
+
+const START_CMD: Record<CardKind, string> = {
+  tts: "python inference/tts_server.py",
+  sfx: "python inference/sfx_server.py",
+  music: "python inference/music_server.py",
+  dissect: "inference/.venv-dissect/bin/python inference/dissect_server.py",
+};
 
 const STATUS_COLOR: Record<string, string> = {
   online:  "var(--st-rendered)",
@@ -32,10 +51,10 @@ const STATUS_COLOR: Record<string, string> = {
 };
 
 export const ModelsView: React.FC = () => {
-  const { tts, sfx, music, health, loadProgress, loadModel, unloadModel, pollHealth } = useModelStore();
-  const statusMap = { tts, sfx, music };
-  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music };
-  const progressMap = { tts: loadProgress.tts, sfx: loadProgress.sfx, music: loadProgress.music };
+  const { tts, sfx, music, dissect, health, loadProgress, loadModel, unloadModel, pollHealth } = useModelStore();
+  const statusMap = { tts, sfx, music, dissect };
+  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, dissect: health.dissect };
+  const progressMap = { tts: loadProgress.tts, sfx: loadProgress.sfx, music: loadProgress.music, dissect: loadProgress.dissect };
 
   const [ttsVariant, setTtsVariant] = useState("CustomVoice-1.7B");
   const [sfxVariant, setSfxVariant] = useState("Woosh-DFlow");
@@ -94,14 +113,14 @@ export const ModelsView: React.FC = () => {
     setChatterboxBusy(false);
   };
 
-  const doLoad = async (kind: "tts" | "sfx" | "music", variant?: string) => {
+  const doLoad = async (kind: CardKind, variant?: string) => {
     setBusy((b) => ({ ...b, [kind]: true }));
     try { await loadModel(kind, variant); } finally {
       setBusy((b) => ({ ...b, [kind]: false }));
     }
   };
 
-  const doUnload = async (kind: "tts" | "sfx" | "music") => {
+  const doUnload = async (kind: CardKind) => {
     setBusy((b) => ({ ...b, [kind]: true }));
     try { await unloadModel(kind); } finally {
       setBusy((b) => ({ ...b, [kind]: false }));
@@ -224,6 +243,34 @@ export const ModelsView: React.FC = () => {
                   </div>
                 )}
 
+                {/* Dissect: four models behind one Load */}
+                {s.kind === "dissect" && (
+                  <div>
+                    {DISSECT_MODELS.map((m) => {
+                      const on = h?.loaded?.includes(m.key) ?? false;
+                      const missing = m.key === "separator" && h && h.separator_ready === false;
+                      return (
+                        <div key={m.key} style={{ display: "flex", gap: 10, alignItems: "baseline", fontSize: 11.5, padding: "2px 0" }}>
+                          <span style={{ width: 10, color: on ? "var(--st-rendered)" : "var(--fg-4)" }}>{on ? "●" : "○"}</span>
+                          <span style={{ color: "var(--fg-1)", minWidth: 170 }}>{m.name}</span>
+                          <span style={{ color: missing ? "var(--tts)" : "var(--fg-3)", fontSize: 10.5 }}>
+                            {missing ? "weights missing — separation will be skipped" : m.role}
+                          </span>
+                        </div>
+                      );
+                    })}
+                    {h?.stub && (
+                      <div style={{ color: "var(--tts)", fontSize: 10.5, marginTop: 6 }}>
+                        Stub mode{h.stub_reason ? ` — ${h.stub_reason}` : ""}. Imports produce placeholder speakers.
+                        Install with <code style={{ fontFamily: "var(--font-mono)" }}>PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh</code> (Linux + NVIDIA).
+                      </div>
+                    )}
+                    <div style={{ color: "var(--fg-4)", fontSize: 10.5, marginTop: 6 }}>
+                      Imports voices from existing recordings (Library → From audio…). Loads on first import if you skip this; ~5.5 GB VRAM.
+                    </div>
+                  </div>
+                )}
+
                 {/* TTS variant picker */}
                 {s.kind === "tts" && (
                   <div>
@@ -274,7 +321,7 @@ export const ModelsView: React.FC = () => {
                     <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontStyle: "normal" }}>
                       {s.kind === "sfx" && wooshDir
                         ? `PHARAOH_WOOSH_DIR="${wooshDir}" python inference/sfx_server.py`
-                        : `python inference/${s.kind}_server.py`}
+                        : START_CMD[s.kind]}
                     </code>
                   </div>
                 )}

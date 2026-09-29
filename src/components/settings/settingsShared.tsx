@@ -63,9 +63,17 @@ export const MODELS = [
     variants: null as null,
     install: "PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh",
   },
+  {
+    kind: "dissect" as const,
+    label: "Dissect",
+    description: "Voices from existing recordings — separate · diarize · transcribe",
+    port: 18007,
+    variants: null as null,
+    install: "PHARAOH_INSTALL_DISSECT=1 ./inference/setup.sh",
+  },
 ];
 
-export type ModelKind = "tts" | "sfx" | "music" | "post";
+export type ModelKind = "tts" | "sfx" | "music" | "post" | "dissect";
 
 /** SFX server health extended with Woosh/AudioLDM readiness flags. */
 export type SfxServerHealth = ServerHealth & {
@@ -83,6 +91,7 @@ export const KIND_COLOR: Record<string, string> = {
   tts:   "var(--tts)",
   sfx:   "var(--sfx)",
   music: "var(--music)",
+  dissect: "var(--st-ready)",
   post:  "var(--sfx)",
 };
 

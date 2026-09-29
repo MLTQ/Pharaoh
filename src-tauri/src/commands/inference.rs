@@ -87,6 +87,9 @@ pub async fn check_server_health(app: AppHandle, model: String) -> Result<Server
             "sfx" => format!("{}/health", cfg.sfx_url),
             "music" => format!("{}/health", cfg.music_url),
             "post" => format!("{}/health", cfg.post_url),
+            "chatterbox" => format!("{}/health", cfg.chatterbox_url),
+            "rvc" => format!("{}/health", cfg.rvc_url),
+            "dissect" => format!("{}/health", cfg.dissect_url),
             "mcp" => format!("{}/health", cfg.mcp_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
@@ -152,6 +155,9 @@ pub async fn load_model(app: AppHandle, model: String, variant: Option<String>) 
             "sfx" => format!("{}/load", cfg.sfx_url),
             "music" => format!("{}/load", cfg.music_url),
             "post" => format!("{}/load", cfg.post_url),
+            "chatterbox" => format!("{}/load", cfg.chatterbox_url),
+            "rvc" => format!("{}/load", cfg.rvc_url),
+            "dissect" => format!("{}/load", cfg.dissect_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };
@@ -229,6 +235,9 @@ pub async fn unload_model(app: AppHandle, model: String) -> Result<()> {
             "sfx" => format!("{}/unload", cfg.sfx_url),
             "music" => format!("{}/unload", cfg.music_url),
             "post" => format!("{}/unload", cfg.post_url),
+            "chatterbox" => format!("{}/unload", cfg.chatterbox_url),
+            "rvc" => format!("{}/unload", cfg.rvc_url),
+            "dissect" => format!("{}/unload", cfg.dissect_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
         }
     };

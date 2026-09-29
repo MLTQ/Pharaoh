@@ -640,6 +640,11 @@ import, speaker, clips, the exact statement confirmed, timestamp) on the
 character. The GUI and `pharaoh dissect assign --confirm-rights yes` both go
 through it.
 
+**In the app:** a managed server like TTS/SFX/Music — Models tab card (one
+Load for all four models), Settings server card, topbar health dot. Each run
+is a job-queue row (`model: "dissect"`) driven by `store/dissectStore.ts`,
+resumed on app start, with a "Review →" toast on completion.
+
 **Known gotchas:**
 - Linux + NVIDIA. ~5.5 GB VRAM for the NeMo models plus the separator.
 - A narrator who also reads a character is usually one speaker to both the

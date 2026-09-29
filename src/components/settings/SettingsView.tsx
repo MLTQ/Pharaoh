@@ -20,10 +20,10 @@ import { ChatterboxRvcCards, type ChatterboxHealth } from "./ChatterboxRvcCards"
 
 export const SettingsView: React.FC = () => {
   const hw = useHardwareProfile();
-  const { tts, sfx, music, post, health, updateServerConfig } = useModelStore();
+  const { tts, sfx, music, post, dissect, health, updateServerConfig } = useModelStore();
 
-  const statusMap = { tts, sfx, music, post };
-  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post };
+  const statusMap = { tts, sfx, music, post, dissect };
+  const healthMap = { tts: health.tts, sfx: health.sfx, music: health.music, post: health.post, dissect: health.dissect };
 
   const [urls, setUrls] = useState<Record<string, string>>(defaultServerUrls());
   const [inferenceHost, setInferenceHost] = useState(LOOPBACK_HOST);
@@ -108,15 +108,6 @@ export const SettingsView: React.FC = () => {
       await invoke("save_app_config", { config: { ...cfg, rvc_url: urls.rvc } });
     } catch (e) {
       reportError("Save RVC URL", e);
-    }
-  };
-
-  const handleDissectUrlBlur = async () => {
-    try {
-      const cfg = await invoke<AppConfig>("get_app_config");
-      await invoke("save_app_config", { config: { ...cfg, dissect_url: urls.dissect } });
-    } catch (e) {
-      reportError("Save dissect URL", e);
     }
   };
 
@@ -313,7 +304,6 @@ export const SettingsView: React.FC = () => {
           onCheckChatterboxHealth={checkChatterboxHealth}
           onChatterboxUrlBlur={handleChatterboxUrlBlur}
           onRvcUrlBlur={handleRvcUrlBlur}
-          onDissectUrlBlur={handleDissectUrlBlur}
         />
       </div>
     </div>

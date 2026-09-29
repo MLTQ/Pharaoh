@@ -7,12 +7,14 @@
  * from the Cast "Add character" modal; when opened with a `projectId`, newly
  * created characters can also be added to that episode's cast.
  *
- * Stages: pick → running (polls dissectStatus) → review.
+ * Stages: pick → running → review. Running imports are polled by
+ * `dissectStore` (which also owns the job-queue row), so closing this modal
+ * never stalls a job; the running stage just follows the store.
  * The rights confirmation gates every "Add" — nothing reaches a character
  * until it is ticked, and the Rust side refuses without it too.
  */
 
-import React, { useCallback, useEffect, useRef, useState } from "react";
+import React, { useCallback, useEffect, useState } from "react";
 import type {
   Character,
   DissectImportSummary,
@@ -31,6 +33,7 @@ import {
 import { reportError } from "../../lib/errors";
 import { fileSrc } from "../../lib/transport";
 import { DissectSpeakerCard, type AssignChoice } from "./DissectSpeakerCard";
+import { useDissectStore } from "../../store/dissectStore";
 
 export const RIGHTS_STATEMENT =
   "I own this recording or have permission from the performer to clone this voice, " +
@@ -38,7 +41,6 @@ export const RIGHTS_STATEMENT =
 
 // .m4b / .m4a audiobooks bring chapters, tags and cover art along with the audio.
 const AUDIO_EXTENSIONS = ["m4b", "m4a", "mp3", "wav", "flac", "ogg", "opus", "aac", "mp4", "mkv", "webm"];
-const POLL_MS = 1500;
 
 type Stage = "pick" | "running" | "review";
 
@@ -48,7 +50,9 @@ export const DissectImportModal: React.FC<{
   projectId?: string | null;
   /** Called after each successful assignment so the caller can refresh lists. */
   onAssigned?: (character: Character, addedToProject: boolean) => void;
-}> = ({ onClose, projectId, onAssigned }) => {
+  /** Open straight at this import (e.g. from the "Review →" toast). */
+  initialImportId?: string | null;
+}> = ({ onClose, projectId, onAssigned, initialImportId }) => {
   const [stage, setStage] = useState<Stage>("pick");
   const [imports, setImports] = useState<DissectImportSummary[]>([]);
   const [separate, setSeparate] = useState(true);
@@ -60,7 +64,8 @@ export const DissectImportModal: React.FC<{
   const [addToCast, setAddToCast] = useState(!!projectId);
   const [assigned, setAssigned] = useState<Record<string, string>>({});
   const [busySpeaker, setBusySpeaker] = useState<string | null>(null);
-  const pollRef = useRef<number | null>(null);
+  const tracked = useDissectStore((s) => (importId ? s.statuses[importId] : undefined));
+  const track = useDissectStore((s) => s.track);
 
   const refreshImports = useCallback(() => {
     listDissectImports().then(setImports).catch((e) => reportError("List imports", e));
@@ -71,41 +76,42 @@ export const DissectImportModal: React.FC<{
 
   useEffect(() => { refreshImports(); refreshLibrary(); }, [refreshImports, refreshLibrary]);
 
-  // Poll the running import until it completes or fails.
+  // Follow the store's poll of the running import.
   useEffect(() => {
-    if (stage !== "running" || !importId) return;
-    let cancelled = false;
-    const tick = async () => {
-      try {
-        const s = await dissectStatus(importId);
-        if (cancelled) return;
-        setStatus(s);
-        if (s.status === "complete") { setStage("review"); refreshImports(); return; }
-        if (s.status === "failed") { setError(s.error ?? "Dissect failed"); setStage("pick"); refreshImports(); return; }
-      } catch (e) {
-        if (cancelled) return;
-        setError(e instanceof Error ? e.message : String(e));
-        setStage("pick");
-        return;
-      }
-      pollRef.current = window.setTimeout(tick, POLL_MS);
-    };
-    tick();
-    return () => {
-      cancelled = true;
-      if (pollRef.current) window.clearTimeout(pollRef.current);
-    };
-  }, [stage, importId, refreshImports]);
+    if (stage !== "running" || !tracked) return;
+    setStatus(tracked);
+    if (tracked.status === "complete") { setStage("review"); refreshImports(); }
+    if (tracked.status === "failed") { setError(tracked.error ?? "Dissect failed"); setStage("pick"); refreshImports(); }
+  }, [stage, tracked, refreshImports]);
 
-  // Running and complete imports both go through the poller; a complete one
-  // resolves to the review stage on its first tick.
-  const openImport = (id: string) => {
+  // A finished import is read once; a running one is handed to the tracker
+  // (which adds it to the job queue if it isn't there already).
+  const openImport = useCallback(async (id: string, sourceName?: string) => {
     setError(null);
     setImportId(id);
     setStatus(null);
     setAssigned({});
-    setStage("running");
-  };
+    try {
+      const s = await dissectStatus(id);
+      if (s.status === "running") {
+        setStage("running");
+        track(id, sourceName ?? s.manifest?.source_name ?? "recording");
+      } else if (s.status === "complete") {
+        setStatus(s);
+        setStage("review");
+      } else {
+        setError(s.error ?? "Dissect failed");
+        setStage("pick");
+      }
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setStage("pick");
+    }
+  }, [track]);
+
+  useEffect(() => {
+    if (initialImportId) void openImport(initialImportId);
+  }, [initialImportId, openImport]);
 
   const handleChoose = async () => {
     setError(null);
@@ -123,6 +129,7 @@ export const DissectImportModal: React.FC<{
       const imp = await dissectSubmit(path, { separate });
       setImportId(imp.import_id);
       setAssigned({});
+      track(imp.import_id, imp.source_name);
       refreshImports();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -277,7 +284,7 @@ export const DissectImportModal: React.FC<{
                         {" · "}{new Date(imp.created_at).toLocaleDateString()}
                       </span>
                       {imp.status !== "failed" && (
-                        <button className="btn btn-sm" onClick={() => openImport(imp.import_id)}>
+                        <button className="btn btn-sm" onClick={() => openImport(imp.import_id, imp.source_name)}>
                           {imp.status === "running" ? "Resume" : "Open"}
                         </button>
                       )}
@@ -299,7 +306,7 @@ export const DissectImportModal: React.FC<{
                 <div style={{ width: `${pct}%`, height: "100%", background: "var(--tts)", transition: "width 0.4s" }} />
               </div>
               <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "var(--fg-3)", marginTop: 8 }}>
-                {pct}% · you can close this and resume from Previous imports
+                {pct}% · runs in the background — it's in the job queue, and you'll get a toast when it's done
               </div>
             </div>
           )}

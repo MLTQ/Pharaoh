@@ -484,7 +484,8 @@ export const AssetBrowser: React.FC<AssetBrowserProps> = ({ assets }) => {
   const setView = useUiStore((s) => s.setView);
   const pushToast = useToastStore((s) => s.push);
   const handleRegenerate = async (job: Job) => {
-    if (!job.output_path) return;
+    // Dissect imports aren't generated assets — nothing to regenerate.
+    if (!job.output_path || job.model === "dissect") return;
     try {
       const meta = await readSidecar(job.output_path);
       if (!meta) {

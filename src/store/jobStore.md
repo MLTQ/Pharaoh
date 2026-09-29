@@ -28,3 +28,6 @@ Frontend store for generation and Post-server jobs, active takes, and event list
 
 ## Notes
 - The store does not write `script.csv` itself on completion; backend finalization owns that. The UI only mirrors the resulting state.
+
+## Dissect jobs
+Rows with `model: "dissect"` are added and updated by [dissectStore](./dissectStore.md), not by Tauri job events — dissect progress is polled from the import, not pushed.

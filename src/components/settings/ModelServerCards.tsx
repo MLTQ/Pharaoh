@@ -270,6 +270,11 @@ export function ModelServerCards({
                     AudioSR runs through the Post server so upscaling can live on the remote ML host.
                     It downloads its own checkpoints on first upscale.
                   </div>
+                ) : m.kind === "dissect" ? (
+                  <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                    setup.sh fetches the BandIt Plus separator into <code>~/pharaoh-models/dissect</code>.
+                    Nemotron-3-Diarization, TitaNet and Parakeet download from Hugging Face on the first import (~2.5 GB).
+                  </div>
                 ) : (
                   <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
                 )}
@@ -316,6 +321,14 @@ export function ModelServerCards({
                       detail="Runs setup.sh for TTS and Music virtualenvs"
                       accent={accent}
                     />
+                    <CopyableCommand command={m.install!} />
+                  </div>
+                ) : m.kind === "dissect" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                      Linux + NVIDIA only (NeMo from source, Python 3.12, CUDA 12.8). Run on the GPU host,
+                      then restart <code>start_servers.sh</code>; open port 18007 if the host has a firewall.
+                    </div>
                     <CopyableCommand command={m.install!} />
                   </div>
                 ) : m.kind === "post" ? (

@@ -12,7 +12,6 @@ export interface ChatterboxRvcCardsProps {
   onCheckChatterboxHealth: () => void;
   onChatterboxUrlBlur: () => void;
   onRvcUrlBlur: () => void;
-  onDissectUrlBlur: () => void;
 }
 
 export function ChatterboxRvcCards({
@@ -24,7 +23,6 @@ export function ChatterboxRvcCards({
   onCheckChatterboxHealth,
   onChatterboxUrlBlur,
   onRvcUrlBlur,
-  onDissectUrlBlur,
 }: ChatterboxRvcCardsProps) {
   return (
     <>
@@ -119,7 +117,7 @@ export function ChatterboxRvcCards({
         </div>
       </div>
 
-      {/* ── RVC + Dissect cards (split mode only; unified mode derives from host) ── */}
+      {/* ── RVC card (split mode only; unified mode derives from host) ── */}
       {splitServers && (
         <>
           <UrlCard
@@ -127,13 +125,6 @@ export function ChatterboxRvcCards({
             value={urls.rvc}
             onChange={(v) => setUrls((prev) => ({ ...prev, rvc: v }))}
             onBlur={onRvcUrlBlur}
-          />
-          <UrlCard
-            title="Dissect" port={18007}
-            subtitle="Separation · diarization · ASR — voices from existing recordings"
-            value={urls.dissect}
-            onChange={(v) => setUrls((prev) => ({ ...prev, dissect: v }))}
-            onBlur={onDissectUrlBlur}
           />
         </>
       )}

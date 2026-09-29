@@ -16,6 +16,7 @@ import { ModelsView } from "./components/models/ModelsView";
 import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ClipStudioView } from "./components/post/ClipStudioView";
 import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
+import { useDissectStore } from "./store/dissectStore";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ProjectChooser } from "./components/launcher/ProjectChooser";
 import { ToastHost } from "./components/shared/ToastHost";
@@ -106,7 +107,7 @@ export default function App() {
   const stopAudio       = useAudioStore((s) => s.stop);
   const isPlaying = audioPlayingPath !== null;
   const positionMs = Math.round(audioPositionSec * 1000);
-  const { tts, sfx, music, post, pollHealth, initListeners: initModelListeners } = useModelStore();
+  const { tts, sfx, music, post, dissect, pollHealth, initListeners: initModelListeners } = useModelStore();
 
   const [_tick, setTick] = useState(0);
   useEffect(() => {
@@ -237,6 +238,10 @@ export default function App() {
     return () => clearInterval(id);
   }, []);
 
+  // Dissect imports outlive the modal and the session: put any still running
+  // back in the job queue.
+  useEffect(() => { void useDissectStore.getState().resumeRunning(); }, []);
+
   const runningJobs = jobs.filter((j) => j.status === "running").length;
 
   const formatMs = (ms: number) => {
@@ -361,6 +366,7 @@ export default function App() {
             ["sfx", "SFX", sfx],
             ["music", "MUSIC", music],
             ["post", "AUDIOSR", post],
+            ["dissect", "DISSECT", dissect],
           ] as const).map(([key, label, s]) => {
             return (
               <span

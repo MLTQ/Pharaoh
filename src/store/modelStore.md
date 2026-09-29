@@ -26,3 +26,6 @@ Zustand store for inference server health, model load/unload state, and load-pro
 - `loadModel("sfx", variant)` forwards the selected variant through Tauri to the SFX server, enabling AudioLDM preloading without a separate store key.
 - `post` is tracked as a server kind so AudioSR can run remotely like the generation services.
 - `invoke` routes via `lib/transport.ts`; `initListeners` is a no-op for mesh viewers (no Tauri events) — health still arrives through `pollHealth` over HTTP.
+
+## Dissect
+`dissect` is a managed server alongside tts/sfx/music/post (`ManagedServer`): polled by `pollHealth`, loadable from the Models tab, shown as a topbar health dot. Its `ServerHealth` carries `stub_reason`, `separator_ready`, `separator_error` and `loaded` — which only reach the UI because Rust's `ServerHealth` now flattens unknown fields through (the AudioLDM/AudioSR extras were being dropped the same way).

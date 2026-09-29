@@ -14,6 +14,10 @@ Model lifecycle panel for checking server health and preloading local inference 
 - **Interacts with**: `sfx_server.py` `/load`.
 - **Rationale**: AudioLDM is an optional backend on the same SFX server. The native runner defaults to upstream's recommended `audioldm-m-full` checkpoint without introducing a fourth top-level model kind.
 
+### Dissect card
+- **Does**: A fourth managed server (`dissect`, port 18007) with one Load that brings up all four models — BandIt Plus, Nemotron-3-Diarization, TitaNet, Parakeet — each shown with a loaded dot from `/health.loaded`. Warns when the separator weights are missing or the server is in stub mode.
+- **Interacts with**: `modelStore` (`dissect` status/health), Rust `load_model` / `unload_model` / `check_server_health` (`"dissect"` arm).
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

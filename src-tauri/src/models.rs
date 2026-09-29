@@ -304,6 +304,11 @@ pub struct ServerHealth {
     pub model_variant: String,
     pub vram_mb: u64,
     pub stub: bool,
+    /// Server-specific extras (AudioLDM / AudioSR readiness, dissect's
+    /// `stub_reason` / `separator_ready` / `loaded`, …) passed through to the
+    /// UI untouched. Without this they were silently dropped here.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -773,5 +778,23 @@ mod tests {
         assert!(encoded.contains("\"tension\":null"));
         let decoded: Scene = serde_json::from_str(&encoded).unwrap();
         assert_eq!(decoded.tension, None);
+    }
+}
+
+#[cfg(test)]
+mod health_tests {
+    use super::ServerHealth;
+
+    #[test]
+    fn server_specific_health_fields_pass_through() {
+        let raw = serde_json::json!({
+            "status": "ok", "model_loaded": true, "model_variant": "x", "vram_mb": 5570,
+            "stub": false, "separator_ready": true, "loaded": ["diarizer", "asr"],
+        });
+        let h: ServerHealth = serde_json::from_value(raw).unwrap();
+        let back = serde_json::to_value(&h).unwrap();
+        assert_eq!(back["separator_ready"], true);
+        assert_eq!(back["loaded"], serde_json::json!(["diarizer", "asr"]));
+        assert_eq!(back["vram_mb"], 5570);
     }
 }

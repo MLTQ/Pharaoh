@@ -54,6 +54,7 @@ import { LibraryDetailHeader } from "./LibraryDetailHeader";
 import { LibraryVoiceTab } from "./LibraryVoiceTab";
 import { LibraryPaletteTab } from "./LibraryPaletteTab";
 import { DissectImportModal } from "../dissect/DissectImportModal";
+import { useDissectStore } from "../../store/dissectStore";
 
 // ── Component ──────────────────────────────────────────────────────────────
 
@@ -66,6 +67,15 @@ export const LibraryView: React.FC = () => {
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
   const [dissectOpen, setDissectOpen] = useState(false);
+  // "Review →" on a finished dissect's toast lands here with an import to open.
+  const dissectOpenRequest = useDissectStore((s) => s.openRequest);
+  const [dissectInitial, setDissectInitial] = useState<string | null>(null);
+  useEffect(() => {
+    if (!dissectOpenRequest) return;
+    setDissectInitial(dissectOpenRequest);
+    setDissectOpen(true);
+    useDissectStore.getState().requestOpen(null);
+  }, [dissectOpenRequest]);
 
   // Tab state — full 4-stage pipeline (Pharaoh-37l)
   const [tab, setTab] = useState<LibraryTab>("voice");
@@ -311,11 +321,12 @@ export const LibraryView: React.FC = () => {
         onSelect={handleSelect}
         onCreate={handleCreate}
         onImportFile={handleImportFile}
-        onImportRecording={() => setDissectOpen(true)}
+        onImportRecording={() => { setDissectInitial(null); setDissectOpen(true); }}
       />
       {dissectOpen && (
         <DissectImportModal
           onClose={() => setDissectOpen(false)}
+          initialImportId={dissectInitial}
           onAssigned={(c) => { void refreshList(c.library_id ?? null); }}
         />
       )}
