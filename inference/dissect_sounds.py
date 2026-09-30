@@ -30,10 +30,19 @@ TAGGER_ID = "MIT/ast-finetuned-audioset-10-10-0.4593"
 TAG_SR = 16000
 TAG_MAX_S = 10.0
 
-# Caps keep a long book's manifest browsable; the strongest are kept.
+# Caps keep a long book's manifest browsable; the strongest are kept. They
+# scale with length — a flat 100 ambience cap truncated a 20 h audiobook.
 MAX_SFX = 300
 MAX_AMBIENCE = 100
 MAX_MUSIC = 150
+CAP_PER_HOUR = {"sfx": 60, "ambience": 25, "music": 25}
+CAP_CEILING = {"sfx": 1500, "ambience": 500, "music": 500}
+
+
+def caps(duration_s: float) -> dict[str, int]:
+    h = max(0.0, duration_s) / 3600
+    base = {"sfx": MAX_SFX, "ambience": MAX_AMBIENCE, "music": MAX_MUSIC}
+    return {k: min(CAP_CEILING[k], max(base[k], int(CAP_PER_HOUR[k] * h))) for k in base}
 
 # Labels that say nothing useful about an effect (the stem is effects by
 # construction; speech/music labels are bleed).
@@ -141,7 +150,7 @@ def beds(power: np.ndarray, abs_db: float = -48.0, gap_s: float = 1.5, min_s: fl
 
 
 def classify(effects: list[dict], music: list[dict], sustained: Optional[list[dict]] = None,
-             ) -> tuple[list[dict], list[dict], list[dict]]:
+             duration_s: float = 0.0) -> tuple[list[dict], list[dict], list[dict]]:
     """Split effect regions into sfx vs ambience, give music a role, cap each list.
 
     `sustained` (from `beds`) adds level-based ambience; floor-relative long
@@ -166,9 +175,10 @@ def classify(effects: list[dict], music: list[dict], sustained: Optional[list[di
         dur = r["end"] - r["start"]
         mus.append({**r, "kind": "music", "role": "sting" if dur < 8.0 else "cue",
                     "prominence": round(r["peak_db"] - r["floor_db"], 1)})
-    sfx = sorted(sfx, key=lambda r: -r["prominence"])[:MAX_SFX]
-    amb = sorted(amb, key=lambda r: -(r["end"] - r["start"]) * max(r["prominence"], 1.0))[:MAX_AMBIENCE]
-    mus = sorted(mus, key=lambda r: -(r["end"] - r["start"]))[:MAX_MUSIC]
+    cap = caps(duration_s)
+    sfx = sorted(sfx, key=lambda r: -r["prominence"])[:cap["sfx"]]
+    amb = sorted(amb, key=lambda r: -(r["end"] - r["start"]) * max(r["prominence"], 1.0))[:cap["ambience"]]
+    mus = sorted(mus, key=lambda r: -(r["end"] - r["start"]))[:cap["music"]]
     return (sorted(sfx, key=lambda r: r["start"]), sorted(amb, key=lambda r: r["start"]),
             sorted(mus, key=lambda r: r["start"]))
 
@@ -219,7 +229,8 @@ def find_sounds(env: dp.Envelope, reader: dp.StemReader, chapters: list[dict],
     fx_power = env.frames.get("effects", np.zeros(0))
     effects = regions(fx_power, rel_db=12.0, abs_db=-50.0, gap_s=0.25, min_s=0.15)
     music = regions(env.frames.get("music", np.zeros(0)), rel_db=10.0, abs_db=-45.0, gap_s=2.0, min_s=3.0)
-    sfx, amb, mus = classify(effects, music, beds(fx_power))
+    duration_s = len(fx_power) * dp.ENV_FRAME_S
+    sfx, amb, mus = classify(effects, music, beds(fx_power), duration_s)
 
     warnings: list[str] = []
     tagger = None

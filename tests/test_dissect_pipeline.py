@@ -290,3 +290,10 @@ def test_constant_bed_is_found_as_ambience():
     sfx, amb, _ = ds.classify(floor_regions, [], ds.beds(power))
     assert len(sfx) == 1
     assert len(amb) == 1 and amb[0]["end"] - amb[0]["start"] > 55
+
+
+def test_sound_caps_scale_with_length():
+    ds = pytest.importorskip("dissect_sounds")
+    assert ds.caps(300) == {"sfx": 300, "ambience": 100, "music": 150}
+    long = ds.caps(20 * 3600)
+    assert long == {"sfx": 1200, "ambience": 500, "music": 500}

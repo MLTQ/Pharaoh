@@ -6,7 +6,7 @@ A finished import laid out for extraction: header (cover, title, author, stats),
 ## Components
 
 ### Voices
-- **Does**: The rights confirmation, "also add to this episode's cast", and one [DissectSpeakerCard](./DissectSpeakerCard.md) per voice. Assigns via `dissectAssignSpeaker` (rights + performer recorded), then `importCharacterFromLibrary` for new characters when a project is open. Notes that a single narrator performing every part is one voice.
+- **Does**: The rights confirmation, "also add to this episode's cast", and one [DissectSpeakerCard](./DissectSpeakerCard.md) per voice. Assigns via `dissectAssignSpeaker` (rights + performer recorded), then `importCharacterFromLibrary` for new characters when a project is open. Notes that a single narrator performing every part is one voice. Voices with under 60 s of speech are folded behind "Show N minor voices" rather than dropped — on a 20 h full-cast fan production 59 of 102 fell under it (bit parts and diarization fragments), while the narrator and main cast (14–34 min each) sat at the top.
 - **Rationale**: The rights gate is enforced in Rust too; the UI gate is the first line.
 
 ### Sound effects / Ambience & beds / Music

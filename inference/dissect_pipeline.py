@@ -732,17 +732,20 @@ def transcribe_turns(models: Models, turns: list[Turn], mono16: np.ndarray,
                      progress: ProgressFn, max_turn_s: float = 30.0) -> None:
     """Fill `text` and absolute-time `words` on every turn."""
     asr = models.load_asr()
-    jobs: list[tuple[Turn, float, np.ndarray]] = []
+    # Spans only — audio is sliced per batch. Materialising every turn's audio
+    # up front cost ~4.6 GB on a 20 h book.
+    jobs: list[tuple[Turn, float, float]] = []
     for t in turns:
         a = t.start
         while a < t.end - 0.2:
             b = min(t.end, a + max_turn_s)
-            jobs.append((t, a, mono16[int(a * ML_SR):int(b * ML_SR)]))
+            jobs.append((t, a, b))
             a = b
     batch = 16
     for i in range(0, len(jobs), batch):
         group = jobs[i:i + batch]
-        hyps = asr.transcribe([g[2] for g in group], batch_size=batch, timestamps=True, verbose=False)
+        audio = [mono16[int(a * ML_SR):int(b * ML_SR)] for _, a, b in group]
+        hyps = asr.transcribe(audio, batch_size=batch, timestamps=True, verbose=False)
         for (turn, offset, _), h in zip(group, hyps):
             text = (h.text or "").strip()
             if text:

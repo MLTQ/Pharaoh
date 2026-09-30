@@ -29,6 +29,11 @@ export const RIGHTS_STATEMENT =
 
 type Tab = "voices" | "sfx" | "ambience" | "music";
 
+// Voices with less speech than this are usually diarization fragments (a long
+// book produced 59 of them); they're folded behind a toggle, not dropped.
+const MINOR_S = 60;
+const isMinor = (speechS: number) => speechS < MINOR_S;
+
 export const DissectReview: React.FC<{
   status: DissectStatus;
   projectId: string | null;
@@ -45,12 +50,13 @@ export const DissectReview: React.FC<{
   const [busySpeaker, setBusySpeaker] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [showVocal, setShowVocal] = useState(false);
+  const [showMinor, setShowMinor] = useState(false);
 
   const refreshLibrary = useCallback(() => {
     listLibraryCharacters().then(setLibrary).catch((e) => reportError("List library", e));
   }, []);
   useEffect(() => { refreshLibrary(); }, [refreshLibrary]);
-  useEffect(() => { setAssigned({}); setTab("voices"); setError(null); }, [importId]);
+  useEffect(() => { setAssigned({}); setTab("voices"); setError(null); setShowMinor(false); }, [importId]);
 
   const handleAssign = async (speakerId: string, choice: AssignChoice) => {
     if (!rights) return;
@@ -85,6 +91,7 @@ export const DissectReview: React.FC<{
     }
   };
 
+  const minorCount = manifest.speakers.filter((sp) => isMinor(sp.total_speech_s)).length;
   const s = manifest.sounds;
   const chapters = manifest.chapters ?? [];
   const tabs: { key: Tab; label: string; n: number | null }[] = [
@@ -174,7 +181,7 @@ export const DissectReview: React.FC<{
               performing every part (as in many audiobooks) is one speaker.
             </div>
           )}
-          {manifest.speakers.map((sp) => (
+          {manifest.speakers.filter((sp) => showMinor || !isMinor(sp.total_speech_s)).map((sp) => (
             <DissectSpeakerCard
               key={`${importId}-${sp.id}`}
               speaker={sp}
@@ -187,6 +194,13 @@ export const DissectReview: React.FC<{
               onAssign={(choice) => handleAssign(sp.id, choice)}
             />
           ))}
+          {minorCount > 0 && (
+            <button className="btn btn-sm" onClick={() => setShowMinor((v) => !v)} style={{ marginTop: 4 }}>
+              {showMinor
+                ? "Hide minor voices"
+                : `Show ${minorCount} minor voice${minorCount === 1 ? "" : "s"} (under ${MINOR_S} s of speech each — often fragments)`}
+            </button>
+          )}
         </>
       )}
 

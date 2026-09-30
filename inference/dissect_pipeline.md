@@ -62,6 +62,7 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 | `tests/test_dissect_pipeline.py` | Stub run works with only numpy + soundfile + ffmpeg | Hard torch imports at module load |
 
 ## Notes
+- Long-source test: a 20.2 h full-cast fan production (.m4b, 14 chapters) ran in 34.7 min on the RTX 4090 at 9.5 GB peak (before the per-batch ASR slicing fix, which removes ~4.6 GB of that); 102 voices (narrator 9.75 h, main cast 14–34 min each), 137 effects (doors, whooshes), 112 music regions confirmed real (music envelope uncorrelated with dialogue, median r = −0.18, same as a known underscore). The previous whole-file version needed ~100 GB and was OOM-killed.
 - Real `.m4b` test: the first 44 min (4 chapters) of LibriVox's *Anne of Green Gables* (DR) processed in 122 s cold on an RTX 4090; chunks cut at chapter starts; the narrator was linked across all chunks; 16 cast credits recovered from the dramatis personae.
 - Measured on a 5-min LibriVox dramatic reading mixed with a Brahms underscore and synthetic rain/knocks: dialogue SDR 16.8 dB (4.9 dB unseparated); 31 s end to end on an RTX 4090 including model load; 5.5 GB VRAM for the NeMo models.
 - Voices that both the diarizer and TitaNet hear as one (e.g. a narrator who also reads a character) stay merged; the UI lets the user pick clips by hand. A split tool is a follow-up.

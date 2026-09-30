@@ -13,7 +13,7 @@ Find the non-dialogue material in a dissected recording — sound effects, vocal
 - **Rationale**: A bed that runs under the whole recording (rain, a crowd) *is* the floor, so `regions` can't see it. Found on the positive-control mix: rain was missed until this pass existed.
 
 ### `classify`
-- **Does**: Effect regions ≤ 6 s → `sfx` (with 0.1 s pre-roll / 0.3 s tail); longer → `ambience`, plus `beds` regions not already covered; music regions → `music` with `role` sting (< 8 s) or cue. Caps: 300 sfx, 100 ambience, 150 music, strongest kept.
+- **Does**: Effect regions ≤ 6 s → `sfx` (with 0.1 s pre-roll / 0.3 s tail); longer → `ambience`, plus `beds` regions not already covered; music regions → `music` with `role` sting (< 8 s) or cue. Caps scale with length (60 / 25 / 25 per hour, at least 300 / 100 / 150, at most 1500 / 500 / 500), strongest kept — a flat cap truncated a 20 h book's ambience.
 
 ### `Tagger`, `find_sounds`
 - **Does**: Labels each region with the AudioSet AST classifier (`MIT/ast-finetuned-audioset-10-10-0.4593`) from a ≤ 10 s excerpt of its stem. Then: effects whose top label is plain speech are dialogue bleed and dropped (unless a real non-speech sound also scores ≥ 0.1); nonverbal vocal sounds (gasp, laugh, sigh…) move to their own `vocal` group; music-stem regions whose "Music" score is < 0.15 are dropped as bleed.
