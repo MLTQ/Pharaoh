@@ -9,9 +9,18 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 - **Does**: Lazily loads and keeps resident BandIt Plus (DnR separator, from a pinned MSST checkout), Nemotron-3-Diarization, TitaNet-large, and Parakeet TDT 0.6B v3. `ml_available()` / `separator_available()` decide stub vs real mode.
 - **Rationale**: MSST's `models.bandit.core` package `__init__` imports its training stack; a bare package object is registered in `sys.modules` so only the model code loads.
 
+### `stream_stems`, `stream_decode`
+- **Does**: One continuous ffmpeg decode, processed in 10-minute windows with 8 s of real audio either side (more than the separator's 6 s chunk) and only the centre kept, so joins are seamless. Each window is separated and appended to FLAC stems on disk; a 50 ms loudness envelope per stem and the 16 kHz dialogue (`Signal16`, int16) are kept in memory.
+- **Rationale**: Decoding a source whole made memory scale with its length — a 20 h audiobook needed ~100 GB and systemd-oomd killed the terminal running every inference server. Streaming holds ~5.5 GB (mostly model weights) whatever the length. Tested sample-exact across window joins.
+
 ### `separate`
-- **Does**: 50 %-overlap, Hann-windowed overlap-add of BandIt Plus over 6 s chunks at 44.1 kHz stereo. Accumulates on the CPU.
-- **Rationale**: An hour of 3-stem stereo is ~4 GB; keeping it off the GPU leaves VRAM for the models.
+- **Does**: 50 %-overlap, Hann-windowed overlap-add of BandIt Plus over 6 s chunks at 44.1 kHz stereo — now per window.
+
+### `Envelope`, `StemReader`
+- **Does**: Clip scoring (level, bleed) reads the envelopes instead of audio; clip export and sound tagging read spans from the FLAC stems on disk.
+
+### Scale: `solo_intervals`, `WordIndex`, `link_speakers`
+- **Does**: Interval and word lookups use bisect; speaker linking keeps a cluster-similarity matrix and updates it in place (average linkage). All three were quadratic-or-worse Python and would have run for hours on a book with tens of thousands of turns.
 
 ### `diarize`, `speaker_centroids`, `link_speakers`
 - **Does**: Diarizes the dialogue stem in `chunk_minutes` chunks (the model tracks ≤ 8 speakers per pass), embeds each chunk-local speaker's longest solo spans with TitaNet, and average-linkage merges them across chunks above `link_threshold`. Speakers from the same chunk never merge.
@@ -24,7 +33,7 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 - **Does**: Cuts each speaker's solo spans into 3–15 s windows at word gaps, trims to the words, scores on length (≈ 8 s ideal), dialogue-over-bed level (`bleed_db`), speech rate, and TitaNet similarity to the speaker centroid; keeps the top non-overlapping `max_candidates`. Exports 48 kHz / 24-bit mono at ≈ −20 dBFS RMS with 12 ms fades.
 
 ### `run`
-- **Does**: Orchestrates the stages, writes `stems/*.flac` (24-bit lossless — WAV stems were 2 GB per 44 min and dominated remote downloads), `candidates/*.wav`, and `manifest.json` (all paths relative to the output dir). Speaker ids are `S1…` ordered by total speech, so the narrator is usually `S1`.
+- **Does**: Orchestrates the stages, writes `transcript.json` (word timings, kept out of the manifest), `stems/*.flac` (24-bit lossless — WAV stems were 2 GB per 44 min and dominated remote downloads), `candidates/*.wav`, and `manifest.json` (all paths relative to the output dir). Speaker ids are `S1…` ordered by total speech, so the narrator is usually `S1`.
 
 ### `probe_container`, `extract_cover`, `chapter_of`, `chunk_bounds`
 - **Does**: ffprobe the source for chapters, descriptive tags (title / album / artist / …) and an attached cover picture; copy the cover out as `cover.jpg|png`; tag every turn and candidate with its chapter; and build diarization chunks from whole chapters (splitting only chapters longer than `chunk_minutes`).
@@ -49,7 +58,7 @@ Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `commands/dissect.rs` | `manifest.json` with `speakers[].id`, `speakers[].candidates[].{id,path,transcript}`; relative paths | Renaming fields, absolute paths |
-| `DissectImportModal.tsx` / `types.ts::DissectManifest` | `duration_s`, `stub`, `warnings`, `speakers[]` stats, candidate `bleed_db` / `similarity` (nullable) | Shape changes |
+| `DissectView` / `DissectReview` / `types.ts::DissectManifest` | `duration_s`, `stub`, `warnings`, `speakers[]` stats, candidate `bleed_db` / `similarity` (nullable) | Shape changes |
 | `tests/test_dissect_pipeline.py` | Stub run works with only numpy + soundfile + ffmpeg | Hard torch imports at module load |
 
 ## Notes

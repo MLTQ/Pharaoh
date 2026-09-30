@@ -17,6 +17,7 @@ The output directory is self-contained and relocatable: every path in
 """
 from __future__ import annotations
 
+import bisect
 import datetime
 import json
 import logging
@@ -56,6 +57,12 @@ ML_SR = 16000       # diarizer / embedder / ASR rate
 CLIP_SR = 48000     # project-standard rate for exported reference clips
 BLEED_CAP_DB = 60.0 # dialogue-over-bed ratios above this all mean "nothing underneath"
 
+# Streaming: sources are processed in windows so memory stays flat however
+# long they are (a 20 h audiobook decoded whole is ~26 GB before separation).
+WINDOW_S = 600.0    # 10 min per window; a multiple of ENV_FRAME_S
+CONTEXT_S = 8.0     # separator context either side (> its 6 s chunk)
+ENV_FRAME_S = 0.05  # loudness-envelope resolution (per stem, mono)
+
 ProgressFn = Callable[[float, str], None]
 
 
@@ -89,19 +96,6 @@ class Turn:
 
 # ── Audio I/O ─────────────────────────────────────────────────────────────────
 
-def decode(path: str, sr: int, channels: int) -> np.ndarray:
-    """Decode any ffmpeg-readable file to float32, shape (samples, channels)."""
-    # -map 0:a:0 / -vn: audiobook containers (.m4b) carry a cover-art video
-    # stream and a chapter-text data track; only the first audio stream is audio.
-    cmd = [
-        "ffmpeg", "-nostdin", "-loglevel", "error", "-i", path,
-        "-map", "0:a:0", "-vn", "-sn", "-dn",
-        "-f", "f32le", "-acodec", "pcm_f32le", "-ac", str(channels), "-ar", str(sr), "-",
-    ]
-    raw = subprocess.run(cmd, check=True, capture_output=True).stdout
-    return np.frombuffer(raw, dtype=np.float32).reshape(-1, channels).copy()
-
-
 # Tags worth carrying from an audiobook / podcast container into the manifest.
 _KEPT_TAGS = ("title", "album", "artist", "album_artist", "composer", "genre", "date",
               "comment", "description", "copyright")
@@ -114,7 +108,7 @@ def probe_container(path: str) -> dict:
     "cover_stream": int|None, "cover_codec": str|None}. Empty on any probe
     failure — metadata is a bonus, never a reason to fail the import.
     """
-    out = {"chapters": [], "tags": {}, "cover_stream": None, "cover_codec": None}
+    out = {"chapters": [], "tags": {}, "cover_stream": None, "cover_codec": None, "duration": None}
     try:
         res = subprocess.run(
             ["ffprobe", "-v", "error", "-print_format", "json", "-show_chapters",
@@ -135,6 +129,10 @@ def probe_container(path: str) -> dict:
         title = ((ch.get("tags") or {}).get("title") or "").strip() or f"Chapter {i + 1}"
         out["chapters"].append({"index": len(out["chapters"]), "title": title,
                                 "start": round(start, 3), "end": round(end, 3)})
+    try:
+        out["duration"] = float((info.get("format") or {}).get("duration"))
+    except (TypeError, ValueError):
+        pass
     tags = {k.lower(): v for k, v in ((info.get("format") or {}).get("tags") or {}).items()}
     out["tags"] = {k: str(tags[k])[:2000] for k in _KEPT_TAGS if tags.get(k)}
     for st in info.get("streams") or []:
@@ -242,6 +240,177 @@ def rms_db(x: np.ndarray) -> float:
     return 20 * math.log10(float(np.sqrt(np.mean(np.square(x)))) + 1e-9)
 
 
+def db(ms: float) -> float:
+    """Mean-square power → dBFS."""
+    return 10 * math.log10(ms + 1e-12)
+
+
+class Signal16:
+    """Mono 16 kHz dialogue kept as int16 (2.3 GB for 20 h instead of 4.6).
+
+    Slicing returns float32 in [-1, 1], so callers treat it like an array.
+    """
+
+    def __init__(self, capacity: int) -> None:
+        self.a = np.zeros(max(capacity, 1), dtype=np.int16)
+        self.n = 0
+
+    def __len__(self) -> int:
+        return self.n
+
+    def __getitem__(self, s: slice) -> np.ndarray:
+        return self.a[: self.n][s].astype(np.float32) / 32767.0
+
+    def put(self, start: int, x: np.ndarray) -> None:
+        end = start + len(x)
+        if end > len(self.a):
+            self.a = np.concatenate([self.a, np.zeros(end - len(self.a) + ML_SR * 60, np.int16)])
+        self.a[start:end] = (np.clip(x, -1.0, 1.0) * 32767.0).astype(np.int16)
+        self.n = max(self.n, end)
+
+
+def frame_power(x: np.ndarray, sr: int) -> np.ndarray:
+    """Mean-square power per ENV_FRAME_S frame of mono-mixed `x`."""
+    hop = int(round(ENV_FRAME_S * sr))
+    m = to_mono(x).astype(np.float32)
+    n = int(math.ceil(len(m) / hop))
+    if n == 0:
+        return np.zeros(0, np.float32)
+    pad = np.zeros(n * hop, np.float32)
+    pad[: len(m)] = m
+    return np.mean(pad.reshape(n, hop) ** 2, axis=1).astype(np.float32)
+
+
+class Envelope:
+    """Per-stem loudness envelopes at ENV_FRAME_S resolution."""
+
+    def __init__(self, frames: dict[str, np.ndarray]) -> None:
+        self.frames = frames
+
+    def power(self, stem: str, a: float, b: float) -> float:
+        f = self.frames.get(stem)
+        if f is None or len(f) == 0:
+            return 0.0
+        i, j = int(a / ENV_FRAME_S), max(int(math.ceil(b / ENV_FRAME_S)), int(a / ENV_FRAME_S) + 1)
+        return float(np.mean(f[i:j])) if i < len(f) else 0.0
+
+    def db(self, stem: str, a: float, b: float) -> float:
+        return db(self.power(stem, a, b))
+
+
+class StemReader:
+    """Random access into the FLAC stems on disk (for clip export)."""
+
+    def __init__(self, out_dir: Path, stem_paths: dict[str, str]) -> None:
+        self.paths = {k: out_dir / v for k, v in stem_paths.items()}
+
+    def read(self, stem: str, a: float, b: float) -> np.ndarray:
+        with sf.SoundFile(str(self.paths[stem])) as f:
+            sr = f.samplerate
+            f.seek(max(0, int(a * sr)))
+            return f.read(max(0, int((b - a) * sr)), dtype="float32", always_2d=True)
+
+
+def stream_decode(path: str, sr: int, channels: int):
+    """Yield consecutive float32 blocks of `path` from one ffmpeg process.
+
+    A single continuous decode — no seeking — so window joins are sample-exact.
+    """
+    cmd = [
+        "ffmpeg", "-nostdin", "-loglevel", "error", "-i", path,
+        "-map", "0:a:0", "-vn", "-sn", "-dn",
+        "-f", "f32le", "-acodec", "pcm_f32le", "-ac", str(channels), "-ar", str(sr), "-",
+    ]
+    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    frame_bytes = 4 * channels
+
+    def read(n_samples: int) -> np.ndarray:
+        want = n_samples * frame_bytes
+        chunks, got = [], 0
+        while got < want:
+            b = proc.stdout.read(want - got)
+            if not b:
+                break
+            chunks.append(b)
+            got += len(b)
+        raw = b"".join(chunks)
+        raw = raw[: len(raw) - len(raw) % frame_bytes]
+        return np.frombuffer(raw, dtype=np.float32).reshape(-1, channels)
+
+    try:
+        yield read
+    finally:
+        try:
+            proc.stdout.close()
+        except Exception:
+            pass
+        proc.kill()
+        proc.wait()
+        if proc.returncode not in (0, -9, None) and proc.stderr is not None:
+            err = proc.stderr.read().decode(errors="replace")[-500:]
+            if err.strip():
+                log.warning("ffmpeg: %s", err)
+
+
+def stream_stems(models: Optional["Models"], input_path: str, out_dir: Path, expected_s: Optional[float],
+                 do_separate: bool, progress: ProgressFn) -> tuple[dict[str, str], Signal16, Envelope, float]:
+    """Decode → (separate) → write FLAC stems, window by window.
+
+    Each window is processed with CONTEXT_S of real audio either side and
+    only its centre kept, so the separator never sees an artificial edge.
+    Returns (stem paths, 16 kHz mono dialogue, envelopes, duration_s).
+    """
+    import contextlib
+
+    win = int(WINDOW_S * SEP_SR)
+    ctx = int(CONTEXT_S * SEP_SR)
+    names = ["dialogue", "music", "effects"] if do_separate else ["dialogue"]
+    (out_dir / "stems").mkdir(parents=True, exist_ok=True)
+    stem_paths = {n: f"stems/{n}.flac" for n in names}
+    mono16 = Signal16(int(((expected_s or 3600.0) + 5) * ML_SR))
+    env: dict[str, list[np.ndarray]] = {n: [] for n in names}
+    total_est = max(1.0, expected_s or 0.0)
+
+    with contextlib.ExitStack() as stack:
+        writers = {n: stack.enter_context(sf.SoundFile(str(out_dir / stem_paths[n]), "w", SEP_SR, 2,
+                                                      subtype="PCM_24", format="FLAC")) for n in names}
+        read = stack.enter_context(contextlib.contextmanager(stream_decode)(input_path, SEP_SR, 2))
+        prev_tail = np.zeros((0, 2), np.float32)
+        buf = read(win + ctx)
+        pos = 0
+        while len(buf):
+            cur = min(win, len(buf))
+            ctx_block = np.concatenate([prev_tail, buf]) if len(prev_tail) else buf
+            k0, k1 = len(prev_tail), len(prev_tail) + cur
+            done_s = pos / SEP_SR
+            label = f"Separating dialogue, music and effects · {fmt_hms(done_s)} / {fmt_hms(total_est)}" \
+                if do_separate else f"Reading audio · {fmt_hms(done_s)} / {fmt_hms(total_est)}"
+            if do_separate:
+                sub = lambda f, _m, d=done_s, c=cur: progress(min(1.0, (d + f * c / SEP_SR) / total_est), label)
+                parts = separate(models, ctx_block, sub)
+            else:
+                progress(min(1.0, done_s / total_est), label)
+                parts = {"dialogue": ctx_block}
+            for n in names:
+                seg = np.clip(parts[n][k0:k1], -0.999, 0.999)
+                writers[n].write(seg)
+                env[n].append(frame_power(seg, SEP_SR))
+            dia = to_mono(parts["dialogue"][k0:k1])
+            mono16.put(int(round(pos * ML_SR / SEP_SR)), resample(dia, SEP_SR, ML_SR).astype(np.float32))
+            prev_tail = buf[max(0, cur - ctx):cur]
+            lookahead = buf[cur:]
+            buf = np.concatenate([lookahead, read(win)]) if len(lookahead) else read(win + ctx)
+            pos += cur
+    duration = pos / SEP_SR
+    frames = {n: (np.concatenate(v) if v else np.zeros(0, np.float32)) for n, v in env.items()}
+    return stem_paths, mono16, Envelope(frames), duration
+
+
+def fmt_hms(s: float) -> str:
+    s = int(max(0, s))
+    return f"{s // 3600}:{(s % 3600) // 60:02d}:{s % 60:02d}" if s >= 3600 else f"{s // 60}:{s % 60:02d}"
+
+
 # ── Model registry ────────────────────────────────────────────────────────────
 
 class Models:
@@ -253,6 +422,7 @@ class Models:
         self.diarizer = None
         self.embedder = None
         self.asr = None
+        self.tagger = None  # dissect_sounds.Tagger, loaded on first use
 
     @staticmethod
     def ml_available() -> tuple[bool, str]:
@@ -335,10 +505,10 @@ class Models:
         return self.asr
 
     def loaded(self) -> list[str]:
-        return [n for n in ("separator", "diarizer", "embedder", "asr") if getattr(self, n) is not None]
+        return [n for n in ("separator", "diarizer", "embedder", "asr", "tagger") if getattr(self, n) is not None]
 
     def unload(self) -> None:
-        self.separator = self.separator_cfg = self.diarizer = self.embedder = self.asr = None
+        self.separator = self.separator_cfg = self.diarizer = self.embedder = self.asr = self.tagger = None
         try:
             import gc
             import torch
@@ -442,23 +612,31 @@ def mark_overlaps(turns: list[Turn]) -> None:
 
 
 def solo_intervals(turns: list[Turn], speaker: str) -> list[tuple[float, float]]:
-    """Spans where `speaker` talks and nobody else does."""
+    """Spans where `speaker` talks and nobody else does.
+
+    Other speakers' turns are start-sorted and searched with bisect, so this is
+    ~O(n log n) — a 20 h book has tens of thousands of turns.
+    """
     others = sorted((t.start, t.end) for t in turns if t.speaker != speaker)
+    starts = [a for a, _ in others]
+    longest = max((b - a for a, b in others), default=0.0)
     out: list[tuple[float, float]] = []
     for t in turns:
         if t.speaker != speaker:
             continue
         pieces = [(t.start, t.end)]
-        for a, b in others:
+        lo = bisect.bisect_left(starts, t.start - longest)
+        hi = bisect.bisect_left(starts, t.end)
+        for a, b in others[lo:hi]:
             if b <= t.start or a >= t.end:
                 continue
             nxt = []
-            for s, e in pieces:
-                if b <= s or a >= e:
-                    nxt.append((s, e))
+            for s_, e in pieces:
+                if b <= s_ or a >= e:
+                    nxt.append((s_, e))
                     continue
-                if a > s:
-                    nxt.append((s, a))
+                if a > s_:
+                    nxt.append((s_, a))
                 if b < e:
                     nxt.append((b, e))
             pieces = nxt
@@ -502,33 +680,49 @@ def link_speakers(centroids: dict[str, np.ndarray], threshold: float) -> dict[st
 
     Two speakers from the same chunk are never merged: the diarizer saw them
     side by side and already decided they differ, which beats the embedder.
+    Vectorised (cluster-similarity matrix updated in place): a long book has
+    hundreds of chunk-local speakers, and the pairwise-mean version was cubic.
     """
-    clusters: list[list[str]] = [[s] for s in centroids]
-
-    def chunk_of(s: str) -> str:
-        return s.split(":", 1)[0]
-
-    def sim(a: list[str], b: list[str]) -> float:
-        return float(np.mean([centroids[x] @ centroids[y] for x in a for y in b]))
-
-    while True:
-        best, pair = threshold, None
-        for i in range(len(clusters)):
-            for j in range(i + 1, len(clusters)):
-                if {chunk_of(s) for s in clusters[i]} & {chunk_of(s) for s in clusters[j]}:
-                    continue
-                s = sim(clusters[i], clusters[j])
-                if s > best:
-                    best, pair = s, (i, j)
-        if pair is None:
-            break
-        i, j = pair
-        clusters[i] += clusters.pop(j)
-
+    keys = list(centroids)
+    n = len(keys)
     mapping: dict[str, str] = {}
-    for k, members in enumerate(clusters):
-        for m in members:
-            mapping[m] = f"tmp{k}"
+    if n == 0:
+        return mapping
+    E = np.stack([centroids[k] for k in keys]).astype(np.float64)
+    S = E @ E.T
+    chunk_ids = {c: i for i, c in enumerate(sorted({k.split(":", 1)[0] for k in keys}))}
+    conflict = np.zeros((n, len(chunk_ids)), dtype=bool)
+    for i, k in enumerate(keys):
+        conflict[i, chunk_ids[k.split(":", 1)[0]]] = True
+    size = np.ones(n)
+    alive = np.ones(n, dtype=bool)
+    members: list[list[int]] = [[i] for i in range(n)]
+
+    def blocked() -> np.ndarray:
+        return (conflict.astype(np.int32) @ conflict.T.astype(np.int32)) > 0
+
+    B = blocked()
+    while True:
+        M = np.where(B | ~alive[:, None] | ~alive[None, :], -np.inf, S)
+        np.fill_diagonal(M, -np.inf)
+        i, j = np.unravel_index(int(np.argmax(M)), M.shape)
+        if not np.isfinite(M[i, j]) or M[i, j] <= threshold:
+            break
+        # Merge j into i: average linkage by size-weighted rows.
+        S[i, :] = (size[i] * S[i, :] + size[j] * S[j, :]) / (size[i] + size[j])
+        S[:, i] = S[i, :]
+        size[i] += size[j]
+        conflict[i] |= conflict[j]
+        alive[j] = False
+        members[i] += members[j]
+        members[j] = []
+        row = (conflict.astype(np.int32) @ conflict[i].astype(np.int32)) > 0
+        B[i, :] = row
+        B[:, i] = row
+
+    for k, group in enumerate(g for g in members if g):
+        for m in group:
+            mapping[keys[m]] = f"tmp{k}"
     return mapping
 
 
@@ -564,12 +758,23 @@ def transcribe_turns(models: Models, turns: list[Turn], mono16: np.ndarray,
 
 # ── Stage 5: reference candidates ─────────────────────────────────────────────
 
-def _words_in(turns: list[Turn], speaker: str, a: float, b: float) -> list[dict]:
-    words = []
-    for t in turns:
-        if t.speaker == speaker and t.end > a and t.start < b:
-            words.extend(w for w in t.words if w["start"] >= a - 0.05 and w["end"] <= b + 0.05)
-    return words
+class WordIndex:
+    """Per-speaker words sorted by start, for bisect range lookups."""
+
+    def __init__(self, turns: list[Turn]) -> None:
+        self.words: dict[str, list[dict]] = {}
+        for t in turns:
+            self.words.setdefault(t.speaker, []).extend(t.words)
+        self.starts: dict[str, list[float]] = {}
+        for spk, ws in self.words.items():
+            ws.sort(key=lambda w: w["start"])
+            self.starts[spk] = [w["start"] for w in ws]
+
+    def within(self, speaker: str, a: float, b: float) -> list[dict]:
+        ws, st = self.words.get(speaker, []), self.starts.get(speaker, [])
+        lo = bisect.bisect_left(st, a - 0.05)
+        hi = bisect.bisect_right(st, b + 0.05)
+        return [w for w in ws[lo:hi] if w["end"] <= b + 0.05]
 
 
 def _windows(span: tuple[float, float], words: list[dict], opts: DissectOptions) -> list[tuple[float, float]]:
@@ -596,35 +801,32 @@ def _windows(span: tuple[float, float], words: list[dict], opts: DissectOptions)
 
 
 def pick_candidates(models: Optional[Models], turns: list[Turn], speaker: str,
-                    stems: dict[str, np.ndarray], stems_sr: int, mono16: np.ndarray,
+                    env: Envelope, separated: bool, mono16, words: WordIndex,
                     centroid: Optional[np.ndarray], opts: DissectOptions) -> list[dict]:
-    dialogue = to_mono(stems["dialogue"])
-    bed = None
-    if "music" in stems and "effects" in stems:
-        bed = to_mono(stems["music"]) + to_mono(stems["effects"])
-
+    """Rank a speaker's solo windows as clone references; scoring reads the
+    loudness envelopes, so no audio is touched until the winners are exported."""
     scored = []
     for span in solo_intervals(turns, speaker):
-        words_all = _words_in(turns, speaker, *span)
+        words_all = words.within(speaker, *span)
         for a, b in _windows(span, words_all, opts):
             # Trim to the spoken words, with a little air either side.
-            words = [w for w in words_all if w["start"] >= a - 0.05 and w["end"] <= b + 0.05]
-            if words:
-                a = max(a, words[0]["start"] - 0.15)
-                b = min(b, words[-1]["end"] + 0.25)
+            ws = [w for w in words_all if w["start"] >= a - 0.05 and w["end"] <= b + 0.05]
+            if ws:
+                a = max(a, ws[0]["start"] - 0.15)
+                b = min(b, ws[-1]["end"] + 0.25)
             d = b - a
             if d < opts.min_clip_s or d > opts.max_clip_s:
                 continue
-            seg = dialogue[int(a * stems_sr):int(b * stems_sr)]
-            level = rms_db(seg)
+            level = env.db("dialogue", a, b)
             if level < -45:
                 continue
             bleed_db = None
-            if bed is not None:
+            if separated:
                 # Capped: on a dry source the music/effects stems are near
                 # silence and the raw ratio runs past 100 dB — meaningless detail.
-                bleed_db = min(BLEED_CAP_DB, level - rms_db(bed[int(a * stems_sr):int(b * stems_sr)]))
-            wps = len(words) / d if words else 0.0
+                bed = env.power("music", a, b) + env.power("effects", a, b)
+                bleed_db = min(BLEED_CAP_DB, level - db(bed))
+            wps = len(ws) / d if ws else 0.0
             score = 1.0 - min(1.0, abs(d - 8.0) / 8.0)
             if bleed_db is not None:
                 score += max(-1.0, min(1.0, (bleed_db - 10.0) / 15.0))
@@ -632,7 +834,7 @@ def pick_candidates(models: Optional[Models], turns: list[Turn], speaker: str,
                 score += 0.5 if 1.0 <= wps <= 4.5 else -0.5
             scored.append({
                 "start": round(a, 3), "end": round(b, 3), "duration": round(d, 3),
-                "transcript": " ".join(w["word"] for w in words),
+                "transcript": " ".join(w["word"] for w in ws),
                 "level_db": round(level, 1),
                 "bleed_db": None if bleed_db is None else round(bleed_db, 1),
                 "score": score,
@@ -662,9 +864,9 @@ def pick_candidates(models: Optional[Models], turns: list[Turn], speaker: str,
     return picked
 
 
-def export_clip(stem: np.ndarray, sr: int, a: float, b: float, path: Path) -> None:
-    seg = to_mono(stem[int(a * sr):int(b * sr)]).astype(np.float32)
-    seg = resample(seg, sr, CLIP_SR)
+def export_clip(reader: StemReader, stem: str, a: float, b: float, path: Path) -> None:
+    seg = to_mono(reader.read(stem, a, b)).astype(np.float32)
+    seg = resample(seg, SEP_SR, CLIP_SR)
     fade = int(0.012 * CLIP_SR)
     if len(seg) > 2 * fade:
         ramp = np.linspace(0, 1, fade, dtype=np.float32)
@@ -725,15 +927,21 @@ def find_credits(turns: list[dict], join_gap_s: float = 2.5) -> dict[str, list[d
 
 # ── Stub path ─────────────────────────────────────────────────────────────────
 
-def stub_turns(mono16: np.ndarray) -> list[Turn]:
-    """Energy-gated segmentation, speakers alternating per pause. UI plumbing only."""
-    hop = ML_SR // 10
-    frames = [rms_db(mono16[i:i + hop]) for i in range(0, len(mono16), hop)]
+def stub_turns(env: Envelope) -> list[Turn]:
+    """Energy-gated segmentation from the dialogue envelope, speakers
+    alternating per pause. UI plumbing only."""
+    p = env.frames.get("dialogue", np.zeros(0))
+    if len(p) == 0:
+        return []
+    # Envelope frames → 0.1 s steps (the gate's original resolution).
+    k = max(1, int(round(0.1 / ENV_FRAME_S)))
+    n = len(p) // k
+    frames = [db(float(x)) for x in p[: n * k].reshape(n, k).mean(axis=1)] if n else []
     thresh = (np.percentile(frames, 60) if frames else -40) - 6
     turns, start, quiet, spk = [], None, 0, 0
-    for k, db in enumerate(frames + [-120.0] * 6):
-        t = k * hop / ML_SR
-        if db > thresh:
+    for i, level in enumerate(frames + [-120.0] * 6):
+        t = i * 0.1
+        if level > thresh:
             start = t if start is None else start
             quiet = 0
         elif start is not None:
@@ -750,7 +958,11 @@ def stub_turns(mono16: np.ndarray) -> list[Turn]:
 
 def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         progress: ProgressFn) -> dict:
-    """Run the full pipeline and write `out_dir/manifest.json`. Returns the manifest."""
+    """Run the full pipeline and write `out_dir/manifest.json`. Returns the manifest.
+
+    Memory is bounded by the window size plus the 16 kHz int16 dialogue
+    (~115 MB per hour), not by the source length.
+    """
     out_dir.mkdir(parents=True, exist_ok=True)
     ml_ok, ml_reason = models.ml_available()
     sep_ok, sep_reason = models.separator_available() if ml_ok else (False, ml_reason)
@@ -762,47 +974,33 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
     def stage(lo: float, hi: float) -> ProgressFn:
         return lambda f, msg: progress(lo + (hi - lo) * max(0.0, min(1.0, f)), msg)
 
-    progress(0.01, "Decoding source")
+    progress(0.01, "Reading source")
     container = probe_container(input_path)
     chapters = container["chapters"]
     cover = None
     if container["cover_stream"] is not None:
         cover = extract_cover(input_path, container["cover_stream"], container["cover_codec"], out_dir)
-    mix = decode(input_path, SEP_SR, 2)
-    duration = len(mix) / SEP_SR
+
+    do_separate = bool(opts.separate and ml_ok and sep_ok)
+    if opts.separate and ml_ok and not sep_ok:
+        warnings.append(f"Separation skipped: {sep_reason}")
+    stem_paths, mono16, env, duration = stream_stems(
+        models if do_separate else None, input_path, out_dir, container["duration"],
+        do_separate, stage(0.02, 0.35),
+    )
     if duration < 1.0:
         raise ValueError("source audio is shorter than one second")
-
-    stems: dict[str, np.ndarray]
-    separated = False
-    if opts.separate and ml_ok and sep_ok:
-        stems = separate(models, mix, stage(0.03, 0.35))
-        separated = True
-    else:
-        if opts.separate and ml_ok and not sep_ok:
-            warnings.append(f"Separation skipped: {sep_reason}")
-        stems = {"dialogue": mix}
-
-    # Stems are FLAC: lossless 24-bit at roughly half the size — a third or
-    # less for near-silent music/effects stems of a dry source. An hour of
-    # three WAV stems is ~2.8 GB, which dominated remote imports' download.
-    stem_paths = {}
-    for name, audio in stems.items():
-        rel = f"stems/{name}.flac"
-        write_wav(out_dir / rel, audio, SEP_SR)
-        stem_paths[name] = rel
-
-    mono16 = resample(to_mono(stems["dialogue"]), SEP_SR, ML_SR).astype(np.float32)
+    reader = StemReader(out_dir, stem_paths)
 
     tmp = Path(tempfile.mkdtemp(prefix="pharaoh-dissect-"))
     try:
         if stub:
-            turns = stub_turns(mono16)
+            turns = stub_turns(env)
             centroids: dict[str, np.ndarray] = {}
             mapping = {s: s for s in {t.speaker for t in turns}}
         else:
             turns = diarize(models, mono16, opts, tmp, stage(0.35, 0.5), chapters)
-            progress(0.52, "Matching voices across the recording")
+            progress(0.51, "Matching voices across the recording")
             centroids = speaker_centroids(models, turns, mono16)
             mapping = link_speakers(centroids, opts.link_threshold)
     finally:
@@ -815,10 +1013,12 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
     for local, v in centroids.items():
         merged.setdefault(mapping.get(local, local), []).append(v)
     global_centroids = {k: (np.mean(v, 0) / (np.linalg.norm(np.mean(v, 0)) + 1e-9)) for k, v in merged.items()}
+    turns.sort(key=lambda t: t.start)
     mark_overlaps(turns)
 
     if opts.transcribe and not stub:
-        transcribe_turns(models, turns, mono16, stage(0.55, 0.85))
+        transcribe_turns(models, turns, mono16, stage(0.53, 0.8))
+    words = WordIndex(turns)
 
     # Stable, human-facing speaker ids: most speech first (usually the narrator).
     talk: dict[str, float] = {}
@@ -826,19 +1026,22 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         talk[t.speaker] = talk.get(t.speaker, 0.0) + (t.end - t.start)
     order = sorted(talk, key=lambda s: -talk[s])
     final_id = {s: f"S{i + 1}" for i, s in enumerate(order)}
+    by_speaker: dict[str, list[Turn]] = {}
+    for t in turns:
+        by_speaker.setdefault(t.speaker, []).append(t)
 
     speakers = []
     for i, spk in enumerate(order):
-        progress(0.86 + 0.12 * i / max(1, len(order)), "Choosing reference clips")
-        cands = pick_candidates(None if stub else models, turns, spk, stems, SEP_SR, mono16,
+        progress(0.8 + 0.08 * i / max(1, len(order)), "Choosing reference clips")
+        cands = pick_candidates(None if stub else models, turns, spk, env, do_separate, mono16, words,
                                 global_centroids.get(spk), opts)
         sid = final_id[spk]
         for k, c in enumerate(cands, 1):
             c["id"] = f"{sid}_c{k}"
             c["chapter"] = chapter_of(chapters, c["start"])
             c["path"] = f"candidates/{c['id']}.wav"
-            export_clip(stems["dialogue"], SEP_SR, c["start"], c["end"], out_dir / c["path"])
-        own = [t for t in turns if t.speaker == spk]
+            export_clip(reader, "dialogue", c["start"], c["end"], out_dir / c["path"])
+        own = by_speaker[spk]
         sample = next((t.text for t in sorted(own, key=lambda t: t.start - t.end) if t.text), "")
         speakers.append({
             "id": sid,
@@ -854,13 +1057,24 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
 
     turn_rows = [
         {"speaker": final_id[t.speaker], "start": round(t.start, 3), "end": round(t.end, 3),
-         "text": t.text, "overlap": t.overlap, "chapter": chapter_of(chapters, t.start),
-         "words": t.words}
+         "text": t.text, "overlap": t.overlap, "chapter": chapter_of(chapters, t.start)}
         for t in turns
     ]
     credits = find_credits(turn_rows)
     for sp in speakers:
         sp["credits"] = credits.get(sp["id"], [])
+
+    sounds: dict = {"sfx": [], "vocal": [], "ambience": [], "music": []}
+    if do_separate:
+        from dissect_sounds import find_sounds
+        sounds = find_sounds(env, reader, chapters, models, stage(0.88, 0.99))
+
+    # Word timings are the bulk of a long transcript; keep them out of the
+    # manifest the UI loads, next to it for later use (scene import).
+    (out_dir / "transcript.json").write_text(json.dumps([
+        {"speaker": final_id[t.speaker], "start": round(t.start, 3), "end": round(t.end, 3), "words": t.words}
+        for t in turns
+    ]))
 
     manifest = {
         "version": MANIFEST_VERSION,
@@ -869,20 +1083,23 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         "duration_s": round(duration, 3),
         "created_at": datetime.datetime.now(datetime.timezone.utc).isoformat(),
         "stub": stub,
-        "separated": separated,
+        "separated": do_separate,
         "models": {
-            "separation": SEPARATOR_ID if separated else None,
+            "separation": SEPARATOR_ID if do_separate else None,
             "diarization": None if stub else DIARIZER_ID,
             "embedding": None if stub else EMBEDDER_ID,
             "asr": ASR_ID if (opts.transcribe and not stub) else None,
+            "tagging": sounds.get("tagger"),
         },
         "options": opts.__dict__,
-        "warnings": warnings,
+        "warnings": warnings + sounds.get("warnings", []),
         "stems": stem_paths,
         "chapters": chapters,
         "source_tags": container["tags"],
         "cover": cover,
         "speakers": speakers,
+        "sounds": {k: sounds.get(k, []) for k in ("sfx", "vocal", "ambience", "music")},
+        "transcript": "transcript.json",
         "turns": turn_rows,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))
@@ -901,6 +1118,10 @@ def prefetch() -> None:
     for repo in (DIARIZER_ID, EMBEDDER_ID, ASR_ID):
         path = snapshot_download(repo, allow_patterns=["*.nemo"])
         print(f"  ✓ {repo} → {path}", flush=True)
+    # AudioSet tagger for sound-effect / music labels (dissect_sounds.py).
+    tagger = "MIT/ast-finetuned-audioset-10-10-0.4593"
+    path = snapshot_download(tagger, allow_patterns=["*.json", "*.safetensors"])
+    print(f"  ✓ {tagger} → {path}", flush=True)
 
 
 def check(deep: bool = True) -> bool:

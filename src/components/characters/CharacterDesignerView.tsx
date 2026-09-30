@@ -1,6 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
 import { PlayButton } from "../shared/PlayButton";
-import { DissectImportModal } from "../dissect/DissectImportModal";
 import { useProjectStore } from "../../store/projectStore";
 import { useUiStore } from "../../store/uiStore";
 import {
@@ -79,7 +78,6 @@ export const CharacterDesignerView: React.FC = () => {
   const [importing, setImporting] = useState<string | null>(null);
   const [savingToLibrary, setSavingToLibrary] = useState(false);
   const [pullingFromLibrary, setPullingFromLibrary] = useState(false);
-  const [dissectOpen, setDissectOpen] = useState(false);
 
   // Lines manifest: rows from every scene's script.csv where this character speaks.
   const [lines, setLines] = useState<LineEntry[]>([]);
@@ -777,16 +775,7 @@ export const CharacterDesignerView: React.FC = () => {
       </div>
       )}
 
-      {dissectOpen && (
-        <DissectImportModal
-          projectId={realProjectId}
-          onClose={() => setDissectOpen(false)}
-          onAssigned={(_c, addedToProject) => {
-            refreshLibrary();
-            if (addedToProject) void reloadProjectFromDisk();
-          }}
-        />
-      )}
+
 
       {/* ── Add-character modal ────────────────────────────────────────── */}
       {castModalOpen && (
@@ -868,7 +857,7 @@ export const CharacterDesignerView: React.FC = () => {
                   </button>
                   <button
                     className="btn"
-                    onClick={() => { setCastModalOpen(false); setDissectOpen(true); }}
+                    onClick={() => { setCastModalOpen(false); setView("dissect"); }}
                     style={{
                       textAlign: "left", padding: "12px 14px",
                       background: "var(--bg-2)", border: "1px solid var(--line-2)",

@@ -215,6 +215,11 @@ async def load() -> dict:
             models.load_asr()
             if models.separator_available()[0]:
                 models.load_separator()
+            try:
+                from dissect_sounds import Tagger
+                models.tagger = models.tagger or Tagger(models.device)
+            except Exception:
+                log.warning("sound tagger unavailable", exc_info=True)
         await asyncio.to_thread(_load)
     return {"status": "loaded", "loaded": models.loaded()}
 

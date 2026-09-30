@@ -482,7 +482,7 @@ export interface AssetItem {
 // ── UI state ────────────────────────────────────────────────────────────────
 
 export type ViewId =
-  | "pyramid" | "composition" | "bible" | "characters" | "library"
+  | "pyramid" | "composition" | "bible" | "characters" | "library" | "dissect"
   | "tts" | "sfx" | "music"
   | "clip-studio" | "upscale" | "final"
   | "settings" | "models";
@@ -499,6 +499,7 @@ export const WORKSPACE_OF: Record<ViewId, WorkspaceId> = {
   bible:          "story",
   characters:     "story",
   library:        "story",
+  dissect:        "story",
   composition:    "scenes",
   tts:            "scenes",
   sfx:            "scenes",
@@ -705,6 +706,8 @@ export interface DissectManifest {
   /** Embedded cover art copied out, relative to the import dir. */
   cover?: string | null;
   speakers: DissectSpeaker[];
+  /** Effects / music regions found on the stems (absent for older imports). */
+  sounds?: DissectSounds;
   turns: DissectTurn[];
 }
 
@@ -750,4 +753,33 @@ export interface M4bExport {
   duration_s: number;
   chapters: EpisodeChapter[];
   cover_path: string | null;
+}
+
+export type DissectSoundKind = "sfx" | "vocal" | "ambience" | "music";
+
+/** A region found on the effects or music stem, labelled by AudioSet when available. */
+export interface DissectSound {
+  id: string;
+  kind: DissectSoundKind;
+  /** Which stem to cut it from. */
+  stem: "effects" | "music";
+  start: number;
+  end: number;
+  duration: number;
+  peak_db: number;
+  floor_db: number;
+  prominence: number;
+  chapter: number | null;
+  /** Display name, e.g. "Door · Knock" or "Music". */
+  name: string;
+  labels: { label: string; score: number }[];
+  /** Music only: short sting vs longer cue / bed. */
+  role?: "sting" | "cue";
+}
+
+export interface DissectSounds {
+  sfx: DissectSound[];
+  vocal: DissectSound[];
+  ambience: DissectSound[];
+  music: DissectSound[];
 }

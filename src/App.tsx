@@ -16,6 +16,7 @@ import { ModelsView } from "./components/models/ModelsView";
 import { UpscaleView } from "./components/upscale/UpscaleView";
 import { ClipStudioView } from "./components/post/ClipStudioView";
 import { FinalAssemblyView } from "./components/post/FinalAssemblyView";
+import { DissectView } from "./components/dissect/DissectView";
 import { useDissectStore } from "./store/dissectStore";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ProjectChooser } from "./components/launcher/ProjectChooser";
@@ -303,6 +304,7 @@ export default function App() {
     if (view === "bible")       return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Story Bible", active: true }];
     if (view === "characters")  return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Cast & Voices", active: true }];
     if (view === "library")     return [{ k: "Project", v: project.title }, { k: "Tier I", v: "Character Library", active: true }];
+    if (view === "dissect")     return [{ k: "Project", v: project.title }, { k: "Source", v: "Dissect", active: true }];
     if (view === "settings")    return [{ k: "Project", v: project.title }, { k: "App", v: "Settings", active: true }];
     if (view === "models")      return [{ k: "Project", v: project.title }, { k: "App", v: "Models", active: true }];
     if (view === "clip-studio") return [{ k: "Project", v: project.title }, { k: "Post", v: "Clip Studio", active: true }];
@@ -513,6 +515,11 @@ export default function App() {
                 <span className="ico" style={{ color: "var(--tts)" }}><Icon name="folder" style={{ width: 14, height: 14 }} /></span>
                 <span>Character Library</span>
               </div>
+              <div className="side-section">Source</div>
+              <div className={`side-item ${view === "dissect" ? "active" : ""}`} onClick={() => setView("dissect")}>
+                <span className="ico" style={{ color: "var(--st-ready)" }}><Icon name="waves" style={{ width: 14, height: 14 }} /></span>
+                <span>Dissect</span>
+              </div>
               <div className="side-section">Cast · {characters.length}</div>
               {characters.map((c) => (
                 <div key={c.id} className="side-item" onClick={() => setView("characters")}>
@@ -705,6 +712,7 @@ export default function App() {
         {view === "clip-studio" && <ClipStudioView />}
         {view === "upscale"  && <UpscaleView />}
         {view === "final"    && <FinalAssemblyView />}
+        {view === "dissect"  && <DissectView />}
         {view === "pyramid" && (
           <PyramidView
             project={project}

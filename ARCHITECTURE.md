@@ -650,10 +650,22 @@ import, speaker, clips, the exact statement confirmed, timestamp) on the
 character. The GUI and `pharaoh dissect assign --confirm-rights yes` both go
 through it.
 
-**In the app:** a managed server like TTS/SFX/Music — Models tab card (one
-Load for all four models), Settings server card, topbar health dot. Each run
-is a job-queue row (`model: "dissect"`) driven by `store/dissectStore.ts`,
-resumed on app start, with a "Review →" toast on completion.
+**In the app:** its own **Dissect** tab (Story → Source): imports list, a
+whole-recording overview, and Voices / Sound effects / Ambience & beds / Music
+tabs — voices become Library characters (rights-gated), sounds are auditioned
+(cut on demand) and extracted into a scene's assets with sidecars
+(`dissect-sfx` / `-ambience` / `-music`). Also a managed server: Models card,
+Settings card, topbar dot. Each run is a job-queue row driven by
+`store/dissectStore.ts`, resumed on app start, with a "Review →" toast.
+
+**Long sources:** streamed in 10-minute windows (8 s context each side) to FLAC
+stems on disk, with 50 ms loudness envelopes for scoring and sound detection;
+memory is ~5.5 GB (mostly weights) whatever the length. A 20 h audiobook
+decoded whole had needed ~100 GB. Sounds come from `dissect_sounds.py`:
+floor-relative events (effects), level-based beds (ambience), music-stem
+regions, AudioSet-tagged (AST), with speech bleed dropped and nonverbal vocal
+sounds split out. A server unreachable for 2 minutes fails the import with a
+reason instead of polling forever.
 
 **Known gotchas:**
 - Linux + NVIDIA. ~5.5 GB VRAM for the NeMo models plus the separator.

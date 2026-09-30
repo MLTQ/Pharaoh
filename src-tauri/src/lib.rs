@@ -126,6 +126,8 @@ pub fn run() {
             commands::dissect::dissect_status,
             commands::dissect::dissect_cancel,
             commands::dissect::dissect_retry,
+            commands::dissect::dissect_clip,
+            commands::dissect::dissect_extract_sound,
             commands::dissect::list_dissect_imports,
             commands::dissect::delete_dissect_import,
             commands::dissect::dissect_assign_speaker,

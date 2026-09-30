@@ -50,9 +50,8 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 ### `emptyCharacter`
 - **Does**: Builds the default Character payload for "+ New". `library_id` is null; the backend allocates one on first save and the UI refreshes from the returned record.
 
-### Import voices from a recording (`dissectOpen`)
-- **Does**: The sidebar's `From audio…` opens [DissectImportModal](../dissect/DissectImportModal.md) without a project; each assigned speaker becomes (or extends) a library entry, and the list refreshes to select it.
-- **Rationale**: The Library is where characters are created, so lifting voices out of an existing drama lands here too.
+### From audio…
+- **Does**: The sidebar's `From audio…` switches to the [Dissect tab](../dissect/DissectView.md), where voices from an existing recording become Library characters.
 
 ## Contracts
 

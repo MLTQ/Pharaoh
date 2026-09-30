@@ -200,3 +200,93 @@ def test_find_credits_from_a_real_dramatis_personae():
     assert got["S5"] == [("The Doctor", "Phil Shinevere")]
     assert got["S6"] == [("Mrs Spencer", "Sally McConnell"), ("Miss Lucilla Harris", "Sally McConnell")]
     assert "S3" not in got
+
+
+@pytest.mark.skipif(shutil.which("ffmpeg") is None, reason="ffmpeg required")
+def test_streaming_windows_are_sample_exact(tmp_path, monkeypatch):
+    """Tiny windows force many joins; the unseparated stem must equal the source."""
+    import soundfile as sf
+    monkeypatch.setattr(dp, "WINDOW_S", 1.0)
+    monkeypatch.setattr(dp, "CONTEXT_S", 0.25)
+    sr = dp.SEP_SR
+    rng = np.random.default_rng(0)
+    src = (0.2 * rng.standard_normal((int(7.3 * sr), 2))).astype(np.float32)
+    path = tmp_path / "src.wav"
+    sf.write(str(path), src, sr, subtype="FLOAT")
+
+    stems, mono16, env, dur = dp.stream_stems(None, str(path), tmp_path / "out", 7.3, False, lambda f, m: None)
+    assert stems == {"dialogue": "stems/dialogue.flac"}
+    got, got_sr = sf.read(str(tmp_path / "out" / stems["dialogue"]), dtype="float32")
+    assert got_sr == sr and got.shape == src.shape
+    # 24-bit quantisation only — no gaps, overlaps or clicks at the 1 s joins.
+    assert np.max(np.abs(got - src)) < 1e-5
+    assert abs(dur - 7.3) < 1e-3
+    assert abs(len(mono16) - 7.3 * dp.ML_SR) <= 2
+    assert len(env.frames["dialogue"]) == int(np.ceil(7.3 / dp.ENV_FRAME_S))
+
+
+def test_link_speakers_matches_brute_force_on_many_chunks():
+    rng = np.random.default_rng(1)
+    voices = rng.standard_normal((5, 32))
+    cents = {}
+    for chunk in range(12):  # 12 chunks × 3 speakers drawn from 5 voices
+        for k, v in enumerate(rng.choice(5, 3, replace=False)):
+            e = voices[v] + 0.15 * rng.standard_normal(32)
+            cents[f"c{chunk}:speaker_{k}"] = e / np.linalg.norm(e)
+    m = dp.link_speakers(cents, threshold=0.6)
+    # A chunk never maps two locals together, and 36 locals collapse to ~5 voices.
+    groups = {}
+    for key, g in m.items():
+        groups.setdefault(g, []).append(key)
+    for members in groups.values():
+        chunks = [k.split(":")[0] for k in members]
+        assert len(chunks) == len(set(chunks))
+    assert 5 <= len(groups) <= 7
+
+
+class TestSoundRegions:
+    ds = pytest.importorskip("dissect_sounds")
+
+    def _power(self, db_frames):
+        return (10 ** (np.array(db_frames, dtype=np.float64) / 10)).astype(np.float32)
+
+    def test_events_and_ambience_are_split_by_length(self):
+        f = int(1 / dp.ENV_FRAME_S)  # frames per second
+        track = [-70.0] * (20 * f)
+        for i in range(2 * f, 2 * f + f // 2):   # 0.5 s hit at 2 s
+            track[i] = -20.0
+        for i in range(8 * f, 16 * f):           # 8 s bed at 8 s
+            track[i] = -30.0
+        regs = self.ds.regions(self._power(track), rel_db=12, abs_db=-50, gap_s=0.25, min_s=0.15)
+        assert len(regs) == 2
+        sfx, amb, mus = self.ds.classify(regs, [])
+        assert len(sfx) == 1 and abs(sfx[0]["start"] - 1.9) < 0.06 and sfx[0]["kind"] == "sfx"
+        assert len(amb) == 1 and amb[0]["end"] - amb[0]["start"] == pytest.approx(8.0, abs=0.06)
+
+    def test_quiet_stem_has_no_regions(self):
+        assert self.ds.regions(self._power([-90.0] * 400), 12, -50, 0.25, 0.15) == []
+
+    def test_music_roles(self):
+        f = int(1 / dp.ENV_FRAME_S)
+        track = [-80.0] * (60 * f)
+        for i in range(5 * f, 10 * f):
+            track[i] = -25.0   # 5 s sting
+        for i in range(20 * f, 50 * f):
+            track[i] = -25.0   # 30 s cue
+        regs = self.ds.regions(self._power(track), rel_db=10, abs_db=-45, gap_s=2.0, min_s=3.0)
+        _, _, mus = self.ds.classify([], regs)
+        assert [m["role"] for m in mus] == ["sting", "cue"]
+
+
+def test_constant_bed_is_found_as_ambience():
+    ds = pytest.importorskip("dissect_sounds")
+    f = int(1 / dp.ENV_FRAME_S)
+    # Rain at -30 dBFS under the whole 60 s, plus one louder hit: the floor
+    # method sees only the hit; the level pass finds the bed.
+    track = np.full(60 * f, -30.0)
+    track[20 * f: 20 * f + f // 2] = -10.0
+    power = (10 ** (track / 10)).astype(np.float32)
+    floor_regions = ds.regions(power, 12, -50, 0.25, 0.15)
+    sfx, amb, _ = ds.classify(floor_regions, [], ds.beds(power))
+    assert len(sfx) == 1
+    assert len(amb) == 1 and amb[0]["end"] - amb[0]["start"] > 55

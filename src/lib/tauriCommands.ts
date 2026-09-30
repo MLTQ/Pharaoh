@@ -821,6 +821,23 @@ export const dissectCancel = (importId: string): Promise<DissectImport> =>
 export const dissectRetry = (importId: string): Promise<DissectImport> =>
   invoke("dissect_retry", { importId });
 
+/** Audition file for a span of a stem (cut on demand, cached per import). */
+export const dissectClip = (importId: string, stem: string, start: number, end: number): Promise<string> =>
+  invoke("dissect_clip", { importId, stem, start, end });
+
+/** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
+export const dissectExtractSound = (request: {
+  import_id: string;
+  stem: string;
+  start: number;
+  end: number;
+  name: string;
+  kind: string;
+  project_id: string;
+  scene_slug: string;
+  labels?: string[];
+}): Promise<string> => invoke("dissect_extract_sound", { request });
+
 export const listDissectImports = (): Promise<DissectImportSummary[]> =>
   invoke("list_dissect_imports");
 

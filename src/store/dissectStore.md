@@ -22,6 +22,6 @@ Background tracker for running dissect imports. Owns the job-queue row for each 
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
-| `DissectImportModal.tsx` | `track` after submit / when resuming a running import; `statuses[importId]` updates | Renaming or removing the status map |
-| `LibraryView.tsx` | `openRequest` set by the toast action, cleared with `requestOpen(null)` | Changing the handshake |
+| `DissectView.tsx` | `track` after submit / when resuming a running import; `statuses[importId]` updates | Renaming or removing the status map |
+| `DissectView.tsx` (toast) | `openRequest` set by the toast action (which switches to the Dissect tab), cleared with `requestOpen(null)` | Changing the handshake |
 | `jobStore.ts` / `JobQueue.tsx` | Rows use `model: "dissect"`; `output_path` is the manifest | Model kind rename (CSS `.model.dissect`) |

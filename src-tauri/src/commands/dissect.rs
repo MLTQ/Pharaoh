@@ -83,7 +83,15 @@ pub struct DissectImport {
     /// What the run was started with, so a retry repeats it exactly.
     #[serde(default)]
     pub options: DissectOptions,
+    /// First failed poll in the current run of failures (RFC 3339). Cleared on
+    /// the next successful poll; after UNREACHABLE_GRACE the import fails.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub unreachable_since: Option<String>,
 }
+
+/// How long a running import may go without reaching its server before it is
+/// marked failed (and offered a Retry) instead of polling forever.
+const UNREACHABLE_GRACE_SECS: i64 = 120;
 
 /// Poll result for `dissect_status`.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -279,6 +287,7 @@ pub async fn submit(
         error: None,
         created_at: Utc::now().to_rfc3339(),
         options,
+        unreachable_since: None,
     };
     write_json(&dir.join(IMPORT_FILE), &import)?;
     Ok(import)
@@ -389,6 +398,7 @@ pub async fn retry(
     import.server_url = base;
     import.status = "running".into();
     import.error = None;
+    import.unreachable_since = None;
     write_json(&path, &import)?;
     Ok(import)
 }
@@ -450,11 +460,48 @@ pub async fn poll(http: &reqwest::Client, projects_dir: &Path, import_id: &str) 
             .json()
             .await
             .map_err(|e| Error::Other(format!("dissect job response: {}", e)))?,
-        // Transient: keep reporting running so the UI keeps polling.
-        Err(e) => {
-            return Ok(status(&import, 0.0, Some(format!("Waiting for server: {}", e)), None))
+        // Unreachable: keep polling through a short blip, then give up with a
+        // message that says what probably happened and what to do.
+        Err(_) => {
+            let now = Utc::now();
+            let since = import
+                .unreachable_since
+                .as_deref()
+                .and_then(|t| chrono::DateTime::parse_from_rfc3339(t).ok())
+                .map(|t| t.with_timezone(&Utc))
+                .unwrap_or(now);
+            let waited = (now - since).num_seconds();
+            if waited >= UNREACHABLE_GRACE_SECS {
+                import.status = "failed".into();
+                import.unreachable_since = None;
+                import.error = Some(format!(
+                    "Lost contact with the dissect server at {} for {} minutes. It may have run out \
+                     of memory, crashed, or been restarted (a restart loses running jobs). Start it \
+                     again with ./inference/start_servers.sh, then Retry.",
+                    import.server_url,
+                    UNREACHABLE_GRACE_SECS / 60
+                ));
+                write_json(&import_path, &import)?;
+                return Ok(status(&import, 0.0, None, None));
+            }
+            if import.unreachable_since.is_none() {
+                import.unreachable_since = Some(now.to_rfc3339());
+                write_json(&import_path, &import)?;
+            }
+            return Ok(status(
+                &import,
+                0.0,
+                Some(format!(
+                    "Can't reach the dissect server at {} — retrying ({}s of {}s)",
+                    import.server_url, waited, UNREACHABLE_GRACE_SECS
+                )),
+                None,
+            ));
         }
     };
+    if import.unreachable_since.take().is_some() {
+        write_json(&import_path, &import)?;
+    }
 
     let progress = job["progress"].as_f64().unwrap_or(0.0) as f32;
     let message = job["message"].as_str().map(str::to_string);
@@ -706,6 +753,163 @@ fn new_character(library_id: &str, name: &str, source_name: &str, speaker_id: &s
     }
 }
 
+// ── Sounds: audition and extraction ───────────────────────────────────────
+
+const STEMS: &[&str] = &["dialogue", "music", "effects"];
+
+fn stem_file(dir: &Path, stem: &str) -> Result<PathBuf> {
+    if !STEMS.contains(&stem) {
+        return Err(Error::Other(format!("unknown stem '{}'", stem)));
+    }
+    for ext in ["flac", "wav"] {
+        let p = dir.join("stems").join(format!("{}.{}", stem, ext));
+        if p.is_file() {
+            return Ok(p);
+        }
+    }
+    Err(Error::Other(format!("this import has no {} stem", stem)))
+}
+
+fn check_span(start: f64, end: f64) -> Result<()> {
+    if !(start >= 0.0 && end > start && end - start <= 900.0) {
+        return Err(Error::Other("span must be 0 ≤ start < end, at most 15 minutes".into()));
+    }
+    Ok(())
+}
+
+/// Cut `[start, end]` of a stem to 48 kHz / 24-bit stereo WAV with short fades.
+fn cut(src: &Path, start: f64, end: f64, fade_s: f64, out: &Path) -> Result<()> {
+    if let Some(parent) = out.parent() {
+        std::fs::create_dir_all(parent)?;
+    }
+    let dur = end - start;
+    let fade = fade_s.min(dur / 4.0);
+    let filter = format!(
+        "afade=t=in:st=0:d={f:.3},afade=t=out:st={o:.3}:d={f:.3}",
+        f = fade,
+        o = (dur - fade).max(0.0)
+    );
+    let res = std::process::Command::new("ffmpeg")
+        .args(["-nostdin", "-loglevel", "error", "-y", "-ss", &format!("{:.3}", start), "-t", &format!("{:.3}", dur), "-i"])
+        .arg(src)
+        .args(["-af", &filter, "-ar", "48000", "-ac", "2", "-c:a", "pcm_s24le"])
+        .arg(out)
+        .output()
+        .map_err(|e| Error::Other(format!("could not run ffmpeg: {}", e)))?;
+    if !res.status.success() {
+        let err = String::from_utf8_lossy(&res.stderr);
+        return Err(Error::Other(format!("clip cut failed: {}", &err[..err.len().min(500)])));
+    }
+    Ok(())
+}
+
+/// Audition file for a span of a stem, cached under the import's `clips/`.
+#[tauri::command]
+pub async fn dissect_clip(app: AppHandle, import_id: String, stem: String, start: f64, end: f64) -> Result<String> {
+    let projects_dir = app_projects_dir(&app)?;
+    tokio::task::spawn_blocking(move || clip_for(&projects_dir, &import_id, &stem, start, end))
+        .await
+        .map_err(|e| Error::Other(format!("clip task: {}", e)))?
+}
+
+pub fn clip_for(projects_dir: &Path, import_id: &str, stem: &str, start: f64, end: f64) -> Result<String> {
+    check_span(start, end)?;
+    let dir = import_dir(projects_dir, import_id)?;
+    let src = stem_file(&dir, stem)?;
+    let out = dir
+        .join("clips")
+        .join(format!("{}_{}_{}.wav", stem, (start * 1000.0) as i64, (end * 1000.0) as i64));
+    if !out.is_file() {
+        cut(&src, start, end, 0.01, &out)?;
+    }
+    Ok(out.to_string_lossy().into_owned())
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExtractSoundRequest {
+    pub import_id: String,
+    /// "effects" | "music" | "dialogue"
+    pub stem: String,
+    pub start: f64,
+    pub end: f64,
+    /// Human name, e.g. "Door · Knock" — becomes the file name and prompt.
+    pub name: String,
+    /// "sfx" | "ambience" | "music" | "vocal" — sets the asset kind.
+    pub kind: String,
+    pub project_id: String,
+    pub scene_slug: String,
+    /// AudioSet labels, recorded in the sidecar.
+    #[serde(default)]
+    pub labels: Vec<String>,
+}
+
+/// Copy a found sound into a scene's assets as a sidecar-indexed WAV.
+#[tauri::command]
+pub async fn dissect_extract_sound(app: AppHandle, request: ExtractSoundRequest) -> Result<String> {
+    let projects_dir = app_projects_dir(&app)?;
+    tokio::task::spawn_blocking(move || extract_sound(&projects_dir, request))
+        .await
+        .map_err(|e| Error::Other(format!("extract task: {}", e)))?
+}
+
+pub fn extract_sound(projects_dir: &Path, req: ExtractSoundRequest) -> Result<String> {
+    check_span(req.start, req.end)?;
+    let slug = req.scene_slug.trim();
+    if slug.is_empty() || slug.contains('/') || slug.contains('\\') || slug.contains("..") {
+        return Err(Error::Other(format!("invalid scene '{}'", req.scene_slug)));
+    }
+    let dir = import_dir(projects_dir, &req.import_id)?;
+    let import: DissectImport = read_json(&dir.join(IMPORT_FILE))?;
+    let src = stem_file(&dir, &req.stem)?;
+    let (model, fade) = match req.kind.as_str() {
+        "sfx" => ("dissect-sfx", 0.01),
+        "vocal" => ("dissect-sfx-vocal", 0.01),
+        "ambience" => ("dissect-ambience", 0.3),
+        "music" => ("dissect-music", 0.3),
+        other => return Err(Error::Other(format!("unknown sound kind '{}'", other))),
+    };
+    let safe: String = req
+        .name
+        .chars()
+        .map(|c| if c.is_ascii_alphanumeric() { c.to_ascii_lowercase() } else { '_' })
+        .collect::<String>()
+        .split('_')
+        .filter(|p| !p.is_empty())
+        .collect::<Vec<_>>()
+        .join("_");
+    let assets = crate::app_support::scene_dir(projects_dir, &req.project_id, slug).join("assets");
+    let out = assets.join(format!(
+        "{}.dissect.{}.wav",
+        if safe.is_empty() { req.kind.clone() } else { safe },
+        Utc::now().format("%Y%m%d%H%M%S%3f")
+    ));
+    cut(&src, req.start, req.end, fade, &out)?;
+
+    let out_s = out.to_string_lossy().into_owned();
+    let dur_ms = ((req.end - req.start) * 1000.0).round() as u64;
+    let meta = crate::models::SidecarMeta {
+        model: model.into(),
+        model_variant: Some(format!("{} stem", req.stem)),
+        prompt: req.name.clone(),
+        instruct: if req.labels.is_empty() { None } else { Some(req.labels.join(", ")) },
+        speaker: None,
+        language: None,
+        seed: 0,
+        temperature: None,
+        top_p: None,
+        duration_target_ms: Some(dur_ms),
+        duration_actual_ms: Some(dur_ms),
+        sample_rate: 48000,
+        generated_at: Utc::now(),
+        parent: Some(format!("{} @ {:.2}–{:.2}s", import.source_name, req.start, req.end)),
+        take_index: 0,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    crate::commands::sidecar::write_sidecar(out_s.clone(), meta)?;
+    Ok(out_s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -729,6 +933,7 @@ mod tests {
                 error: None,
                 created_at: Utc::now().to_rfc3339(),
                 options: DissectOptions::default(),
+                unreachable_since: None,
             },
         )
         .unwrap();
@@ -851,6 +1056,81 @@ mod tests {
         assert!(retry(&http, "http://127.0.0.1:9", &root, &id).await.is_err());
         let imp: DissectImport = read_json(&imports_root(&root).join(&id).join(IMPORT_FILE)).unwrap();
         assert_eq!(imp.status, "failed");
+    }
+
+    #[tokio::test]
+    async fn unreachable_server_gets_a_grace_period_then_fails_with_a_reason() {
+        let root = tmp();
+        let id = fixture(&root);
+        set_status(&root, &id, "running", "/nope.mp3");
+        let http = reqwest::Client::new();
+
+        let s = poll(&http, &root, &id).await.unwrap();
+        assert_eq!(s.status, "running");
+        assert!(s.message.unwrap().contains("Can't reach the dissect server"));
+
+        // Backdate the first failure past the grace period.
+        let path = imports_root(&root).join(&id).join(IMPORT_FILE);
+        let mut imp: DissectImport = read_json(&path).unwrap();
+        imp.unreachable_since = Some((Utc::now() - chrono::Duration::seconds(UNREACHABLE_GRACE_SECS + 5)).to_rfc3339());
+        write_json(&path, &imp).unwrap();
+
+        let s = poll(&http, &root, &id).await.unwrap();
+        assert_eq!(s.status, "failed");
+        assert!(s.error.unwrap().contains("Lost contact"));
+    }
+
+    fn with_stem(root: &Path, id: &str) {
+        let stems = imports_root(root).join(id).join("stems");
+        std::fs::create_dir_all(&stems).unwrap();
+        let st = std::process::Command::new("ffmpeg")
+            .args(["-loglevel", "error", "-y", "-f", "lavfi", "-i", "sine=f=440:d=6", "-ac", "2", "-ar", "44100"])
+            .arg(stems.join("effects.flac"))
+            .status()
+            .unwrap();
+        assert!(st.success());
+    }
+
+    #[test]
+    fn clip_is_cut_and_cached() {
+        let root = tmp();
+        let id = fixture(&root);
+        with_stem(&root, &id);
+        let a = clip_for(&root, &id, "effects", 1.0, 2.5).unwrap();
+        let info = crate::app_support::wav_info(&a).unwrap();
+        assert_eq!(info.sample_rate, 48000);
+        assert!((info.duration_ms().unwrap() as i64 - 1500).abs() < 30);
+        assert_eq!(clip_for(&root, &id, "effects", 1.0, 2.5).unwrap(), a);
+        assert!(clip_for(&root, &id, "music", 1.0, 2.5).is_err(), "no music stem");
+        assert!(clip_for(&root, &id, "../x", 1.0, 2.5).is_err());
+        assert!(clip_for(&root, &id, "effects", 2.0, 1.0).is_err());
+    }
+
+    #[test]
+    fn extract_writes_scene_asset_with_sidecar() {
+        let root = tmp();
+        let id = fixture(&root);
+        with_stem(&root, &id);
+        let req = |kind: &str, slug: &str| ExtractSoundRequest {
+            import_id: id.clone(),
+            stem: "effects".into(),
+            start: 0.5,
+            end: 1.25,
+            name: "Door · Knock".into(),
+            kind: kind.into(),
+            project_id: "p".into(),
+            scene_slug: slug.into(),
+            labels: vec!["Door".into(), "Knock".into()],
+        };
+        let out = extract_sound(&root, req("sfx", "01_bright_river")).unwrap();
+        assert!(out.contains("/scenes/01_bright_river/assets/door_knock.dissect."), "{}", out);
+        let meta: serde_json::Value = read_json(Path::new(&format!("{}.meta.json", out))).unwrap();
+        assert_eq!(meta["model"], "dissect-sfx");
+        assert_eq!(crate::app_support::asset_kind_from_model("dissect-sfx"), "sfx");
+        assert_eq!(crate::app_support::asset_kind_from_model("dissect-music"), "music");
+        assert!(meta["parent"].as_str().unwrap().starts_with("ep1.mp3 @ 0.50"));
+        assert!(extract_sound(&root, req("sfx", "../../etc")).is_err());
+        assert!(extract_sound(&root, req("laser", "s")).is_err());
     }
 
     #[test]

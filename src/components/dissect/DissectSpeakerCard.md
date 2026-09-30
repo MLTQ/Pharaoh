@@ -19,4 +19,4 @@ One detected speaker in a dissect import: stats, a sample line, candidate clips 
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
-| `DissectImportModal.tsx` | `onAssign({candidateIds, goldId, libraryId, newName})`; `goldId` ∈ `candidateIds` | Changing `AssignChoice` |
+| `DissectReview.tsx` | `onAssign({candidateIds, goldId, libraryId, newName})`; `goldId` ∈ `candidateIds` | Changing `AssignChoice` |

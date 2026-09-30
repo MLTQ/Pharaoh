@@ -27,13 +27,14 @@ const SERVERS = [
 
 type CardKind = (typeof SERVERS)[number]["kind"];
 
-// The four models behind one Load on the dissect server, keyed by the names
+// The models behind one Load on the dissect server, keyed by the names
 // its /health `loaded` list uses.
 const DISSECT_MODELS = [
   { key: "separator", name: "BandIt Plus (DnR)",       role: "dialogue / music / effects separation" },
   { key: "diarizer",  name: "Nemotron-3-Diarization", role: "who speaks when · up to 8 per pass" },
   { key: "embedder",  name: "TitaNet-large",          role: "links voices across a long recording" },
   { key: "asr",       name: "Parakeet TDT 0.6B v3",   role: "transcripts with word timestamps" },
+  { key: "tagger",    name: "AST (AudioSet)",         role: "labels sound effects, ambience and music" },
 ];
 
 const START_CMD: Record<CardKind, string> = {

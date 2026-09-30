@@ -46,7 +46,7 @@ export const LibrarySidebar: React.FC<{
             className="btn btn-sm"
             style={{ padding: "2px 8px" }}
             onClick={onImportRecording}
-            title="Lift voices out of an existing audio drama (separate, diarize, pick clone clips)"
+            title="Open the Dissect tab: pull voices, sound effects and music out of an existing recording"
           >From audio…</button>
           <button
             className="btn btn-sm"

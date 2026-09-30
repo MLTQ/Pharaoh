@@ -112,7 +112,7 @@ export const useDissectStore = create<DissectState>((set, get) => ({
           body: `${speakers} speaker${speakers === 1 ? "" : "s"}${chapters ? ` · ${chapters} chapters` : ""}`,
           actionLabel: "Review →",
           onAction: () => {
-            useUiStore.getState().setView("library");
+            useUiStore.getState().setView("dissect");
             get().requestOpen(importId);
           },
         });
