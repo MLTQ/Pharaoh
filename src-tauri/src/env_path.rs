@@ -42,6 +42,26 @@ pub fn augment() {
     }
 }
 
+/// Raise the soft open-file limit toward the hard limit (macOS caps the
+/// request at OPEN_MAX = 10240). A Dock-launched app starts at 256, and
+/// `render_scene` opens one ffmpeg input per placed row — a rebuilt chapter
+/// can have hundreds. Child processes (ffmpeg) inherit the raised limit.
+pub fn raise_fd_limit() {
+    #[cfg(unix)]
+    unsafe {
+        let mut lim = libc::rlimit { rlim_cur: 0, rlim_max: 0 };
+        if libc::getrlimit(libc::RLIMIT_NOFILE, &mut lim) != 0 {
+            return;
+        }
+        let want: libc::rlim_t = 10_240;
+        let target = if lim.rlim_max == libc::RLIM_INFINITY { want } else { lim.rlim_max.min(want) };
+        if lim.rlim_cur < target {
+            lim.rlim_cur = target;
+            let _ = libc::setrlimit(libc::RLIMIT_NOFILE, &lim);
+        }
+    }
+}
+
 /// Login shell PATH first, then the process's own entries, then existing
 /// well-known directories — each directory once, first occurrence wins.
 pub fn merge(login: Option<&std::ffi::OsStr>, current: &std::ffi::OsStr, extras: &[PathBuf]) -> OsString {

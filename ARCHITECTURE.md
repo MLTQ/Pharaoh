@@ -236,7 +236,7 @@ spatial_azimuth,spatial_elevation,spatial_path,spatial_space
 - `pan`: L/R amplitude pan, clamped to `-1.0`–`1.0` by the render graph
 - `reverb_send`: 0.0–1.0 wet send amount
 - `emotion`: palette emotion key (e.g. `neutral`, `sardonic`); selects which reference take Chatterbox clones; empty = first palette entry
-- `notes`: free text, and the home of the `id:r-xxx` tag that lets the Fountain editor keep row identity across edits
+- `notes`: free text, and the home of the `id:r-xxx` tag that lets the Fountain editor keep row identity across edits. The token `mix:as-is` routes a row around the template mix (no ducking, bus trims or dialogue high-pass) — used for material lifted from a finished mix, whose balance is already baked in
 - `gain_envelope`: `ms:db` breakpoints for the per-clip gain lane, empty = flat
 - `spatial_azimuth` / `spatial_elevation`: degrees; azimuth 0 = front, 90 = right, 180 = behind. Empty = not spatialized (the clip uses `pan` instead)
 - `spatial_path`: JSON waypoint list for a moving source, empty = static
@@ -658,6 +658,18 @@ tabs — voices become Library characters (rights-gated), sounds are auditioned
 Settings card, topbar dot. Each run is a job-queue row driven by
 `store/dissectStore.ts`, resumed on app start, with a "Review →" toast.
 
+**Rebuild ("render → project"):** launcher → *Rebuild from a recording*, or
+`pharaoh dissect rebuild`. Scenes follow chapters (split at a pause past
+~12 min / 120 lines, so the renderer's one-input-per-row stays well under the
+open-file limit, which startup also raises to 10240). Each stem is decoded once
+per scene and split into the itemised clips plus a remainder bed; within a stem
+every frame belongs to exactly one file (priority: sfx over ambience, earlier
+line over later), rows carry no fades and `mix:as-is`, so a scene renders back
+to the source. Measured: the rows mix to the stems at 58 dB SDR; a 44-min
+4-chapter rebuild renders back within 20 ms of the original's length, joins
+sample-aligned, 22 dB median windowed SDR (the gap is the master
+loudnorm/limiter). Requires the rights confirmation.
+
 **Long sources:** streamed in 10-minute windows (8 s context each side) to FLAC
 stems on disk, with 50 ms loudness envelopes for scoring and sound detection;
 memory is ~5.5 GB (mostly weights) whatever the length. A 20 h audiobook
@@ -702,6 +714,7 @@ reason instead of polling forever.
 | `commands/rvc.rs` | RVC convert/train proxies, corpus and model status (stage 4) |
 | `commands/character.rs` | Character library: save, import, export, corpus import |
 | `commands/audiobook.rs` | Episode → chaptered `.m4b` (AAC, one chapter per scene, project tags, iTunes audiobook `stik`, remembered cover art); chapter math shared with `render_episode` |
+| `commands/rebuild.rs` | Dissect import → new project: scenes (chapters, split at pauses), characters with voice refs, a row per line / sound, per-stem remainder beds that make it render back to the source; streaming stem splitter; disk check |
 | `commands/dissect.rs` | Dissect imports: submit/poll (upload + bundle download when remote), list/delete, assign speaker → Library character behind the rights gate |
 | `commands/llm.rs` | Anthropic scene drafting and storyboard review |
 | `commands/settings.rs` | App config and aggregate server health |

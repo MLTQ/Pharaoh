@@ -14,7 +14,9 @@
 
 import { create } from "zustand";
 import type { DissectStatus, Job } from "../lib/types";
-import { dissectCancel, dissectRetry, dissectStatus, listDissectImports } from "../lib/tauriCommands";
+import { dissectCancel, dissectRebuildStatus, dissectRetry, dissectStatus, listDissectImports } from "../lib/tauriCommands";
+import type { RebuildStatus } from "../lib/types";
+import { openProjectById } from "../lib/openProject";
 import { useJobStore } from "./jobStore";
 import { useToastStore } from "./toastStore";
 import { useUiStore } from "./uiStore";
@@ -45,6 +47,10 @@ interface DissectState {
   settle: (importId: string) => Promise<void>;
   /** Drop an import's queue row and tracking (after it's deleted). */
   forget: (importId: string) => void;
+  /** Latest status per rebuild job (recording → project). */
+  rebuilds: Record<string, RebuildStatus>;
+  /** Follow a rebuild: queue row, progress, and an "Open project" toast when done. */
+  trackRebuild: (jobId: string, title: string) => void;
   /** Resolves false (with the queue row failed and a toast) if the re-run couldn't start. */
   retry: (importId: string, sourceName?: string) => Promise<boolean>;
   requestOpen: (importId: string | null) => void;
@@ -53,6 +59,47 @@ interface DissectState {
 export const useDissectStore = create<DissectState>((set, get) => ({
   statuses: {},
   openRequest: null,
+  rebuilds: {},
+
+  trackRebuild: (jobId, title) => {
+    const id = `rebuild-${jobId}`;
+    const jobs = useJobStore.getState();
+    if (!jobs.jobs.some((j) => j.id === id)) {
+      jobs.addJob({
+        id, model: "dissect", description: `Rebuild project · ${title}`, status: "running", progress: 0,
+        eta: "starting", started_at: new Date().toISOString(), scene_id: null, scene_slug: null, row_index: null,
+        output_path: null, peaks: null, qa_status: "unreviewed", error: null,
+      });
+    }
+    const tick = async () => {
+      let s: RebuildStatus;
+      try {
+        s = await dissectRebuildStatus(jobId);
+      } catch (e) {
+        useJobStore.getState().updateJob(id, { status: "failed", eta: "failed", error: String(e) });
+        return;
+      }
+      set((st) => ({ rebuilds: { ...st.rebuilds, [jobId]: s } }));
+      const update = useJobStore.getState().updateJob;
+      if (!s.done) {
+        update(id, { progress: Math.round(s.progress * 100), eta: s.message });
+        window.setTimeout(tick, 1000);
+        return;
+      }
+      if (s.error || !s.project_id) {
+        update(id, { status: "failed", eta: "failed", error: s.error ?? "rebuild failed" });
+        useToastStore.getState().push({ kind: "error", title: `Rebuild failed · ${title}`, body: s.error ?? undefined });
+        return;
+      }
+      const pid = s.project_id;
+      update(id, { status: "complete", progress: 100, eta: "project ready" });
+      useToastStore.getState().push({
+        kind: "info", title: `Project rebuilt · ${title}`, body: "Scenes, script, characters and sounds are in place.",
+        actionLabel: "Open →", onAction: () => { void openProjectById(pid); },
+      });
+    };
+    void tick();
+  },
 
   requestOpen: (importId) => set({ openRequest: importId }),
 

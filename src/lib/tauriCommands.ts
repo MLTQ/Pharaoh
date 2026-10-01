@@ -17,6 +17,9 @@ import type {
   DissectImportSummary,
   EpisodeChapter,
   M4bOptions,
+  RebuildOptions,
+  RebuildPlan,
+  RebuildStatus,
   M4bExport,
 } from "./types";
 
@@ -877,3 +880,16 @@ export const exportEpisodeM4b = (args: {
   options?: M4bOptions;
 }): Promise<M4bExport> =>
   invoke("export_episode_m4b", { projectId: args.projectId, outputPath: args.outputPath, options: args.options ?? null });
+
+// ── Rebuild: dissected recording → project ──────────────────────────────────
+
+/** What a rebuild would create (scenes, characters, rows, disk) — no side effects. */
+export const dissectRebuildPlan = (importId: string, options?: RebuildOptions): Promise<RebuildPlan> =>
+  invoke("dissect_rebuild_plan", { importId, options: options ?? null });
+
+/** Start building a project from a finished import. Returns a job id for `dissectRebuildStatus`. */
+export const dissectRebuildStart = (importId: string, options: RebuildOptions): Promise<string> =>
+  invoke("dissect_rebuild_start", { importId, options });
+
+export const dissectRebuildStatus = (jobId: string): Promise<RebuildStatus> =>
+  invoke("dissect_rebuild_status", { jobId });

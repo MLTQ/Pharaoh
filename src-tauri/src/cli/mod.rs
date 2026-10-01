@@ -106,6 +106,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speaker_id, rest @ ..] if group == "dissect" && action == "assign" => {
             dissect::assign(&config, import_id, speaker_id, rest).await
         }
+        [group, action, import_id, rest @ ..] if group == "dissect" && action == "rebuild" => {
+            dissect::rebuild(&config, import_id, rest)
+        }
         [group, action, import_id] if group == "dissect" && action == "cancel" => {
             dissect::cancel(&config, import_id).await
         }
@@ -303,6 +306,7 @@ fn usage() -> &'static str {
   pharaoh dissect status <import_id>
   pharaoh dissect list
   pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
+  pharaoh dissect rebuild <import_id> --confirm-rights yes [--title <t>] [--chapters 0,2] [--plan true] [--sounds true|false] [--remainders true|false]
   pharaoh dissect cancel <import_id>
   pharaoh dissect retry <import_id> [--wait true|false]
   pharaoh dissect delete <import_id>

@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { listProjects, createProject, getProjectsDir, listScenes } from "../../lib/tauriCommands";
+import { RebuildWizard } from "./RebuildWizard";
 import { useProjectStore } from "../../store/projectStore";
 import { useUiStore } from "../../store/uiStore";
 import type { Project } from "../../lib/types";
@@ -168,6 +169,7 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
   const [loading, setLoading]   = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
   const [showNew, setShowNew]   = useState(false);
+  const [showRebuild, setShowRebuild] = useState(false);
   const [err, setErr]           = useState<string | null>(null);
 
   const { loadRealProject } = useProjectStore();
@@ -263,16 +265,26 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
             {loading ? "Loading…" : `Projects · ${projects.length}`}
           </span>
           {!showNew && (
-            <button
-              className="btn btn-primary"
-              onClick={() => setShowNew(true)}
-              style={{
-                background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-0)",
-                fontSize: 12,
-              }}
-            >
-              + New project
-            </button>
+            <span style={{ display: "flex", gap: 8 }}>
+              <button
+                className="btn"
+                onClick={() => setShowRebuild(true)}
+                title="Turn a finished audio drama back into a project: scenes, script, characters, voices, sounds"
+                style={{ fontSize: 12 }}
+              >
+                ⤓ Rebuild from a recording
+              </button>
+              <button
+                className="btn btn-primary"
+                onClick={() => setShowNew(true)}
+                style={{
+                  background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-0)",
+                  fontSize: 12,
+                }}
+              >
+                + New project
+              </button>
+            </span>
           )}
         </div>
 
@@ -292,6 +304,10 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
             >
               Create your first project →
             </button>
+            <br />
+            <button className="btn btn-sm" onClick={() => setShowRebuild(true)} style={{ marginTop: 8 }}>
+              …or rebuild one from an existing recording
+            </button>
           </div>
         )}
 
@@ -303,6 +319,8 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
             loading={openingId === p.id}
           />
         ))}
+
+        {showRebuild && <RebuildWizard onClose={() => setShowRebuild(false)} />}
 
         {/* Settings link */}
         <div style={{ marginTop: 24, textAlign: "center" }}>

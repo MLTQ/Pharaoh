@@ -16,6 +16,7 @@
 //! a [`VoiceProvenance`] record on the character naming the source recording and
 //! the statement the user agreed to.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 
@@ -174,11 +175,13 @@ async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str)
     let bytes = tokio::fs::read(local_path)
         .await
         .map_err(|e| Error::Other(format!("read source '{}': {}", local_path, e)))?;
-    let filename = Path::new(local_path)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("source.wav")
-        .to_string();
+    // Unique per upload: two imports of the same file used to share one
+    // uploads/ path, and the first to finish deleted the other's input.
+    let filename = format!(
+        "{}_{}",
+        &Uuid::new_v4().simple().to_string()[..8],
+        Path::new(local_path).file_name().and_then(|n| n.to_str()).unwrap_or("source.wav")
+    );
     let resp: Value = http
         .post(format!("{}/upload", base_url))
         .query(&[("filename", &filename)])
@@ -201,8 +204,9 @@ async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str)
 
 /// Unpack the server's zip bundle into `dest`, refusing entries that would
 /// escape it.
-fn unpack_bundle(bytes: &[u8], dest: &Path) -> Result<()> {
-    let mut zip = zip::ZipArchive::new(std::io::Cursor::new(bytes))
+fn unpack_bundle(zip_path: &Path, dest: &Path) -> Result<()> {
+    let file = std::fs::File::open(zip_path)?;
+    let mut zip = zip::ZipArchive::new(std::io::BufReader::new(file))
         .map_err(|e| Error::Other(format!("dissect bundle is not a zip: {}", e)))?;
     for i in 0..zip.len() {
         let mut entry = zip
@@ -231,6 +235,109 @@ fn read_manifest(dir: &Path) -> Result<Option<Value>> {
         return Ok(None);
     }
     Ok(Some(read_json(&p)?))
+}
+
+// ── Background result download ────────────────────────────────────────────
+
+#[derive(Debug, Clone)]
+enum DownloadState {
+    Running { done: u64, total: u64 },
+    Failed(String),
+}
+
+fn download_map() -> &'static std::sync::Mutex<HashMap<String, DownloadState>> {
+    static M: std::sync::OnceLock<std::sync::Mutex<HashMap<String, DownloadState>>> = std::sync::OnceLock::new();
+    M.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+fn download_state(import_id: &str) -> Option<DownloadState> {
+    download_map().lock().ok()?.get(import_id).cloned()
+}
+
+fn set_download(import_id: &str, st: DownloadState) {
+    if let Ok(mut m) = download_map().lock() {
+        m.insert(import_id.to_string(), st);
+    }
+}
+
+fn clear_download(import_id: &str) {
+    if let Ok(mut m) = download_map().lock() {
+        m.remove(import_id);
+    }
+}
+
+fn fmt_bytes_progress(done: u64, total: u64) -> String {
+    let gb = |b: u64| b as f64 / 1e9;
+    if total > 0 { format!("{:.1} / {:.1} GB", gb(done), gb(total)) } else { format!("{:.1} GB", gb(done)) }
+}
+
+/// Stream the server's zip to `<import>/.bundle.zip.part`, unpack, delete.
+/// One per import (guarded by the map). Transient failures retry; a 404 —
+/// the server no longer has the results — fails the import with that reason.
+fn start_download(http: reqwest::Client, import: DissectImport, dir: PathBuf) {
+    set_download(&import.import_id, DownloadState::Running { done: 0, total: 0 });
+    tokio::spawn(async move {
+        let id = import.import_id.clone();
+        let url = format!("{}/files/{}", import.server_url, import.job_id);
+        let part = dir.join(".bundle.zip.part");
+        let mut last_err = String::new();
+        for attempt in 0..3 {
+            if attempt > 0 {
+                tokio::time::sleep(Duration::from_secs(5)).await;
+            }
+            match download_once(&http, &url, &part, &id).await {
+                Ok(()) => {
+                    let (p, d) = (part.clone(), dir.clone());
+                    let unpacked = tokio::task::spawn_blocking(move || unpack_bundle(&p, &d)).await;
+                    let _ = std::fs::remove_file(&part);
+                    match unpacked {
+                        Ok(Ok(())) => {
+                            clear_download(&id);
+                            return;
+                        }
+                        Ok(Err(e)) => last_err = e.to_string(),
+                        Err(e) => last_err = format!("unpack task: {}", e),
+                    }
+                }
+                Err((fatal, e)) => {
+                    let _ = std::fs::remove_file(&part);
+                    last_err = e;
+                    if fatal {
+                        break;
+                    }
+                }
+            }
+        }
+        set_download(&id, DownloadState::Failed(format!("Couldn't download the results: {}", last_err)));
+    });
+}
+
+/// Err((fatal, message)): fatal when retrying can't help (404).
+async fn download_once(http: &reqwest::Client, url: &str, part: &Path, id: &str) -> std::result::Result<(), (bool, String)> {
+    use tokio::io::AsyncWriteExt;
+    let mut resp = http
+        .get(url)
+        .timeout(Duration::from_secs(6 * 60 * 60))
+        .send()
+        .await
+        .map_err(|e| (false, e.to_string()))?;
+    if resp.status().as_u16() == 404 {
+        return Err((true, "the server no longer has this job's results (it may have been restarted or cleaned up) — Retry the import".into()));
+    }
+    let resp_status = resp.status();
+    if !resp_status.is_success() {
+        return Err((false, format!("HTTP {}", resp_status)));
+    }
+    let total = resp.content_length().unwrap_or(0);
+    let mut file = tokio::fs::File::create(part).await.map_err(|e| (true, format!("write {}: {}", part.display(), e)))?;
+    let mut done = 0u64;
+    while let Some(chunk) = resp.chunk().await.map_err(|e| (false, e.to_string()))? {
+        file.write_all(&chunk).await.map_err(|e| (true, format!("write {}: {}", part.display(), e)))?;
+        done += chunk.len() as u64;
+        set_download(id, DownloadState::Running { done, total });
+    }
+    file.flush().await.map_err(|e| (true, e.to_string()))?;
+    Ok(())
 }
 
 // ── Commands ──────────────────────────────────────────────────────────────
@@ -529,22 +636,28 @@ pub async fn poll(http: &reqwest::Client, projects_dir: &Path, import_id: &str) 
     let message = job["message"].as_str().map(str::to_string);
     match job["status"].as_str().unwrap_or("pending") {
         "complete" => {
-            if import.remote {
-                let bytes = http
-                    .get(format!("{}/files/{}", import.server_url, import.job_id))
-                    .timeout(Duration::from_secs(30 * 60))
-                    .send()
-                    .await
-                    .map_err(|e| Error::Other(format!("download dissect bundle: {}", e)))?
-                    .error_for_status()
-                    .map_err(|e| Error::Other(format!("download dissect bundle: {}", e)))?
-                    .bytes()
-                    .await
-                    .map_err(|e| Error::Other(format!("download dissect bundle: {}", e)))?;
-                let dest = dir.clone();
-                tokio::task::spawn_blocking(move || unpack_bundle(&bytes, &dest))
-                    .await
-                    .map_err(|e| Error::Other(format!("unpack task: {}", e)))??;
+            if import.remote && read_manifest(&dir)?.is_none() {
+                // Results come down in the background (a long book is tens of
+                // GB); polls report progress instead of blocking for minutes.
+                return Ok(match download_state(&import.import_id) {
+                    Some(DownloadState::Running { done, total }) => status(
+                        &import,
+                        0.99,
+                        Some(format!("Downloading results · {}", fmt_bytes_progress(done, total))),
+                        None,
+                    ),
+                    Some(DownloadState::Failed(err)) => {
+                        clear_download(&import.import_id);
+                        import.status = "failed".into();
+                        import.error = Some(err);
+                        write_json(&import_path, &import)?;
+                        status(&import, 0.0, None, None)
+                    }
+                    None => {
+                        start_download(http.clone(), import.clone(), dir.clone());
+                        status(&import, 0.99, Some("Downloading results…".into()), None)
+                    }
+                });
             }
             let manifest = read_manifest(&dir)?
                 .ok_or_else(|| Error::Other("dissect finished but manifest.json is missing".into()))?;

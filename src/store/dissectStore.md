@@ -16,6 +16,9 @@ Background tracker for running dissect imports. Owns the job-queue row for each 
 - **Does**: `settle` re-reads an import and puts its row in its real state; `cancel` falls back to it when the cancel call errors (e.g. the import already failed). `forget` drops the row and tracking when an import is deleted.
 - **Rationale**: Cancel used to set "cancelling…" and wait for the poll loop; when the loop wasn't running or the cancel errored, the row stayed "running" forever and the queue reported a phantom running job. Every poll tick also checks it is still wanted, so an in-flight poll can't overwrite a cancelled row.
 
+### `trackRebuild(jobId, title)`, `rebuilds`
+- **Does**: Follows a rebuild job (`dissect_rebuild_status`, 1 s): queue row "Rebuild project · title", progress from the backend's stage message, and on completion a toast whose "Open →" calls `openProjectById`.
+
 ### `resumeRunning()`
 - **Does**: Called once at app start (`App.tsx`); re-tracks every import whose `import.json` says `running`, so the queue survives a restart. No-op for mesh viewers.
 

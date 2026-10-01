@@ -156,3 +156,38 @@ pub(super) async fn retry(config: &AppConfig, import_id: &str, rest: &[String]) 
     }
     wait_for(&http, config, import_id).await
 }
+
+/// `dissect rebuild <import_id> --confirm-rights yes [--title T] [--chapters 0,2]
+///  [--plan true] [--sounds true|false] [--remainders true|false]`
+pub(super) fn rebuild(config: &AppConfig, import_id: &str, rest: &[String]) -> Result<()> {
+    use crate::commands::rebuild as rb;
+    let flags = parse_flags(rest)?;
+    let mut opts = rb::RebuildOptions {
+        title: flag_opt(&flags, "title"),
+        rights_confirmed: matches!(flags.get("confirm_rights").map(String::as_str), Some("yes" | "true")),
+        include_sounds: flag_parse(&flags, "sounds", true)?,
+        include_remainders: flag_parse(&flags, "remainders", true)?,
+        ..Default::default()
+    };
+    if let Some(c) = flag_opt(&flags, "chapters") {
+        opts.chapters = Some(c.split(',').filter_map(|x| x.trim().parse().ok()).collect());
+    }
+    if let Some(m) = flags.get("max_scene_minutes") {
+        opts.max_scene_minutes = m.parse().map_err(|_| Error::Other("invalid --max-scene-minutes".into()))?;
+    }
+    let dir = projects_dir(config);
+    if flag_parse(&flags, "plan", false)? {
+        return print_json(&rb::plan_for(&dir, import_id, &opts)?);
+    }
+    if !opts.rights_confirmed {
+        return Err(Error::Other(format!("pass --confirm-rights yes to affirm: \"{}\"", DEFAULT_RIGHTS_STATEMENT)));
+    }
+    let last = std::sync::Mutex::new(String::new());
+    let cb = |f: f32, msg: &str| {
+        if let Ok(mut l) = last.lock() {
+            if *l != msg { eprintln!("{:>3}% {}", (f * 100.0) as u32, msg); *l = msg.to_string(); }
+        }
+    };
+    let project_id = rb::rebuild(&dir, import_id, &opts, &cb)?;
+    print_json(&serde_json::json!({ "project_id": project_id }))
+}

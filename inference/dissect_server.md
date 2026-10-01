@@ -21,6 +21,12 @@ FastAPI shell on port 18007 around `dissect_pipeline.py`: takes an existing audi
 ### `/cancel/{job_id}`
 - **Does**: Flags a queued or running job; `_run`'s progress callback raises `DissectCancelled` at the next checkpoint (every separation batch, diarization chunk, transcription batch — decode is the one uninterruptible step). A job cancelled while waiting for the GPU never starts. Status becomes `cancelled`; server-owned scratch and the uploaded source are removed.
 
+### Robustness
+- **Job persistence**: finished jobs are written to `server-output/dissect-jobs.json` and reloaded on start, so a restart reports the real outcome instead of "unknown job"; jobs that were running are marked interrupted.
+- **CUDA faults**: an illegal-access error poisons the process's GPU context, so the job is failed with an explanation and the server re-execs itself a few seconds later. Parakeet's CUDA-graph greedy decoder (the fault site seen on a 20 h book) is disabled.
+- **Scratch**: a failed job's server-owned output is deleted (a failed 20 h import left 22 GB); uploads are uniquely named by the client (two imports of one file used to share — and delete — one upload); queued jobs re-check their input when they start.
+- **`/files`**: the zip is streamed from disk (zip64, stored) instead of built in memory, and the scratch dir is deleted only after the last byte is sent; an interrupted download leaves it for another try.
+
 ### `/health`, `/load`, `/unload`
 - **Does**: Standard server surface. `/health` also reports `stub`, `stub_reason`, `separator_ready`, and which models are resident.
 

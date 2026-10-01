@@ -15,10 +15,13 @@ zip from GET /files/{job_id}.
 Isolated venv: inference/.venv-dissect (Python 3.12, NeMo from source).
 """
 import asyncio
-import io
 import logging
+import json
 import os
 import shutil
+import sys
+import threading
+import time
 import zipfile
 from pathlib import Path
 from typing import Optional
@@ -27,10 +30,11 @@ import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import StreamingResponse
+from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from _common import (
-    JobStore, inference_lock, is_server_owned, new_job_id, remap_path,
+    SERVER_OUTPUT_DIR, JobStore, inference_lock, is_server_owned, new_job_id, remap_path,
     register_upload_route, server_output_path, spawn_job,
 )
 import dissect_pipeline as dp
@@ -47,6 +51,69 @@ models = dp.Models()
 # Job ids whose cancel was requested. Checked at every progress checkpoint
 # (every separation batch, diarization chunk and transcription batch).
 _cancel: set = set()
+
+# ── Job persistence ───────────────────────────────────────────────────────────
+#
+# Finished jobs are recorded on disk so that a restart — including the
+# self-restart after a CUDA fault, below — doesn't turn "failed: <reason>"
+# into "server no longer knows this job" for the client polling it.
+JOBS_FILE = SERVER_OUTPUT_DIR / "dissect-jobs.json"
+_jobs_lock = threading.Lock()
+
+
+def _persist(job_id: str) -> None:
+    job = jobs.get(job_id)
+    if job is None:
+        return
+    with _jobs_lock:
+        try:
+            data = json.loads(JOBS_FILE.read_text()) if JOBS_FILE.is_file() else {}
+        except Exception:
+            data = {}
+        data[job_id] = {k: job.get(k) for k in ("status", "progress", "output_path", "error", "message")}
+        data[job_id]["t"] = time.time()
+        # Keep the newest 200.
+        data = dict(sorted(data.items(), key=lambda kv: kv[1].get("t", 0))[-200:])
+        JOBS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        tmp = JOBS_FILE.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data))
+        tmp.replace(JOBS_FILE)
+
+
+def _restore() -> None:
+    """Reload finished jobs; anything that was still running died with the process."""
+    try:
+        data = json.loads(JOBS_FILE.read_text())
+    except Exception:
+        return
+    for job_id, j in data.items():
+        jobs.create(job_id, "dissect", "dissect", {})
+        status = j.get("status")
+        if status in ("running", "pending"):
+            status, j["error"] = "failed", "Interrupted: the dissect server restarted while this job was running. Retry it."
+        jobs.update(job_id, status=status, progress=j.get("progress", 0.0), output_path=j.get("output_path"),
+                    error=j.get("error"), message=j.get("message"))
+
+
+def _is_cuda_fault(exc: BaseException) -> bool:
+    text = f"{exc.__class__.__name__}: {exc}"
+    return "CUDA error" in text or "AcceleratorError" in text or "cudaError" in text
+
+
+def _restart_soon(delay: float = 3.0) -> None:
+    """Re-exec this server: after a CUDA fault the process's GPU context is
+    poisoned and every later job would fail. The delay lets the client poll
+    the failure first; queued jobs are recorded as interrupted."""
+    def go():
+        time.sleep(delay)
+        for job_id, job in list(jobs._jobs.items()):
+            if job.get("status") in ("running", "pending"):
+                jobs.update(job_id, status="failed",
+                            error="Interrupted: the dissect server restarted after a GPU fault. Retry it.")
+                _persist(job_id)
+        log.error("restarting dissect server after a CUDA fault")
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    threading.Thread(target=go, daemon=True).start()
 
 
 class DissectParams(BaseModel):
@@ -97,6 +164,9 @@ async def _run(job_id: str, p: DissectParams) -> None:
         try:
             if job_id in _cancel:  # cancelled while waiting for the GPU
                 raise dp.DissectCancelled()
+            # Checked again now: queued jobs can wait a long time behind others.
+            if not Path(input_path).is_file():
+                raise FileNotFoundError(f"input audio disappeared while queued: {input_path}")
             jobs.update(job_id, status="running", progress=0.0, message="Starting")
             await asyncio.to_thread(dp.run, models, input_path, out_dir, opts, progress)
             jobs.update(job_id, status="complete", progress=1.0, message="Done",
@@ -107,8 +177,17 @@ async def _run(job_id: str, p: DissectParams) -> None:
                 shutil.rmtree(out_dir, ignore_errors=True)
         except Exception as exc:
             log.exception("dissect failed")
-            jobs.update(job_id, status="failed", error=f"{exc.__class__.__name__}: {exc}")
+            msg = f"{exc.__class__.__name__}: {exc}"
+            if _is_cuda_fault(exc):
+                msg = ("The GPU hit a fault (" + msg.splitlines()[0][:160] + "). The dissect server is "
+                       "restarting itself to recover — Retry in a few seconds.")
+                _restart_soon()
+            jobs.update(job_id, status="failed", error=msg)
+            # A failed job's partial stems are unusable; a 20 h book left 22 GB.
+            if is_server_owned(str(out_dir)):
+                shutil.rmtree(out_dir, ignore_errors=True)
         finally:
+            _persist(job_id)
             _cancel.discard(job_id)
             # A remote client's upload is a whole episode; don't let them pile up.
             if is_server_owned(input_path) and "uploads" in Path(input_path).parts:
@@ -170,12 +249,38 @@ async def get_job(job_id: str) -> dict:
     return jobs.response(job_id)
 
 
+class _Sink:
+    """Write-only file object for zipfile that hands bytes to a generator."""
+
+    def __init__(self) -> None:
+        self.chunks: list[bytes] = []
+        self.pos = 0
+
+    def write(self, b) -> int:
+        self.chunks.append(bytes(b))
+        self.pos += len(b)
+        return len(b)
+
+    def tell(self) -> int:
+        return self.pos
+
+    def flush(self) -> None:
+        pass
+
+    def take(self) -> bytes:
+        out = b"".join(self.chunks)
+        self.chunks.clear()
+        return out
+
+
 @app.get("/files/{job_id}")
 async def download_bundle(job_id: str) -> StreamingResponse:
-    """Zip of the job's import directory, for remote clients.
+    """The job's import directory as a zip, streamed from disk (a long book's
+    bundle is tens of GB — it was built in memory before).
 
-    The directory is deleted after the zip is built when it is server-owned
-    scratch; in same-machine mode it IS the client's import dir and is kept.
+    Server-owned scratch is deleted only after the last byte has been sent;
+    an interrupted download leaves it in place so the client can try again.
+    In same-machine mode the directory IS the client's import and is kept.
     """
     job = jobs.get(job_id)
     if job is None:
@@ -184,22 +289,37 @@ async def download_bundle(job_id: str) -> StreamingResponse:
     if job["status"] != "complete" or not manifest or not Path(manifest).is_file():
         raise HTTPException(status_code=404, detail="output not available")
     root = Path(manifest).parent
+    files = [p for p in sorted(root.rglob("*")) if p.is_file()]
+    finished = {"ok": False}
 
-    def build() -> bytes:
-        buf = io.BytesIO()
-        # Stems are already PCM; deflate buys little and costs a lot of CPU.
-        with zipfile.ZipFile(buf, "w", compression=zipfile.ZIP_STORED) as zf:
-            for path in sorted(root.rglob("*")):
-                if path.is_file():
-                    zf.write(path, path.relative_to(root).as_posix())
-        return buf.getvalue()
+    def stream():
+        sink = _Sink()
+        # Stems are FLAC/PCM; deflate buys little and costs a lot of CPU.
+        with zipfile.ZipFile(sink, "w", compression=zipfile.ZIP_STORED, allowZip64=True) as zf:
+            for path in files:
+                info = zipfile.ZipInfo.from_file(path, path.relative_to(root).as_posix())
+                with open(path, "rb") as src, zf.open(info, "w", force_zip64=True) as dst:
+                    while True:
+                        block = src.read(4 << 20)
+                        if not block:
+                            break
+                        dst.write(block)
+                        if sink.pos and sink.chunks:
+                            yield sink.take()
+                yield sink.take()
+        tail = sink.take()
+        if tail:
+            yield tail
+        finished["ok"] = True
 
-    data = await asyncio.to_thread(build)
-    if is_server_owned(str(manifest)):
-        shutil.rmtree(root, ignore_errors=True)
+    def cleanup():
+        if finished["ok"] and is_server_owned(str(manifest)):
+            shutil.rmtree(root, ignore_errors=True)
+
     return StreamingResponse(
-        io.BytesIO(data), media_type="application/zip",
+        stream(), media_type="application/zip",
         headers={"Content-Disposition": f'attachment; filename="dissect-{job_id}.zip"'},
+        background=BackgroundTask(cleanup),
     )
 
 
@@ -230,6 +350,8 @@ async def unload() -> dict:
         models.unload()
     return {"status": "unloaded"}
 
+
+_restore()
 
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)

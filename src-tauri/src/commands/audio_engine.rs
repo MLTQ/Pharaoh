@@ -563,6 +563,11 @@ pub async fn render_scene_with_projects_dir(
     let mut dialogue_idxs: Vec<usize> = Vec::new();
     let mut duck_target_idxs: Vec<usize> = Vec::new();
     let mut passthrough_idxs: Vec<usize> = Vec::new();
+    // Rows tagged `mix:as-is` in notes bypass the template mix (ducking, bus
+    // trims, dialogue high-pass): their balance is already baked in — Dissect
+    // rebuilds tag every row lifted from a finished mix, so the scene renders
+    // back to the source. New authored rows still get the template.
+    let mut as_is_idxs: Vec<usize> = Vec::new();
 
     for (i, row) in placed.iter().enumerate() {
         let start_ms: u64 = row.start_ms.parse().unwrap_or(0);
@@ -641,7 +646,9 @@ pub async fn render_scene_with_projects_dir(
         filter_parts.push(format!("[{}:a]{}[a{}]", i, filters.join(","), i));
 
         let kind = row.track_type.to_uppercase();
-        if kind == "DIALOGUE" {
+        if is_as_is(&row.notes) {
+            as_is_idxs.push(i);
+        } else if kind == "DIALOGUE" {
             dialogue_idxs.push(i);
         } else if kind == "BED" || kind == "MUSIC" {
             duck_target_idxs.push(i);
@@ -735,6 +742,7 @@ pub async fn render_scene_with_projects_dir(
     if let Some(l) = &dialogue_bus_label   { final_inputs.push(l.clone()); }
     if let Some(l) = &music_bed_bus_label  { final_inputs.push(l.clone()); }
     if let Some(l) = &sfx_bus_label        { final_inputs.push(l.clone()); }
+    for &i in &as_is_idxs                  { final_inputs.push(format!("[a{}]", i)); }
 
     // Defensive: if for some reason no buses materialized, fall back to a flat amix
     if final_inputs.is_empty() {
@@ -758,9 +766,12 @@ pub async fn render_scene_with_projects_dir(
     // ── Master chain: loudnorm + alimiter ────────────────────────────────
     // Single-pass loudnorm (faster, slightly less precise than two-pass).
     // alimiter brick-walls to -1 dBTP so we never clip downstream encoders.
+    // latency=1: without it the limiter's 5 ms look-ahead delays the whole
+    // render against its own timeline (found when a Dissect rebuild rendered
+    // 240 samples late and stopped summing with its source).
     let target_i = target_lufs.unwrap_or(-16.0).clamp(-30.0, -8.0);
     filter_parts.push(format!(
-        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891[master]",
+        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891:latency=1[master]",
         mix_out_label, target_i
     ));
 
@@ -806,6 +817,11 @@ pub async fn render_scene_with_projects_dir(
     update_storyboard_scene_status(projects_dir, project_id, scene_slug, "composed");
 
     Ok(output_path.to_string_lossy().to_string())
+}
+
+/// Whether a row's notes carry the `mix:as-is` token (see render_scene).
+pub fn is_as_is(notes: &str) -> bool {
+    notes.split(|c: char| c == ';' || c.is_whitespace()).any(|t| t.eq_ignore_ascii_case("mix:as-is"))
 }
 
 /// Concatenate scene renders into a single episode WAV with crossfades.
@@ -942,7 +958,7 @@ pub async fn render_episode_with_projects_dir(
     // overall result hits the same target with consistent ceilings.
     let target_i = target_lufs.unwrap_or(-16.0).clamp(-30.0, -8.0);
     filter_parts.push(format!(
-        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891[master]",
+        "{}loudnorm=I={:.1}:TP=-1.0:LRA=11,alimiter=limit=0.891:latency=1[master]",
         concat_label, target_i
     ));
 

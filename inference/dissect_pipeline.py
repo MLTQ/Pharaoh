@@ -501,7 +501,20 @@ class Models:
     def load_asr(self):
         if self.asr is None:
             from nemo.collections.asr.models import ASRModel
-            self.asr = ASRModel.from_pretrained(ASR_ID, map_location=self.device).eval()
+            asr = ASRModel.from_pretrained(ASR_ID, map_location=self.device).eval()
+            # NeMo's CUDA-graphs greedy TDT decoder hit "illegal memory access"
+            # (in _greedy_decode_blank_as_pad_loop_labels) on a 20 h book,
+            # which also poisons the process's CUDA context. The plain loop is
+            # a little slower and robust.
+            try:
+                from omegaconf import open_dict
+                dec = asr.cfg.decoding
+                with open_dict(dec):
+                    dec.greedy.use_cuda_graph_decoder = False
+                asr.change_decoding_strategy(dec, verbose=False)
+            except Exception:
+                log.warning("could not disable the CUDA-graph decoder", exc_info=True)
+            self.asr = asr
         return self.asr
 
     def loaded(self) -> list[str]:

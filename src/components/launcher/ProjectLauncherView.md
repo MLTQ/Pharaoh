@@ -27,3 +27,6 @@ No-project start screen for Pharaoh. It lists existing projects, creates new pro
 
 ## Notes
 - The fallback Settings click still calls `setView("settings")` for compatibility if the component is ever rendered outside the launcher shell.
+
+## Rebuild from a recording
+"⤓ Rebuild from a recording" (next to New project, and in the empty state) opens [RebuildWizard](./RebuildWizard.md): a finished audio drama becomes a full project — scenes, script, characters with voices, sounds — that renders back to the original.

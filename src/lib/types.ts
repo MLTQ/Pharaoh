@@ -783,3 +783,49 @@ export interface DissectSounds {
   ambience: DissectSound[];
   music: DissectSound[];
 }
+
+// ── Rebuild: dissected recording → project ──────────────────────────────────
+
+export interface RebuildOptions {
+  title?: string | null;
+  /** Chapter indices to include; omit / empty = all. */
+  chapters?: number[] | null;
+  max_scene_minutes?: number;
+  max_scene_lines?: number;
+  min_character_speech_s?: number;
+  include_sounds?: boolean;
+  /** Per-stem remainder beds — what makes the project render back to the source. */
+  include_remainders?: boolean;
+  rights_confirmed?: boolean;
+  rights_statement?: string | null;
+}
+
+export interface RebuildCharacterPlan {
+  speaker_ids: string[];
+  name: string;
+  performer: string | null;
+  extras: boolean;
+  speech_s: number;
+  reference_clips: number;
+}
+
+export interface RebuildPlan {
+  title: string;
+  scenes: { title: string; start: number; end: number; lines: number; sounds: number }[];
+  characters: RebuildCharacterPlan[];
+  rows: number;
+  /** Upper bound — silent remainders are skipped at build time. */
+  est_bytes: number;
+  free_bytes: number | null;
+  duration_s: number;
+  chapters: { index: number; title: string; start: number; end: number }[];
+}
+
+export interface RebuildStatus {
+  progress: number;
+  message: string;
+  done: boolean;
+  error: string | null;
+  project_id: string | null;
+  title: string;
+}

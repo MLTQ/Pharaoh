@@ -38,6 +38,11 @@ zip = { version = "2", features = ["deflate"] }
 dirs = "5"
 cpal = "0.15"
 
+[target.'cfg(unix)'.dependencies]
+# setrlimit (open-file limit for big scene renders) and statvfs (free disk
+# before a rebuild). Already in the dependency tree via tokio/hound.
+libc = "0.2"
+
 [profile.release]
 panic = "abort"
 codegen-units = 1
