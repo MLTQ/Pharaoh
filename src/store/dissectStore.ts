@@ -41,6 +41,10 @@ interface DissectState {
   track: (importId: string, sourceName: string) => void;
   resumeRunning: () => Promise<void>;
   cancel: (importId: string) => Promise<void>;
+  /** Re-read an import and put its queue row in its real (terminal) state. */
+  settle: (importId: string) => Promise<void>;
+  /** Drop an import's queue row and tracking (after it's deleted). */
+  forget: (importId: string) => void;
   /** Resolves false (with the queue row failed and a toast) if the re-run couldn't start. */
   retry: (importId: string, sourceName?: string) => Promise<boolean>;
   requestOpen: (importId: string | null) => void;
@@ -83,13 +87,21 @@ export const useDissectStore = create<DissectState>((set, get) => ({
     }
 
     const tick = async () => {
+      // Cancelled, settled or forgotten since this loop started: stop, and
+      // don't let a poll that was in flight overwrite the row's final state.
+      if (!polling.has(importId)) return;
       let s: DissectStatus;
       try {
         s = await dissectStatus(importId);
+        if (!polling.has(importId)) return;
       } catch (e) {
+        if (!polling.has(importId)) return;
         // The import itself is gone or unreadable — stop, don't spin.
         polling.delete(importId);
-        useJobStore.getState().updateJob(id, { status: "failed", eta: "failed", error: String(e) });
+        useJobStore.getState().updateJob(id, {
+          status: "failed", eta: "failed",
+          error: /not found|No such file|os error 2/i.test(String(e)) ? "This import no longer exists (it was deleted)." : String(e),
+        });
         return;
       }
       set((st) => ({ statuses: { ...st.statuses, [importId]: s } }));
@@ -143,13 +155,54 @@ export const useDissectStore = create<DissectState>((set, get) => ({
 
   cancel: async (importId) => {
     const id = dissectJobId(importId);
-    useJobStore.getState().updateJob(id, { eta: "cancelling…" });
+    const update = useJobStore.getState().updateJob;
+    update(id, { eta: "cancelling…" });
     try {
+      // Rust marks the import cancelled locally even if the server is gone,
+      // so the row can be finalised now — never left waiting on a poll loop
+      // that may not be running (that left rows stuck on "cancelling…").
       await dissectCancel(importId);
-      // The poll loop sees "cancelled" on its next tick and finalises the row.
-    } catch (e) {
-      useToastStore.getState().push({ kind: "error", title: "Cancel failed", body: String(e) });
+      polling.delete(importId);
+      update(id, { status: "cancelled", eta: "cancelled", error: null });
+      set((st) => {
+        const prev = st.statuses[importId];
+        return prev ? { statuses: { ...st.statuses, [importId]: { ...prev, status: "cancelled", message: null } } } : {};
+      });
+    } catch {
+      // Already ended (or gone): show what it actually is instead of hanging.
+      await get().settle(importId);
     }
+  },
+
+  settle: async (importId) => {
+    const id = dissectJobId(importId);
+    const update = useJobStore.getState().updateJob;
+    polling.delete(importId);
+    try {
+      const s = await dissectStatus(importId);
+      set((st) => ({ statuses: { ...st.statuses, [importId]: s } }));
+      if (s.status === "running") {
+        // Genuinely still running — resume following it.
+        update(id, { eta: s.message ?? "running" });
+        get().track(importId, names.get(importId) ?? "recording");
+      } else if (s.status === "complete") {
+        update(id, { status: "complete", progress: 100, eta: "done" });
+      } else {
+        update(id, { status: s.status, eta: s.status, error: s.status === "failed" ? s.error ?? "failed" : null });
+      }
+    } catch {
+      update(id, { status: "failed", eta: "failed", error: "This import no longer exists (it was deleted)." });
+    }
+  },
+
+  forget: (importId) => {
+    polling.delete(importId);
+    names.delete(importId);
+    useJobStore.getState().removeJob(dissectJobId(importId));
+    set((st) => {
+      const { [importId]: _gone, ...rest } = st.statuses;
+      return { statuses: rest };
+    });
   },
 
   retry: async (importId, sourceName) => {

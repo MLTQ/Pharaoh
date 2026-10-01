@@ -365,6 +365,33 @@ pub async fn cancel(http: &reqwest::Client, projects_dir: &Path, import_id: &str
     Ok(import)
 }
 
+/// Why a source can't be read, in words that point at the fix. A file on a
+/// network mount (e.g. a fuse-t/NFS mount of the GPU box) can be briefly
+/// unreachable, or blocked for this app by macOS — "it's gone" is wrong then.
+fn source_readable(path: &str) -> Result<()> {
+    let p = Path::new(path);
+    match std::fs::metadata(p) {
+        Ok(m) if m.is_file() => Ok(()),
+        Ok(_) => Err(Error::Other(format!("{} is not a file", path))),
+        Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => Err(Error::Other(format!(
+            "Pharaoh isn't allowed to read {} — on macOS, allow it under System Settings → Privacy & \
+             Security → Files & Folders (Network Volumes), then Retry",
+            path
+        ))),
+        Err(_) => {
+            let parent_ok = p.parent().map(|d| d.is_dir()).unwrap_or(false);
+            Err(Error::Other(if parent_ok {
+                format!("the original recording is no longer at {} — it was moved or deleted; start a new import", path)
+            } else {
+                format!(
+                    "can't reach {} — its folder isn't available (is a network drive unmounted?). Reconnect it, then Retry",
+                    path
+                )
+            }))
+        }
+    }
+}
+
 /// Re-run a failed or cancelled import from its original source and options,
 /// in place (same import id and directory), against the currently configured
 /// dissect server.
@@ -385,12 +412,7 @@ pub async fn retry(
     if !matches!(import.status.as_str(), "failed" | "cancelled") {
         return Err(Error::Other(format!("only failed or cancelled imports can be retried (this one is {})", import.status)));
     }
-    if !Path::new(&import.source_path).is_file() {
-        return Err(Error::Other(format!(
-            "the original recording is no longer at {} — start a new import instead",
-            import.source_path
-        )));
-    }
+    source_readable(&import.source_path)?;
     let base = base.trim_end_matches('/').to_string();
     let (job_id, remote) = start_job(http, &base, &dir, &import.source_path, &import.options).await?;
     import.job_id = job_id;
@@ -1047,7 +1069,12 @@ mod tests {
 
         set_status(&root, &id, "failed", "/definitely/not/here.m4b");
         let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
-        assert!(e.contains("no longer at"), "{}", e);
+        assert!(e.contains("can't reach"), "missing folder reads as unreachable: {}", e);
+
+        let gone = root.join("ep_moved.wav");
+        set_status(&root, &id, "failed", &gone.to_string_lossy());
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        assert!(e.contains("no longer at"), "folder present, file gone: {}", e);
 
         // Source present but server down: error, and the import stays failed.
         let src = root.join("ep.wav");

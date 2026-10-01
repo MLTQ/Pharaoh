@@ -12,6 +12,10 @@ Background tracker for running dissect imports. Owns the job-queue row for each 
 ### `cancel(importId)`, `retry(importId, sourceName?)`
 - **Does**: Back the job-queue row's Cancel / Retry buttons and the modal's. Cancel calls `dissect_cancel` and lets the poll loop finalise the row as `cancelled`. Retry calls `dissect_retry` (same import, same options, current server) and re-tracks, reusing the existing row; it resolves `false` — row failed, toast shown — when the re-run couldn't start (e.g. the source file moved).
 
+### `settle(importId)`, `forget(importId)`
+- **Does**: `settle` re-reads an import and puts its row in its real state; `cancel` falls back to it when the cancel call errors (e.g. the import already failed). `forget` drops the row and tracking when an import is deleted.
+- **Rationale**: Cancel used to set "cancelling…" and wait for the poll loop; when the loop wasn't running or the cancel errored, the row stayed "running" forever and the queue reported a phantom running job. Every poll tick also checks it is still wanted, so an in-flight poll can't overwrite a cancelled row.
+
 ### `resumeRunning()`
 - **Does**: Called once at app start (`App.tsx`); re-tracks every import whose `import.json` says `running`, so the queue survives a restart. No-op for mesh viewers.
 

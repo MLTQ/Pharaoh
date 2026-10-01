@@ -48,6 +48,8 @@ interface JobState {
   addJob: (job: Job) => void;
   updateJob: (id: string, update: Partial<Job>) => void;
   removeJob: (id: string) => void;
+  /** Remove every complete / failed / cancelled row. Returns how many went. */
+  clearFinished: () => number;
   setActiveTake: (sceneSlug: string, rowIndex: number, jobId: string) => void;
   setQaStatus: (jobId: string, status: QaJobStatus) => void;
   // Returns an unlisten function; call on unmount
@@ -65,6 +67,12 @@ export const useJobStore = create<JobState>((set, get) => ({
     set((state) => ({
       jobs: state.jobs.map((j) => (j.id === id ? { ...j, ...update } : j)),
     })),
+
+  clearFinished: () => {
+    const before = get().jobs.length;
+    set((state) => ({ jobs: state.jobs.filter((j) => j.status === "running" || j.status === "pending") }));
+    return before - get().jobs.length;
+  },
 
   removeJob: (id) =>
     set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),

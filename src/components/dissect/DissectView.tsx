@@ -119,6 +119,7 @@ export const DissectView: React.FC = () => {
     if (!window.confirm("Delete this import's stems and clips? Characters and scene assets keep what they already took.")) return;
     try {
       await deleteDissectImport(id);
+      useDissectStore.getState().forget(id);
       if (selected === id) { setSelected(null); setDetail(null); }
       refresh();
     } catch (e) {

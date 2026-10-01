@@ -31,3 +31,6 @@ Frontend store for generation and Post-server jobs, active takes, and event list
 
 ## Dissect jobs
 Rows with `model: "dissect"` are added and updated by [dissectStore](./dissectStore.md), not by Tauri job events — dissect progress is polled from the import, not pushed.
+
+## Clearing
+`clearFinished()` drops every complete / failed / cancelled row (the queue's **Clear N** button); `removeJob` backs each finished row's ×. Only the list changes — nothing on disk is touched.
