@@ -1,6 +1,7 @@
 mod app_support;
 mod cli;
 mod commands;
+mod env_path;
 mod error;
 mod fountain;
 mod models;
@@ -15,6 +16,8 @@ use crate::app_support::{ensure_app_dirs, load_or_default_app_config};
 use crate::commands::recording::RecordingState;
 
 pub fn run() {
+    // Before anything spawns: a Dock-launched app has no Homebrew on PATH.
+    env_path::augment();
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_fs::init())
@@ -150,6 +153,7 @@ pub fn run() {
 }
 
 pub fn run_cli(args: Vec<String>) -> Result<(), String> {
+    env_path::augment();
     let runtime = tokio::runtime::Runtime::new()
         .map_err(|e| format!("failed to start runtime: {}", e))?;
     runtime

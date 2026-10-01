@@ -31,7 +31,17 @@ fn check_tool(cmd: &str, version_args: &[&str], hint: &str) -> ToolStatus {
             let first_line = stdout.lines().next().map(|s| s.trim().to_string());
             ToolStatus { ok: true, version: first_line, hint: hint.to_string() }
         }
-        _ => ToolStatus { ok: false, version: None, hint: hint.to_string() },
+        _ => ToolStatus {
+            ok: false,
+            version: None,
+            // Say where we looked: "install it" is wrong advice when it's
+            // installed somewhere this process can't see.
+            hint: format!(
+                "{} — not found on Pharaoh's PATH ({})",
+                hint,
+                std::env::var("PATH").unwrap_or_default()
+            ),
+        },
     }
 }
 

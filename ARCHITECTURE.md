@@ -689,6 +689,7 @@ reason instead of polling forever.
 |--------|----------------|
 | `app_support.rs` | Paths, project/script/JSON I/O, voice-path relativize/absolutize, `wav_info`, asset→row binding |
 | `models.rs` | Every serialized type plus `AppState` |
+| `env_path.rs` | Startup PATH repair: a Finder/Dock-launched app lacks Homebrew's dirs, so ffmpeg/sox "weren't installed"; adds the login shell's PATH (only when ffmpeg isn't already findable) and well-known tool dirs |
 | `commands/project.rs` | Project and scene CRUD, on-load migration |
 | `commands/script.rs` | `script.csv` and `script.fountain` read/write |
 | `commands/sidecar.rs` | `.meta.json` read/write, takes, QA status, asset listing |
