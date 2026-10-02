@@ -20,7 +20,8 @@
 //! priority — and rows carry no fades or gain, so rendering the scene sums
 //! back to the source. Change any row and the rest of the scene stays put.
 //!
-//! Clips are 16-bit FLAC, mono when the stem is dual-mono (a mono source's
+//! Clips are 24-bit FLAC (lossless against the 24-bit stems), mono only when
+//! both channels are bit-identical (a mono source's
 //! stems are): ~100 MB per hour of source rather than ~3.5 GB as 24-bit stereo
 //! WAV. The renderer upmixes these mono `mix:as-is` clips at full level.
 //!
@@ -47,12 +48,10 @@ use crate::models::{
 
 const SR: u32 = 48_000;
 // Disk estimate per counted frame (clip frames plus each remainder's full
-// length). FLAC of dual-mono stems measured 0.15 B/frame on a 44-min drama
-// (76 MB vs 2.6 GB as 24-bit stereo WAV); this allows ~2.5× for denser,
-// genuinely stereo sources. Not an upper bound — the build gate adds 2 GB.
-const BYTES_PER_FRAME: f64 = 0.4;
-/// Remainder beds quieter than this are skipped (e.g. a dry reading's music stem).
-const SILENT_DB: f64 = -60.0;
+// length). 24-bit FLAC of a dual-mono 44-min drama measured 0.4 B/frame
+// (201 MB vs 2.6 GB as 24-bit stereo WAV); a genuinely stereo, music-heavy
+// source runs ~2× that. Not an upper bound — the build gate adds 2 GB.
+const BYTES_PER_FRAME: f64 = 1.0;
 
 // ── Options / plan ────────────────────────────────────────────────────────
 
@@ -435,20 +434,20 @@ struct SplitResult {
     remainder_kept: bool,
 }
 
-/// One output clip, buffered as 16-bit stereo and written as FLAC when it's
-/// finished. FLAC is lossless and stores the long stretches of digital silence
-/// in itemised stems almost for free; a clip whose channels are identical (a
-/// mono source's stems are dual-mono) is written as mono. Together that's
-/// ~10-20× smaller than the 24-bit stereo WAV this used to write. 16-bit is
-/// ample: the source is a lossy encode, and its quantisation sits ~96 dB down.
+/// One output clip, buffered as 24-bit stereo and written as FLAC when it's
+/// finished. FLAC is lossless — same samples as a 24-bit WAV, matching the
+/// 24-bit stems — and stores the long stretches of digital silence in
+/// itemised stems almost for free. A clip is written mono only when its two
+/// channels are bit-identical (a mono source's stems are dual-mono), so the
+/// stereo field is never touched.
 struct Clip {
     path: PathBuf,
-    pcm: Vec<i16>,
+    pcm: Vec<i32>,
     dual_mono: bool,
 }
 
-fn to_i16(x: f32) -> i16 {
-    (x.clamp(-1.0, 1.0) * 32_767.0).round() as i16
+fn to_i24(x: f32) -> i32 {
+    (x.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32
 }
 
 impl Clip {
@@ -457,7 +456,7 @@ impl Clip {
     }
 
     fn push(&mut self, l: f32, r: f32) {
-        let (a, b) = (to_i16(l), to_i16(r));
+        let (a, b) = (to_i24(l), to_i24(r));
         self.dual_mono &= a == b;
         self.pcm.push(a);
         self.pcm.push(b);
@@ -469,9 +468,9 @@ impl Clip {
     }
 }
 
-/// flacenc source over interleaved stereo i16, yielding `channels` (1 = left only).
+/// flacenc source over interleaved stereo 24-bit samples, yielding `channels` (1 = left only).
 struct PcmSource<'a> {
-    pcm: &'a [i16],
+    pcm: &'a [i32],
     channels: usize,
     head: usize, // frame
     scratch: Vec<i32>,
@@ -479,16 +478,16 @@ struct PcmSource<'a> {
 
 impl flacenc::source::Source for PcmSource<'_> {
     fn channels(&self) -> usize { self.channels }
-    fn bits_per_sample(&self) -> usize { 16 }
+    fn bits_per_sample(&self) -> usize { 24 }
     fn sample_rate(&self) -> usize { SR as usize }
     fn read_samples<F: flacenc::source::Fill>(&mut self, block_size: usize, dest: &mut F) -> std::result::Result<usize, flacenc::error::SourceError> {
         let frames = self.pcm.len() / 2;
         let end = (self.head + block_size).min(frames);
         self.scratch.clear();
         for f in self.head..end {
-            self.scratch.push(i32::from(self.pcm[2 * f]));
+            self.scratch.push(self.pcm[2 * f]);
             if self.channels == 2 {
-                self.scratch.push(i32::from(self.pcm[2 * f + 1]));
+                self.scratch.push(self.pcm[2 * f + 1]);
             }
         }
         dest.fill_interleaved(&self.scratch)?;
@@ -514,7 +513,7 @@ pub fn fix_min_block_size(bytes: &mut [u8]) -> bool {
     true
 }
 
-fn write_flac(path: &Path, pcm: &[i16], channels: usize) -> Result<()> {
+fn write_flac(path: &Path, pcm: &[i32], channels: usize) -> Result<()> {
     use flacenc::component::BitRepr;
     use flacenc::error::Verify;
     let config = flacenc::config::Encoder::default()
@@ -554,8 +553,7 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
     let mut active: Vec<(usize, Clip, usize)> = Vec::new();
     let mut rem = remainder.map(Clip::new);
     let mut rem_cursor = 0usize;
-    let mut rem_energy = 0f64;
-    let mut rem_frames = 0u64;
+    let mut rem_nonzero = false;
     let mut f: u64 = 0;
     let mut buf = vec![0u8; 8 * 8192];
 
@@ -595,9 +593,8 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
             if let Some(w) = rem.as_mut() {
                 let covered = in_spans(claimed, &mut rem_cursor, f);
                 let (rl, rr) = if covered { (0.0, 0.0) } else { (l, r) };
-                if !covered {
-                    rem_energy += (rl as f64).powi(2) + (rr as f64).powi(2);
-                    rem_frames += 1;
+                if !covered && !rem_nonzero {
+                    rem_nonzero = to_i24(rl) != 0 || to_i24(rr) != 0;
                 }
                 w.push(rl, rr);
             }
@@ -621,10 +618,9 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
     let mut remainder_kept = false;
     if let Some(w) = rem {
         w.finish()?;
-        // Level of what the remainder actually carries (the uncovered frames),
-        // not diluted by the zeros under itemised clips.
-        let rms_db = 10.0 * ((rem_energy / (2.0 * rem_frames.max(1) as f64)) + 1e-12).log10();
-        remainder_kept = rms_db > SILENT_DB;
+        // Dropped only when it's digital silence: any signal at all, however
+        // quiet, is part of the original and stays.
+        remainder_kept = rem_nonzero;
         if !remainder_kept {
             if let Some(p) = remainder { let _ = std::fs::remove_file(p); }
         }
@@ -1066,14 +1062,14 @@ mod tests {
         let head = std::fs::read(&mono).unwrap();
         assert_eq!(head[8..10], head[10..12]);
         assert_eq!(crate::app_support::wav_info(&p(&mono)).unwrap().sample_rate, SR);
-        // Lossless at 16 bits: samples come back within one quantisation step.
+        // Lossless at 24 bits: samples come back within one quantisation step.
         let mut worst = 0f32;
         crate::app_support::for_each_flac_sample(&p(&stereo), 100, |f, c, v| {
             let x = ((f + 100) as f32 * 0.01).sin() * 0.5;
             worst = worst.max((v - if c == 0 { x } else { -x }).abs());
             true
         }).unwrap();
-        assert!(worst < 1.0 / 32_000.0, "worst error {}", worst);
+        assert!(worst < 1.0 / 8_000_000.0, "worst error {}", worst);
         std::fs::remove_dir_all(&dir).ok();
     }
 
