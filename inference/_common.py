@@ -145,7 +145,6 @@ def register_upload_route(app) -> None:
 
     @app.post("/upload")
     async def upload_file(request: _Request, filename: str = Query(...)):
-        content = await request.body()
         # Use only the final component of whatever the client sent. Joining the
         # raw query value let "../../x" escape the uploads directory and write
         # anywhere the server process could reach.
@@ -154,7 +153,17 @@ def register_upload_route(app) -> None:
             raise HTTPException(status_code=400, detail="invalid filename")
         dest = SERVER_OUTPUT_DIR / "uploads" / safe
         dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_bytes(content)
+        # Stream to disk: a whole audiobook (1 GB+) must not sit in memory,
+        # and a dropped connection must not leave a truncated file behind.
+        part = dest.with_name(dest.name + ".part")
+        try:
+            with open(part, "wb") as f:
+                async for chunk in request.stream():
+                    f.write(chunk)
+            part.replace(dest)
+        except BaseException:
+            part.unlink(missing_ok=True)
+            raise
         return {"server_path": str(dest)}
 
 

@@ -22,3 +22,4 @@ Shared helpers for Pharaoh Python inference servers. It provides small dependenc
 
 ## Notes
 - Keep this module conservative; it is imported by isolated model environments with different Python versions and dependency stacks.
+- `POST /upload` streams the request body to `uploads/<name>.part` and renames it when complete, so a whole audiobook never sits in memory and a dropped connection leaves no truncated file.

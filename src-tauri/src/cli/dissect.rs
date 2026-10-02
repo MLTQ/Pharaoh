@@ -38,6 +38,7 @@ pub(super) async fn run(config: &AppConfig, source: &str, rest: &[String]) -> Re
         &projects_dir(config),
         &source.to_string_lossy(),
         options,
+        false,
     )
     .await?;
     if !flag_parse(&flags, "wait", true)? {
@@ -150,7 +151,7 @@ pub(super) async fn cancel(config: &AppConfig, import_id: &str) -> Result<()> {
 pub(super) async fn retry(config: &AppConfig, import_id: &str, rest: &[String]) -> Result<()> {
     let flags = parse_flags(rest)?;
     let http = reqwest::Client::new();
-    let import = dissect::retry(&http, &config.dissect_url, &projects_dir(config), import_id).await?;
+    let import = dissect::retry(&http, &config.dissect_url, &projects_dir(config), import_id, false).await?;
     if !flag_parse(&flags, "wait", true)? {
         return print_json(&import);
     }

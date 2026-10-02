@@ -9,7 +9,10 @@
 //!
 //! Same-machine servers write the import directory in place. Remote servers
 //! write to their own scratch dir; `dissect_status` downloads the finished
-//! directory as a zip and unpacks it here.
+//! directory as a zip and unpacks it here. For a remote server the app's
+//! submit / retry return at once and stream the source up in the background
+//! (`spawn_start`); until the job starts, `import.json` has an empty `job_id`
+//! and polls report upload progress.
 //!
 //! `dissect_assign_speaker` turns a speaker into (or onto) a Library character.
 //! It refuses unless the caller passes `rights_confirmed = true`, and it stamps
@@ -18,6 +21,8 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Duration;
 
 use chrono::Utc;
@@ -88,6 +93,11 @@ pub struct DissectImport {
     /// the next successful poll; after UNREACHABLE_GRACE the import fails.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub unreachable_since: Option<String>,
+    /// Process uploading the source while `job_id` is still empty. A remote
+    /// import's upload runs in the background, so a 1 GB audiobook doesn't
+    /// hold the UI; if that process is gone, the upload was interrupted.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub upload_pid: Option<u32>,
 }
 
 /// How long a running import may go without reaching its server before it is
@@ -170,11 +180,49 @@ fn http(app: &AppHandle) -> reqwest::Client {
     app.state::<AppState>().http.clone()
 }
 
-/// Upload with a timeout sized for whole episodes rather than short refs.
-async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str) -> Result<String> {
-    let bytes = tokio::fs::read(local_path)
+/// Progress of a background upload, by import id (in-process).
+pub struct UploadProgress {
+    pub done: AtomicU64,
+    pub total: u64,
+    pub cancelled: AtomicBool,
+}
+
+fn uploads() -> &'static Mutex<HashMap<String, Arc<UploadProgress>>> {
+    static UPLOADS: OnceLock<Mutex<HashMap<String, Arc<UploadProgress>>>> = OnceLock::new();
+    UPLOADS.get_or_init(Default::default)
+}
+
+fn upload_of(import_id: &str) -> Option<Arc<UploadProgress>> {
+    uploads().lock().ok()?.get(import_id).cloned()
+}
+
+fn process_alive(pid: u32) -> bool {
+    if pid == std::process::id() {
+        return true;
+    }
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as libc::pid_t, 0) == 0 }
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
+}
+
+fn fmt_mb(b: u64) -> String {
+    if b >= 1_000_000_000 { format!("{:.2} GB", b as f64 / 1e9) } else { format!("{} MB", b / 1_000_000) }
+}
+
+/// Stream the source to the server's /upload — never the whole file in
+/// memory — counting bytes into `progress` and stopping if it's cancelled.
+async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str, progress: Option<Arc<UploadProgress>>) -> Result<String> {
+    use futures_util::StreamExt;
+    use tokio::io::AsyncReadExt;
+    let file = tokio::fs::File::open(local_path)
         .await
         .map_err(|e| Error::Other(format!("read source '{}': {}", local_path, e)))?;
+    let len = file.metadata().await.map(|m| m.len()).unwrap_or(0);
     // Unique per upload: two imports of the same file used to share one
     // uploads/ path, and the first to finish deleted the other's input.
     let filename = format!(
@@ -182,12 +230,32 @@ async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str)
         &Uuid::new_v4().simple().to_string()[..8],
         Path::new(local_path).file_name().and_then(|n| n.to_str()).unwrap_or("source.wav")
     );
+    let stream = futures_util::stream::unfold((file, progress), |(mut f, p)| async move {
+        if p.as_ref().is_some_and(|p| p.cancelled.load(Ordering::Relaxed)) {
+            return Some((Err(std::io::Error::other("upload cancelled")), (f, p)));
+        }
+        let mut buf = vec![0u8; 1 << 20];
+        match f.read(&mut buf).await {
+            Ok(0) => None,
+            Ok(n) => {
+                buf.truncate(n);
+                if let Some(p) = &p {
+                    p.done.fetch_add(n as u64, Ordering::Relaxed);
+                }
+                Some((Ok(bytes::Bytes::from(buf)), (f, p)))
+            }
+            Err(e) => Some((Err(e), (f, p))),
+        }
+    })
+    .boxed();
     let resp: Value = http
         .post(format!("{}/upload", base_url))
         .query(&[("filename", &filename)])
-        .body(bytes)
         .header("content-type", "application/octet-stream")
-        .timeout(Duration::from_secs(30 * 60))
+        .header("content-length", len)
+        .body(reqwest::Body::wrap_stream(stream))
+        // Generous: a 20 h audiobook over a slow link or a network mount.
+        .timeout(Duration::from_secs(3 * 60 * 60))
         .send()
         .await
         .map_err(|e| Error::Other(format!("upload to {}: {}", base_url, e)))?
@@ -350,7 +418,7 @@ pub async fn dissect_submit(
     options: Option<DissectOptions>,
 ) -> Result<DissectImport> {
     let projects_dir = app_projects_dir(&app)?;
-    submit(&http(&app), &dissect_url(&app)?, &projects_dir, &source_path, options.unwrap_or_default()).await
+    submit(&http(&app), &dissect_url(&app)?, &projects_dir, &source_path, options.unwrap_or_default(), true).await
 }
 
 /// Shared by the Tauri command and `pharaoh dissect run`.
@@ -360,6 +428,7 @@ pub async fn submit(
     projects_dir: &Path,
     source_path: &str,
     options: DissectOptions,
+    background: bool,
 ) -> Result<DissectImport> {
     let source_path = source_path.to_string();
     let src = Path::new(&source_path);
@@ -371,33 +440,81 @@ pub async fn submit(
     std::fs::create_dir_all(&dir)?;
 
     let base = base.trim_end_matches('/').to_string();
-    let (job_id, remote) = match start_job(http, &base, &dir, &source_path, &options).await {
-        Ok(v) => v,
-        Err(e) => {
-            // Nothing was started; don't leave an empty import behind.
-            let _ = std::fs::remove_dir_all(&dir);
-            return Err(e);
-        }
-    };
-
-    let import = DissectImport {
+    let mut import = DissectImport {
         import_id,
-        job_id,
+        job_id: String::new(),
         source_name: src
             .file_name()
             .map(|n| n.to_string_lossy().into_owned())
             .unwrap_or_default(),
         source_path,
-        server_url: base,
-        remote,
+        server_url: base.clone(),
+        remote: is_remote_url(&base),
         status: "running".into(),
         error: None,
         created_at: Utc::now().to_rfc3339(),
         options,
         unreachable_since: None,
+        upload_pid: None,
     };
+    if background && import.remote {
+        import.upload_pid = Some(std::process::id());
+        write_json(&dir.join(IMPORT_FILE), &import)?;
+        spawn_start(http.clone(), dir, import.clone());
+        return Ok(import);
+    }
+    match start_job(http, &base, &dir, &import.source_path, &import.options, None).await {
+        Ok((job_id, _)) => import.job_id = job_id,
+        Err(e) => {
+            // Nothing was started; don't leave an empty import behind.
+            let _ = std::fs::remove_dir_all(&dir);
+            return Err(e);
+        }
+    }
     write_json(&dir.join(IMPORT_FILE), &import)?;
     Ok(import)
+}
+
+/// Upload and start the server job in the background, then record the job id
+/// in `import.json`. A failure marks the import failed (Retry re-uploads); a
+/// cancel during the upload stops it, and a job that started anyway is
+/// cancelled on the server.
+fn spawn_start(http: reqwest::Client, dir: PathBuf, import: DissectImport) {
+    let total = std::fs::metadata(&import.source_path).map(|m| m.len()).unwrap_or(0);
+    let progress = Arc::new(UploadProgress { done: AtomicU64::new(0), total, cancelled: AtomicBool::new(false) });
+    if let Ok(mut m) = uploads().lock() {
+        m.insert(import.import_id.clone(), progress.clone());
+    }
+    tauri::async_runtime::spawn(async move {
+        let res = start_job(&http, &import.server_url, &dir, &import.source_path, &import.options, Some(progress)).await;
+        if let Ok(mut m) = uploads().lock() {
+            m.remove(&import.import_id);
+        }
+        let path = dir.join(IMPORT_FILE);
+        let Ok(mut now) = read_json::<DissectImport>(&path) else { return }; // deleted meanwhile
+        let still_wanted = now.status == "running" && now.job_id.is_empty();
+        match res {
+            Ok((job_id, _)) if still_wanted => {
+                now.job_id = job_id;
+                now.upload_pid = None;
+                let _ = write_json(&path, &now);
+            }
+            Ok((job_id, _)) => {
+                let _ = http
+                    .post(format!("{}/cancel/{}", import.server_url, job_id))
+                    .timeout(Duration::from_secs(10))
+                    .send()
+                    .await;
+            }
+            Err(e) if still_wanted => {
+                now.status = "failed".into();
+                now.error = Some(e.to_string());
+                now.upload_pid = None;
+                let _ = write_json(&path, &now);
+            }
+            Err(_) => {}
+        }
+    });
 }
 
 /// Upload (when remote) and POST /generate/dissect. Returns (job_id, remote).
@@ -407,10 +524,11 @@ async fn start_job(
     dir: &Path,
     source_path: &str,
     options: &DissectOptions,
+    progress: Option<Arc<UploadProgress>>,
 ) -> Result<(String, bool)> {
     let remote = is_remote_url(base);
     let (input_path, output_path) = if remote {
-        (upload_source(http, base, source_path).await?, String::new())
+        (upload_source(http, base, source_path, progress).await?, String::new())
     } else {
         (source_path.to_string(), dir.to_string_lossy().into_owned())
     };
@@ -461,6 +579,9 @@ pub async fn cancel(http: &reqwest::Client, projects_dir: &Path, import_id: &str
     if import.status != "running" {
         return Err(Error::Other(format!("import is {}, not running", import.status)));
     }
+    if let Some(p) = upload_of(import_id) {
+        p.cancelled.store(true, Ordering::Relaxed);
+    }
     let _ = http
         .post(format!("{}/cancel/{}", import.server_url, import.job_id))
         .timeout(Duration::from_secs(10))
@@ -504,7 +625,7 @@ fn source_readable(path: &str) -> Result<()> {
 /// dissect server.
 #[tauri::command]
 pub async fn dissect_retry(app: AppHandle, import_id: String) -> Result<DissectImport> {
-    retry(&http(&app), &dissect_url(&app)?, &app_projects_dir(&app)?, &import_id).await
+    retry(&http(&app), &dissect_url(&app)?, &app_projects_dir(&app)?, &import_id, true).await
 }
 
 pub async fn retry(
@@ -512,6 +633,7 @@ pub async fn retry(
     base: &str,
     projects_dir: &Path,
     import_id: &str,
+    background: bool,
 ) -> Result<DissectImport> {
     let dir = import_dir(projects_dir, import_id)?;
     let path = dir.join(IMPORT_FILE);
@@ -521,13 +643,26 @@ pub async fn retry(
     }
     source_readable(&import.source_path)?;
     let base = base.trim_end_matches('/').to_string();
-    let (job_id, remote) = start_job(http, &base, &dir, &import.source_path, &import.options).await?;
+    if background && is_remote_url(&base) {
+        import.job_id = String::new();
+        import.remote = true;
+        import.server_url = base;
+        import.status = "running".into();
+        import.error = None;
+        import.unreachable_since = None;
+        import.upload_pid = Some(std::process::id());
+        write_json(&path, &import)?;
+        spawn_start(http.clone(), dir, import.clone());
+        return Ok(import);
+    }
+    let (job_id, remote) = start_job(http, &base, &dir, &import.source_path, &import.options, None).await?;
     import.job_id = job_id;
     import.remote = remote;
     import.server_url = base;
     import.status = "running".into();
     import.error = None;
     import.unreachable_since = None;
+    import.upload_pid = None;
     write_json(&path, &import)?;
     Ok(import)
 }
@@ -564,6 +699,34 @@ pub async fn poll(http: &reqwest::Client, projects_dir: &Path, import_id: &str) 
         "complete" => return Ok(status(&import, 1.0, None, read_manifest(&dir)?)),
         "failed" | "cancelled" => return Ok(status(&import, 0.0, None, None)),
         _ => {}
+    }
+
+    // Still uploading (no server job yet).
+    if import.job_id.is_empty() {
+        if let Some(p) = upload_of(import_id) {
+            let done = p.done.load(Ordering::Relaxed);
+            let pct = if p.total > 0 { done as f32 / p.total as f32 } else { 0.0 };
+            let msg = if p.total > 0 && done >= p.total {
+                "Uploaded — starting the dissect job".to_string()
+            } else {
+                format!("Uploading to the dissect server · {} of {} ({:.0}%)", fmt_mb(done), fmt_mb(p.total), pct * 100.0)
+            };
+            return Ok(status(&import, 0.0, Some(msg), None));
+        }
+        if import.upload_pid.is_some_and(|pid| pid != std::process::id() && process_alive(pid)) {
+            return Ok(status(&import, 0.0, Some("Uploading to the dissect server (in another Pharaoh window)".into()), None));
+        }
+        // Re-read: the upload may have just finished and recorded its job.
+        import = read_json(&import_path)?;
+        if import.job_id.is_empty() {
+            if import.status == "running" {
+                import.status = "failed".into();
+                import.upload_pid = None;
+                import.error = Some("The upload to the dissect server was interrupted (Pharaoh closed before it finished). Retry to upload again.".into());
+                write_json(&import_path, &import)?;
+            }
+            return Ok(status(&import, 0.0, None, None));
+        }
     }
 
     let job: Value = match http
@@ -1069,6 +1232,7 @@ mod tests {
                 created_at: Utc::now().to_rfc3339(),
                 options: DissectOptions::default(),
                 unreachable_since: None,
+                upload_pid: None,
             },
         )
         .unwrap();
@@ -1177,23 +1341,23 @@ mod tests {
         let id = fixture(&root);
         let http = reqwest::Client::new();
         set_status(&root, &id, "running", "/nope.mp3");
-        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id, false).await.unwrap_err().to_string();
         assert!(e.contains("only failed or cancelled"), "{}", e);
 
         set_status(&root, &id, "failed", "/definitely/not/here.m4b");
-        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id, false).await.unwrap_err().to_string();
         assert!(e.contains("can't reach"), "missing folder reads as unreachable: {}", e);
 
         let gone = root.join("ep_moved.wav");
         set_status(&root, &id, "failed", &gone.to_string_lossy());
-        let e = retry(&http, "http://127.0.0.1:9", &root, &id).await.unwrap_err().to_string();
+        let e = retry(&http, "http://127.0.0.1:9", &root, &id, false).await.unwrap_err().to_string();
         assert!(e.contains("no longer at"), "folder present, file gone: {}", e);
 
         // Source present but server down: error, and the import stays failed.
         let src = root.join("ep.wav");
         std::fs::write(&src, b"RIFF").unwrap();
         set_status(&root, &id, "failed", &src.to_string_lossy());
-        assert!(retry(&http, "http://127.0.0.1:9", &root, &id).await.is_err());
+        assert!(retry(&http, "http://127.0.0.1:9", &root, &id, false).await.is_err());
         let imp: DissectImport = read_json(&imports_root(&root).join(&id).join(IMPORT_FILE)).unwrap();
         assert_eq!(imp.status, "failed");
     }
@@ -1280,4 +1444,81 @@ mod tests {
         r.import_id = "../../etc".into();
         assert!(assign_speaker(&root, r).is_err());
     }
+
+    /// Minimal HTTP server: answers /upload (counting body bytes, plain or
+    /// chunked) and /generate/dissect. Returns its base URL and the byte count.
+    fn fake_dissect_server() -> (String, Arc<AtomicU64>) {
+        use std::io::{BufRead, BufReader, Read, Write};
+        // IPv6 loopback spelled out, so is_remote_url treats it as remote.
+        let listener = std::net::TcpListener::bind("[::1]:0").unwrap();
+        let base = format!("http://[0:0:0:0:0:0:0:1]:{}", listener.local_addr().unwrap().port());
+        let got = Arc::new(AtomicU64::new(0));
+        let got2 = got.clone();
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut r = BufReader::new(stream.try_clone().unwrap());
+                let mut line = String::new();
+                r.read_line(&mut line).unwrap();
+                let path = line.split_whitespace().nth(1).unwrap_or("").to_string();
+                let (mut len, mut chunked) = (0usize, false);
+                loop {
+                    let mut h = String::new();
+                    r.read_line(&mut h).unwrap();
+                    let l = h.to_ascii_lowercase();
+                    if let Some(v) = l.strip_prefix("content-length:") { len = v.trim().parse().unwrap_or(0); }
+                    if l.starts_with("transfer-encoding:") && l.contains("chunked") { chunked = true; }
+                    if h == "\r\n" { break; }
+                }
+                let mut n = 0usize;
+                if chunked {
+                    loop {
+                        let mut sz = String::new();
+                        r.read_line(&mut sz).unwrap();
+                        let k = usize::from_str_radix(sz.trim(), 16).unwrap_or(0);
+                        let mut buf = vec![0u8; k + 2];
+                        r.read_exact(&mut buf).unwrap();
+                        if k == 0 { break; }
+                        n += k;
+                    }
+                } else {
+                    let mut buf = vec![0u8; len];
+                    r.read_exact(&mut buf).unwrap();
+                    n = len;
+                }
+                let body = if path.starts_with("/upload") {
+                    got2.fetch_add(n as u64, Ordering::SeqCst);
+                    r#"{"server_path":"/srv/uploads/x.m4b"}"#
+                } else {
+                    r#"{"job_id":"job-42"}"#
+                };
+                let mut w = stream;
+                write!(w, "HTTP/1.1 200 OK\r\ncontent-type: application/json\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{}", body.len(), body).unwrap();
+            }
+        });
+        (base, got)
+    }
+
+    #[tokio::test]
+    async fn remote_submit_returns_at_once_and_uploads_in_the_background() {
+        let root = std::env::temp_dir().join(format!("pharaoh-dissect-bg-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let src = root.join("book.m4b");
+        std::fs::write(&src, vec![7u8; 5 * 1024 * 1024 + 3]).unwrap();
+        let (url, got) = fake_dissect_server();
+        assert!(is_remote_url(&url));
+        let http = reqwest::Client::new();
+        let import = submit(&http, &url, &root, &src.to_string_lossy(), DissectOptions::default(), true).await.unwrap();
+        assert!(import.job_id.is_empty(), "returns before the upload finishes");
+        let path = imports_root(&root).join(&import.import_id).join(IMPORT_FILE);
+        let mut job = String::new();
+        for _ in 0..200 {
+            let now: DissectImport = read_json(&path).unwrap();
+            if !now.job_id.is_empty() { job = now.job_id; break; }
+            tokio::time::sleep(Duration::from_millis(25)).await;
+        }
+        assert_eq!(job, "job-42");
+        assert_eq!(got.load(Ordering::SeqCst), 5 * 1024 * 1024 + 3);
+        std::fs::remove_dir_all(&root).ok();
+    }
+
 }

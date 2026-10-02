@@ -28,7 +28,7 @@ chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1"
 csv = "1"
 tokio = { version = "1", features = ["full"] }
-reqwest = { version = "0.12", features = ["json"] }
+reqwest = { version = "0.12", features = ["json", "stream"] }
 # Gruve share server: serves the built frontend + an HTTP mirror of the Tauri
 # command surface so mesh viewers (no Tauri IPC) can use the app remotely.
 axum = "0.8"
@@ -39,6 +39,8 @@ dirs = "5"
 cpal = "0.15"
 flacenc = "0.5.1"
 claxon = "0.4.3"
+futures-util = "0.3.34"
+bytes = "1.12.1"
 
 [target.'cfg(unix)'.dependencies]
 # setrlimit (open-file limit for big scene renders) and statvfs (free disk

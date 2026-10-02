@@ -134,3 +134,29 @@ class TestSpawnJob:
             return overlap["max"]
 
         assert asyncio.run(main()) == 1, "GPU work must not run concurrently"
+
+
+class TestUploadRoute:
+    """POST /upload streams the body to disk (a whole audiobook must not sit
+    in memory) and leaves no partial file behind."""
+
+    def test_streams_body_to_uploads_dir(self, monkeypatch, tmp_path):
+        fastapi = pytest.importorskip("fastapi")
+        from fastapi.testclient import TestClient
+        import _common
+
+        monkeypatch.setattr(_common, "SERVER_OUTPUT_DIR", tmp_path)
+        app = fastapi.FastAPI()
+        _common.register_upload_route(app)
+        body = os.urandom(3 * 1024 * 1024 + 7)
+
+        def chunks():
+            for i in range(0, len(body), 65536):
+                yield body[i:i + 65536]
+
+        r = TestClient(app).post("/upload", params={"filename": "../x/book.m4b"}, content=chunks())
+        assert r.status_code == 200
+        dest = tmp_path / "uploads" / "book.m4b"
+        assert r.json()["server_path"] == str(dest)
+        assert dest.read_bytes() == body
+        assert not list((tmp_path / "uploads").glob("*.part"))
