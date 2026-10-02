@@ -85,6 +85,20 @@ fn write_cached_peaks(cache_path: &Path, peaks: &[f32]) -> Result<()> {
 }
 
 fn compute_waveform_peaks(path: &str, num_peaks: usize) -> Result<Vec<f32>> {
+    if crate::app_support::is_flac(path) {
+        let frames = crate::app_support::wav_info(path)?.frames as usize;
+        let mut peaks = vec![0.0_f32; num_peaks];
+        if frames == 0 {
+            return Ok(peaks);
+        }
+        let per = (frames / num_peaks).max(1);
+        crate::app_support::for_each_flac_sample(path, 0, |f, _, v| {
+            let k = (f as usize / per).min(num_peaks - 1);
+            peaks[k] = peaks[k].max(v.abs().min(1.0));
+            true
+        })?;
+        return Ok(peaks);
+    }
     let mut reader = hound::WavReader::open(path)
         .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
     let spec = reader.spec();
@@ -135,6 +149,28 @@ fn compute_window_peaks(
     end_ms: f64,
     num_peaks: usize,
 ) -> Result<Vec<f32>> {
+    if crate::app_support::is_flac(path) {
+        let info = crate::app_support::wav_info(path)?;
+        let sr = f64::from(info.sample_rate.max(1));
+        let duration_ms = info.frames as f64 / sr * 1000.0;
+        let start_ms = start_ms.clamp(0.0, duration_ms);
+        let end_ms = end_ms.clamp(start_ms, duration_ms);
+        let window = ((end_ms - start_ms) / 1000.0 * sr) as u64;
+        let mut peaks = vec![0.0_f32; num_peaks];
+        if window == 0 {
+            return Ok(peaks);
+        }
+        let per = (window / num_peaks as u64).max(1);
+        crate::app_support::for_each_flac_sample(path, (start_ms / 1000.0 * sr) as u64, |f, _, v| {
+            if f >= window {
+                return false;
+            }
+            let k = ((f / per) as usize).min(num_peaks - 1);
+            peaks[k] = peaks[k].max(v.abs().min(1.0));
+            true
+        })?;
+        return Ok(peaks);
+    }
     let mut reader = hound::WavReader::open(path)
         .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
     let spec = reader.spec();
@@ -330,6 +366,26 @@ pub fn get_duration_ms(path: String) -> Result<u64> {
 /// Find the nearest zero-crossing in a WAV file, searching ±200ms around `near_ms`.
 #[tauri::command]
 pub fn find_zero_crossings(path: String, near_ms: u64) -> Result<Vec<u64>> {
+    if crate::app_support::is_flac(&path) {
+        let sr = u64::from(crate::app_support::wav_info(&path)?.sample_rate.max(1));
+        let near = near_ms * sr / 1000;
+        let window = 200 * sr / 1000;
+        let start = near.saturating_sub(window);
+        // First channel only, frames [start, near + window].
+        let mut xs: Vec<f32> = Vec::new();
+        crate::app_support::for_each_flac_sample(&path, start, |f, c, v| {
+            if c == 0 {
+                xs.push(v);
+            }
+            f < near + window - start
+        })?;
+        return Ok(xs
+            .windows(2)
+            .enumerate()
+            .filter(|(_, w)| w[0] * w[1] <= 0.0)
+            .map(|(i, _)| ((start + i as u64) * 1000) / sr)
+            .collect());
+    }
     let mut reader = hound::WavReader::open(&path)
         .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
     let spec = reader.spec();

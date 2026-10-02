@@ -463,8 +463,64 @@ impl WavInfo {
     }
 }
 
-/// Read a WAV header without decoding samples.
+/// True for a `.flac` path. Rebuilt projects store their clips as FLAC, so the
+/// header and sample readers below accept it alongside WAV.
+pub fn is_flac(path: &str) -> bool {
+    Path::new(path)
+        .extension()
+        .and_then(|e| e.to_str())
+        .is_some_and(|e| e.eq_ignore_ascii_case("flac"))
+}
+
+/// Stream a FLAC file's samples as f32 in [-1, 1], starting at frame
+/// `skip_frames`. `f(frame, channel, value)` gets frame indices relative to
+/// `skip_frames` and returns false to stop early. Returns the channel count.
+pub fn for_each_flac_sample(path: &str, skip_frames: u64, mut f: impl FnMut(u64, usize, f32) -> bool) -> Result<usize> {
+    let mut reader = claxon::FlacReader::open(path).map_err(|e| Error::Other(format!("cannot open FLAC: {}", e)))?;
+    let info = reader.streaminfo();
+    let channels = info.channels as usize;
+    let scale = 1.0 / (1u64 << (info.bits_per_sample.max(1) - 1)) as f32;
+    let mut blocks = reader.blocks();
+    let mut buf = Vec::new();
+    let mut pos = 0u64;
+    loop {
+        let block = match blocks.read_next_or_eof(buf) {
+            Ok(Some(b)) => b,
+            Ok(None) => break,
+            Err(e) => return Err(Error::Other(format!("FLAC decode: {}", e))),
+        };
+        let n = u64::from(block.duration());
+        if pos + n > skip_frames {
+            for i in skip_frames.saturating_sub(pos)..n {
+                for c in 0..channels {
+                    if !f(pos + i - skip_frames, c, block.sample(c as u32, i as u32) as f32 * scale) {
+                        return Ok(channels);
+                    }
+                }
+            }
+        }
+        pos += n;
+        buf = block.into_buffer();
+    }
+    Ok(channels)
+}
+
+/// Channel count of a WAV or FLAC file, from its header.
+pub fn audio_channels(path: &str) -> Option<u16> {
+    if is_flac(path) {
+        claxon::FlacReader::open(path).ok().map(|r| r.streaminfo().channels as u16)
+    } else {
+        hound::WavReader::open(path).ok().map(|r| r.spec().channels)
+    }
+}
+
+/// Read a WAV (or FLAC) header without decoding samples.
 pub fn wav_info(path: &str) -> Result<WavInfo> {
+    if is_flac(path) {
+        let reader = claxon::FlacReader::open(path).map_err(|e| Error::Other(format!("cannot open FLAC: {}", e)))?;
+        let info = reader.streaminfo();
+        return Ok(WavInfo { frames: info.samples.unwrap_or(0), sample_rate: info.sample_rate });
+    }
     let reader = hound::WavReader::open(path)
         .map_err(|e| Error::Other(format!("cannot open WAV: {}", e)))?;
     let spec = reader.spec();

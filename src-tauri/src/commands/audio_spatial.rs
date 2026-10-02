@@ -625,12 +625,9 @@ pub fn prerender_spatialized_clip(
 }
 
 fn wav_duration_seconds(path: &Path) -> Result<f32> {
-    let reader = hound::WavReader::open(path)
-        .map_err(|e| Error::Other(format!("open wav {}: {}", path.display(), e)))?;
-    let spec = reader.spec();
-    let frames = reader.duration() as f32;
-    let sr = spec.sample_rate.max(1) as f32;
-    Ok(frames / sr)
+    let info = crate::app_support::wav_info(&path.to_string_lossy())
+        .map_err(|e| Error::Other(format!("open audio {}: {}", path.display(), e)))?;
+    Ok(info.frames as f32 / info.sample_rate.max(1) as f32)
 }
 
 #[cfg(test)]

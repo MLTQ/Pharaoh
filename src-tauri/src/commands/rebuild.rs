@@ -20,6 +20,10 @@
 //! priority — and rows carry no fades or gain, so rendering the scene sums
 //! back to the source. Change any row and the rest of the scene stays put.
 //!
+//! Clips are 16-bit FLAC, mono when the stem is dual-mono (a mono source's
+//! stems are): ~100 MB per hour of source rather than ~3.5 GB as 24-bit stereo
+//! WAV. The renderer upmixes these mono `mix:as-is` clips at full level.
+//!
 //! Requires the rights confirmation: the project reproduces the performances.
 
 use std::collections::{HashMap, HashSet};
@@ -42,7 +46,11 @@ use crate::models::{
 };
 
 const SR: u32 = 48_000;
-const BYTES_PER_FRAME: u64 = 6; // stereo, 24-bit
+// Disk estimate per counted frame (clip frames plus each remainder's full
+// length). FLAC of dual-mono stems measured 0.15 B/frame on a 44-min drama
+// (76 MB vs 2.6 GB as 24-bit stereo WAV); this allows ~2.5× for denser,
+// genuinely stereo sources. Not an upper bound — the build gate adds 2 GB.
+const BYTES_PER_FRAME: f64 = 0.4;
 /// Remainder beds quieter than this are skipped (e.g. a dry reading's music stem).
 const SILENT_DB: f64 = -60.0;
 
@@ -359,7 +367,7 @@ fn plan(m: &Manifest, opts: &RebuildOptions) -> Result<Plan> {
         .unwrap_or_else(|| Path::new(&m.source_name).file_stem().map(|s| s.to_string_lossy().into_owned()).unwrap_or_else(|| "Rebuilt project".into()));
     Ok(Plan {
         title,
-        est_bytes: (frames * SR as f64) as u64 * BYTES_PER_FRAME,
+        est_bytes: (frames * SR as f64 * BYTES_PER_FRAME) as u64,
         rows,
         duration_s: scenes.iter().map(|s| s.end - s.start).sum(),
         scenes,
@@ -427,12 +435,83 @@ struct SplitResult {
     remainder_kept: bool,
 }
 
-fn spec() -> hound::WavSpec {
-    hound::WavSpec { channels: 2, sample_rate: SR, bits_per_sample: 24, sample_format: hound::SampleFormat::Int }
+/// One output clip, buffered as 16-bit stereo and written as FLAC when it's
+/// finished. FLAC is lossless and stores the long stretches of digital silence
+/// in itemised stems almost for free; a clip whose channels are identical (a
+/// mono source's stems are dual-mono) is written as mono. Together that's
+/// ~10-20× smaller than the 24-bit stereo WAV this used to write. 16-bit is
+/// ample: the source is a lossy encode, and its quantisation sits ~96 dB down.
+struct Clip {
+    path: PathBuf,
+    pcm: Vec<i16>,
+    dual_mono: bool,
 }
 
-fn to_i24(x: f32) -> i32 {
-    (x.clamp(-1.0, 1.0) * 8_388_607.0).round() as i32
+fn to_i16(x: f32) -> i16 {
+    (x.clamp(-1.0, 1.0) * 32_767.0).round() as i16
+}
+
+impl Clip {
+    fn new(path: &Path) -> Self {
+        Clip { path: path.to_path_buf(), pcm: Vec::new(), dual_mono: true }
+    }
+
+    fn push(&mut self, l: f32, r: f32) {
+        let (a, b) = (to_i16(l), to_i16(r));
+        self.dual_mono &= a == b;
+        self.pcm.push(a);
+        self.pcm.push(b);
+    }
+
+    fn finish(self) -> Result<()> {
+        let channels = if self.dual_mono { 1 } else { 2 };
+        write_flac(&self.path, &self.pcm, channels)
+    }
+}
+
+/// flacenc source over interleaved stereo i16, yielding `channels` (1 = left only).
+struct PcmSource<'a> {
+    pcm: &'a [i16],
+    channels: usize,
+    head: usize, // frame
+    scratch: Vec<i32>,
+}
+
+impl flacenc::source::Source for PcmSource<'_> {
+    fn channels(&self) -> usize { self.channels }
+    fn bits_per_sample(&self) -> usize { 16 }
+    fn sample_rate(&self) -> usize { SR as usize }
+    fn read_samples<F: flacenc::source::Fill>(&mut self, block_size: usize, dest: &mut F) -> std::result::Result<usize, flacenc::error::SourceError> {
+        let frames = self.pcm.len() / 2;
+        let end = (self.head + block_size).min(frames);
+        self.scratch.clear();
+        for f in self.head..end {
+            self.scratch.push(i32::from(self.pcm[2 * f]));
+            if self.channels == 2 {
+                self.scratch.push(i32::from(self.pcm[2 * f + 1]));
+            }
+        }
+        dest.fill_interleaved(&self.scratch)?;
+        let n = end - self.head;
+        self.head = end;
+        Ok(n)
+    }
+    fn len_hint(&self) -> Option<usize> { Some(self.pcm.len() / 2) }
+}
+
+fn write_flac(path: &Path, pcm: &[i16], channels: usize) -> Result<()> {
+    use flacenc::component::BitRepr;
+    use flacenc::error::Verify;
+    let config = flacenc::config::Encoder::default()
+        .into_verified()
+        .map_err(|e| Error::Other(format!("flac config: {:?}", e)))?;
+    let source = PcmSource { pcm, channels, head: 0, scratch: Vec::new() };
+    let stream = flacenc::encode_with_fixed_block_size(&config, source, config.block_size)
+        .map_err(|e| Error::Other(format!("flac encode {}: {:?}", path.display(), e)))?;
+    let mut sink = flacenc::bitsink::ByteSink::new();
+    stream.write(&mut sink).map_err(|e| Error::Other(format!("flac write: {:?}", e)))?;
+    std::fs::write(path, sink.as_slice())?;
+    Ok(())
 }
 
 fn in_spans(spans: &[Span], cursor: &mut usize, f: u64) -> bool {
@@ -455,20 +534,13 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
     let mut order: Vec<usize> = (0..pieces.len()).collect();
     order.sort_by_key(|&i| pieces[i].span.0);
     let mut next = 0usize; // next piece (in `order`) to open
-    let mut active: Vec<(usize, hound::WavWriter<std::io::BufWriter<std::fs::File>>, usize)> = Vec::new();
-    let mut rem = match remainder {
-        Some(p) => Some(hound::WavWriter::create(p, spec()).map_err(|e| Error::Other(format!("wav: {}", e)))?),
-        None => None,
-    };
+    let mut active: Vec<(usize, Clip, usize)> = Vec::new();
+    let mut rem = remainder.map(Clip::new);
     let mut rem_cursor = 0usize;
     let mut rem_energy = 0f64;
     let mut rem_frames = 0u64;
     let mut f: u64 = 0;
     let mut buf = vec![0u8; 8 * 8192];
-
-    let finish = |w: hound::WavWriter<std::io::BufWriter<std::fs::File>>| -> Result<()> {
-        w.finalize().map_err(|e| Error::Other(format!("wav finalize: {}", e)))
-    };
 
     loop {
         let n = out.read(&mut buf).map_err(|e| Error::Other(format!("ffmpeg read: {}", e)))?;
@@ -487,8 +559,7 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
             let r = f32::from_le_bytes([chunk[4], chunk[5], chunk[6], chunk[7]]);
             while next < order.len() && pieces[order[next]].span.0 <= f {
                 let i = order[next];
-                let w = hound::WavWriter::create(&pieces[i].path, spec()).map_err(|e| Error::Other(format!("wav: {}", e)))?;
-                active.push((i, w, 0));
+                active.push((i, Clip::new(&pieces[i].path), 0));
                 next += 1;
             }
             let mut k = 0;
@@ -496,14 +567,12 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
                 let i = active[k].0;
                 if f >= pieces[i].span.1 {
                     let (_, w, _) = active.swap_remove(k);
-                    finish(w)?;
+                    w.finish()?;
                     continue;
                 }
                 let owned = in_spans(&pieces[i].owned, &mut active[k].2, f);
                 let (wl, wr) = if owned { (l, r) } else { (0.0, 0.0) };
-                let w = &mut active[k].1;
-                w.write_sample(to_i24(wl)).map_err(|e| Error::Other(format!("wav: {}", e)))?;
-                w.write_sample(to_i24(wr)).map_err(|e| Error::Other(format!("wav: {}", e)))?;
+                active[k].1.push(wl, wr);
                 k += 1;
             }
             if let Some(w) = rem.as_mut() {
@@ -513,19 +582,17 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
                     rem_energy += (rl as f64).powi(2) + (rr as f64).powi(2);
                     rem_frames += 1;
                 }
-                w.write_sample(to_i24(rl)).map_err(|e| Error::Other(format!("wav: {}", e)))?;
-                w.write_sample(to_i24(rr)).map_err(|e| Error::Other(format!("wav: {}", e)))?;
+                w.push(rl, rr);
             }
             f += 1;
         }
     }
     for (_, w, _) in active.drain(..) {
-        finish(w)?;
+        w.finish()?;
     }
     // Pieces that start past the decoded end still need a (silent) file.
     while next < order.len() {
-        let w = hound::WavWriter::create(&pieces[order[next]].path, spec()).map_err(|e| Error::Other(format!("wav: {}", e)))?;
-        finish(w)?;
+        Clip::new(&pieces[order[next]].path).finish()?;
         next += 1;
     }
     let status = child.wait().map_err(|e| Error::Other(format!("ffmpeg: {}", e)))?;
@@ -536,7 +603,7 @@ fn split_stem(stem: &Path, t0: f64, t1: f64, pieces: &[Piece], claimed: &[Span],
     }
     let mut remainder_kept = false;
     if let Some(w) = rem {
-        finish(w)?;
+        w.finish()?;
         // Level of what the remainder actually carries (the uncovered frames),
         // not diluted by the zeros under itemised clips.
         let rms_db = 10.0 * ((rem_energy / (2.0 * rem_frames.max(1) as f64)) + 1e-12).log10();
@@ -750,13 +817,13 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
                 let (cid, name) = char_of_speaker.get(&l.speaker).cloned().unwrap_or_else(|| (String::new(), l.speaker.clone()));
                 let n = counters.entry(cid.clone()).or_insert(0);
                 *n += 1;
-                let file = assets.join(format!("{}_{:03}.dissect.wav", slugify(&name), n));
+                let file = assets.join(format!("{}_{:03}.dissect.flac", slugify(&name), n));
                 pieces.push(Piece { span: spans[i].0, owned: owned[i].clone(), path: file.clone() });
                 let track = if cid.is_empty() { "dialogue".to_string() } else { cid.to_lowercase() };
                 let (row, id) = base_row(&scene_no, &track, "DIALOGUE", &cid, &l.text, &file.to_string_lossy(), spans[i].0 .0, spans[i].0 .1 - spans[i].0 .0, &format!("dissect {} @{:.2}s", l.speaker, l.start));
                 rows.push((row, id, name, l.text.clone()));
             }
-            let rem = opts.include_remainders.then(|| assets.join("room_tone_and_unassigned.dissect.wav"));
+            let rem = opts.include_remainders.then(|| assets.join("room_tone_and_unassigned.dissect.flac"));
             let res = split_stem(&stem, s.start, s.end, &pieces, &claimed, rem.as_deref())?;
             if let (Some(rp), true) = (rem, res.remainder_kept) {
                 let (row, id) = base_row(&scene_no, "room", "BED", "", "Room tone & unassigned speech (original)", &rp.to_string_lossy(), 0, to_f(s.end), "dissect remainder: dialogue");
@@ -776,7 +843,7 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
             let (owned, claimed) = partition(&spans);
             let mut pieces = Vec::new();
             for (i, x) in items.iter().enumerate() {
-                let file = assets.join(format!("{}_{}_{}.dissect.wav", x.kind, i + 1, slugify(&x.name)));
+                let file = assets.join(format!("{}_{}_{}.dissect.flac", x.kind, i + 1, slugify(&x.name)));
                 pieces.push(Piece { span: spans[i].0, owned: owned[i].clone(), path: file.clone() });
                 let (kind, track) = match x.kind.as_str() { "sfx" => ("SFX", "FOLEY"), "ambience" => ("BED", "FOLEY"), _ => ("MUSIC", "MUSIC") };
                 let mut prompt = x.name.clone();
@@ -784,7 +851,7 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
                 let (row, id) = base_row(&scene_no, track, kind, "", &prompt, &file.to_string_lossy(), spans[i].0 .0, spans[i].0 .1 - spans[i].0 .0, &format!("dissect {} @{:.2}s", x.kind, x.start));
                 rows.push((row, id, String::new(), prompt));
             }
-            let rem = opts.include_remainders.then(|| assets.join(format!("{}_remainder.dissect.wav", stem_name)));
+            let rem = opts.include_remainders.then(|| assets.join(format!("{}_remainder.dissect.flac", stem_name)));
             let res = split_stem(&stem, s.start, s.end, &pieces, &claimed, rem.as_deref())?;
             if let (Some(rp), true) = (rem, res.remainder_kept) {
                 let (kind, track, text) = if stem_name == "music" {
@@ -958,6 +1025,37 @@ pub fn dissect_rebuild_status(job_id: String) -> Result<RebuildStatus> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn clips_are_flac_and_mono_when_both_channels_match() {
+        let dir = std::env::temp_dir().join(format!("pharaoh-rebuild-flac-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (mono, stereo, empty) = (dir.join("m.flac"), dir.join("s.flac"), dir.join("e.flac"));
+        let mut m = Clip::new(&mono);
+        let mut st = Clip::new(&stereo);
+        for i in 0..10_000 {
+            let x = (i as f32 * 0.01).sin() * 0.5;
+            m.push(x, x);
+            st.push(x, -x);
+        }
+        m.finish().unwrap();
+        st.finish().unwrap();
+        Clip::new(&empty).finish().unwrap();
+        let p = |f: &PathBuf| f.to_string_lossy().into_owned();
+        assert_eq!(crate::app_support::audio_channels(&p(&mono)), Some(1));
+        assert_eq!(crate::app_support::audio_channels(&p(&stereo)), Some(2));
+        assert_eq!(crate::app_support::wav_info(&p(&mono)).unwrap().frames, 10_000);
+        assert_eq!(crate::app_support::wav_info(&p(&mono)).unwrap().sample_rate, SR);
+        // Lossless at 16 bits: samples come back within one quantisation step.
+        let mut worst = 0f32;
+        crate::app_support::for_each_flac_sample(&p(&stereo), 100, |f, c, v| {
+            let x = ((f + 100) as f32 * 0.01).sin() * 0.5;
+            worst = worst.max((v - if c == 0 { x } else { -x }).abs());
+            true
+        }).unwrap();
+        assert!(worst < 1.0 / 32_000.0, "worst error {}", worst);
+        std::fs::remove_dir_all(&dir).ok();
+    }
 
     #[test]
     fn subtract_and_partition_make_a_disjoint_tiling() {

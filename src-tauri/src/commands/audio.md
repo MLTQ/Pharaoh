@@ -26,4 +26,4 @@ Rust audio-analysis utilities used by the frontend for waveform display, duratio
 | Clip Studio | Peak extraction stays usable for long imported WAVs | Loading entire recordings into memory |
 
 ## Notes
-- These helpers currently expect WAV input. Clip Studio imports external audio through ffmpeg into project-local WAV assets before waveform analysis.
+- These helpers read WAV and FLAC (rebuilt projects store their clips as FLAC; the FLAC paths go through `app_support::for_each_flac_sample`). Other formats are converted to project-local WAV by Clip Studio's import before analysis.

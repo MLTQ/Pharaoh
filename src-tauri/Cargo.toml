@@ -37,6 +37,8 @@ hound = "3"
 zip = { version = "2", features = ["deflate"] }
 dirs = "5"
 cpal = "0.15"
+flacenc = "0.5.1"
+claxon = "0.4.3"
 
 [target.'cfg(unix)'.dependencies]
 # setrlimit (open-file limit for big scene renders) and statvfs (free disk

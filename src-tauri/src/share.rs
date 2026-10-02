@@ -212,6 +212,7 @@ fn mime_for(path: &str) -> String {
         "wasm" => "application/wasm",
         "wav" => "audio/wav",
         "mp3" => "audio/mpeg",
+        "flac" => "audio/flac",
         _ => "application/octet-stream",
     }
     .to_string()

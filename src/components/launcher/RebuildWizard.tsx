@@ -251,7 +251,7 @@ export const RebuildWizard: React.FC<{ onClose: () => void }> = ({ onClose }) =>
                   <>
                     <div style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, color: "var(--fg-3)", marginBottom: 8 }}>
                       {plan.scenes.length} scenes · {plan.rows} script rows · {plan.characters.length} characters · {fmt(plan.duration_s)}
-                      {" "}· up to {gb(plan.est_bytes)}
+                      {" "}· about {gb(plan.est_bytes)} on disk
                       {plan.free_bytes !== null && <> of {gb(plan.free_bytes)} free</>}
                     </div>
                     {tooBig && (

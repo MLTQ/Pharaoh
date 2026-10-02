@@ -620,7 +620,13 @@ pub async fn render_scene_with_projects_dir(
         // Delay clip to its timeline position
         filters.push(format!("adelay={}|{}", start_ms, start_ms));
 
-        // Stereoize so the pan filter has two channels regardless of source
+        // Stereoize so the pan filter has two channels regardless of source.
+        // ffmpeg's default mono→stereo upmix is 3 dB down per side; a
+        // mix:as-is clip (lifted from a recording, stored mono when the source
+        // was) must land at its original level, so duplicate it instead.
+        if is_as_is(&row.notes) && crate::app_support::audio_channels(&effective_files[i]) == Some(1) {
+            filters.push("pan=stereo|c0=c0|c1=c0".to_string());
+        }
         filters.push("aformat=channel_layouts=stereo".to_string());
 
         // Equal-power pan. pan ∈ [-1, 1]: -1 = full left, 0 = center, +1 = full right.

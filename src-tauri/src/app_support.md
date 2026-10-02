@@ -65,3 +65,4 @@ Shared filesystem and config helpers for both Tauri commands and the headless CL
 
 ## Notes
 - `bind_generated_asset` intentionally refuses to overwrite a row that already points at a different file. Alternate-take selection remains an explicit user or agent action.
+- `wav_info` and `audio_channels` read WAV or FLAC headers; `for_each_flac_sample` streams FLAC samples (claxon) for the waveform / zero-crossing helpers. FLAC is what Dissect rebuilds write.

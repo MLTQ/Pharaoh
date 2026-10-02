@@ -53,3 +53,4 @@ Rust-side ffmpeg rendering utilities for scene composition. This file mixes plac
 - `reverb_send` is in the data model but **not yet wired** in the master chain;
   it'll need a chosen reverb implementation (likely shipping a small/medium IR
   for `afir`).
+- A mono `mix:as-is` clip is upmixed with `pan=stereo|c0=c0|c1=c0` (full level). ffmpeg's implicit mono→stereo is 3 dB down per side, which would leave a rebuilt scene 3 dB under its source. Other mono rows keep the implicit upmix, so existing projects render unchanged.

@@ -23,9 +23,7 @@ pub fn output_path_for(input: &Path, model_name: &str) -> Result<PathBuf> {
 }
 
 fn wav_duration_ms(path: &Path) -> Option<u64> {
-    let reader = hound::WavReader::open(path).ok()?;
-    let spec = reader.spec();
-    Some((reader.duration() as u64 * 1000) / spec.sample_rate as u64)
+    crate::app_support::wav_info(&path.to_string_lossy()).ok()?.duration_ms()
 }
 
 pub fn write_upscale_sidecar(
