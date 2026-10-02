@@ -29,6 +29,13 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [manualScale, setManualScale] = useState<number | null>(null);
+  // Pan offset in screen px. A rebuilt audiobook can have 60+ scenes — far
+  // wider than the 1280 px canvas — so the view drags and scrolls.
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const drag = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
+  const suppressClick = useRef(false);
+  const zoomRef = useRef(1);
+  zoomRef.current = manualScale ?? scale;
   const [episodeDurationSec, setEpisodeDurationSec] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
@@ -79,6 +86,57 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
   }, []);
+
+  // Trackpad / wheel: scroll pans; pinch (ctrl+wheel) or ⌘+wheel zooms
+  // about the cursor. Native listener so the page itself never zooms.
+  useEffect(() => {
+    const el = wrapRef.current;
+    if (!el) return;
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      if (e.ctrlKey || e.metaKey) {
+        const old = zoomRef.current;
+        const next = Math.min(3, Math.max(0.1, old * Math.exp(-e.deltaY * 0.01)));
+        const r = el.getBoundingClientRect();
+        const cx = e.clientX - r.left - r.width / 2;
+        const cy = e.clientY - r.top - r.height / 2;
+        const k = next / old;
+        setPan((p) => ({ x: cx - (cx - p.x) * k, y: cy - (cy - p.y) * k }));
+        setManualScale(next);
+      } else {
+        setPan((p) => ({ x: p.x - e.deltaX, y: p.y - e.deltaY }));
+      }
+    };
+    el.addEventListener("wheel", onWheel, { passive: false });
+    return () => el.removeEventListener("wheel", onWheel);
+  }, []);
+
+  const onPanDown = (e: React.PointerEvent) => {
+    if (e.button !== 0 || (e.target as HTMLElement).closest("input, textarea, select")) return;
+    drag.current = { x: e.clientX, y: e.clientY, px: pan.x, py: pan.y, moved: false };
+  };
+  const onPanMove = (e: React.PointerEvent) => {
+    const d = drag.current;
+    if (!d) return;
+    const dx = e.clientX - d.x, dy = e.clientY - d.y;
+    if (!d.moved) {
+      if (Math.hypot(dx, dy) < 4) return; // a click, not a drag
+      d.moved = true;
+      wrapRef.current?.setPointerCapture(e.pointerId);
+    }
+    setPan({ x: d.px + dx, y: d.py + dy });
+  };
+  const onPanUp = () => {
+    if (drag.current?.moved) suppressClick.current = true;
+    drag.current = null;
+  };
+  // Zoom buttons scale about the view centre, so the pan scales with them.
+  const zoomBy = (k: number) => {
+    const old = manualScale ?? scale;
+    const next = Math.min(3, Math.max(0.1, old * k));
+    setPan((p) => ({ x: p.x * (next / old), y: p.y * (next / old) }));
+    setManualScale(next);
+  };
 
   // Load episode duration from output/final.wav.meta.json when available.
   useEffect(() => {
@@ -238,11 +296,22 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
         </div>
       )}
 
-      <div ref={wrapRef} style={{ position: "absolute", inset: 0, overflow: "hidden" }}>
+      <div
+        ref={wrapRef}
+        style={{ position: "absolute", inset: 0, overflow: "hidden", cursor: drag.current?.moved ? "grabbing" : "grab", touchAction: "none" }}
+        onPointerDown={onPanDown}
+        onPointerMove={onPanMove}
+        onPointerUp={onPanUp}
+        onPointerCancel={onPanUp}
+        onClickCapture={(e) => {
+          // The click that ends a drag must not open the plate under it.
+          if (suppressClick.current) { suppressClick.current = false; e.stopPropagation(); e.preventDefault(); }
+        }}
+      >
         <div style={{
           width: W, height: H, position: "absolute",
           top: "50%", left: "50%",
-          transform: `translate(-50%, -50%) scale(${manualScale ?? scale})`,
+          transform: `translate(calc(-50% + ${pan.x}px), calc(-50% + ${pan.y}px)) scale(${manualScale ?? scale})`,
           transformOrigin: "center center",
         }}>
           {/* SVG silhouette + structure lines */}
@@ -545,20 +614,20 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
       {/* Coord display */}
       <div className="pyramid-coord">
-        <span>X 0.000</span><span>Y 0.000</span>
+        <span>X {(-pan.x / (manualScale ?? scale)).toFixed(0)}</span><span>Y {(-pan.y / (manualScale ?? scale)).toFixed(0)}</span>
         <span>ZOOM {((manualScale ?? scale) * 100).toFixed(0)}%</span>
         <span>SCALE 1:48</span>
       </div>
 
       {/* Zoom controls */}
       <div className="pyramid-zoom">
-        <button title="Zoom in" onClick={() => setManualScale((s) => Math.min((s ?? scale) * 1.25, 3))}>
+        <button title="Zoom in (or pinch / ⌘-scroll)" onClick={() => zoomBy(1.25)}>
           <Icon name="plus" style={{ width: 14, height: 14 }} />
         </button>
-        <button title="Zoom out" onClick={() => setManualScale((s) => Math.max((s ?? scale) * 0.8, 0.2))}>
+        <button title="Zoom out" onClick={() => zoomBy(0.8)}>
           <Icon name="minus" style={{ width: 14, height: 14 }} />
         </button>
-        <button title="Fit to window" onClick={() => setManualScale(null)}>
+        <button title="Fit to window (drag or scroll to pan)" onClick={() => { setManualScale(null); setPan({ x: 0, y: 0 }); }}>
           <Icon name="fit" style={{ width: 14, height: 14 }} />
         </button>
       </div>

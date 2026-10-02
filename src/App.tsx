@@ -95,7 +95,7 @@ export default function App() {
   const {
     project, scenes, assets, activeSceneNo,
     setActiveScene, updateScene, characters, realProjectId,
-    reloadProjectFromDisk,
+    reloadProjectFromDisk, realScenes,
   } = useProjectStore();
   const { jobs, initListeners } = useJobStore();
   const { view, rightTab, colorTemp, density, setView, setWorkspace, setRightTab, agentActiveUntil } = useUiStore();
@@ -717,7 +717,12 @@ export default function App() {
           <PyramidView
             project={project}
             scenes={scenes}
-            cast={[]}
+            cast={characters.map((c) => ({
+              id: c.id,
+              name: c.name,
+              voice: c.voice_assignment.production_pipeline === "chatterbox+rvc" ? "Chatterbox + RVC" : c.voice_assignment.model,
+              scenes: realScenes.filter((s) => s.characters.includes(c.name) || s.characters.includes(c.id)).length,
+            }))}
             activeSceneNo={activeSceneNo}
             onOpenScene={(no) => { setActiveScene(no); setView("composition"); }}
             onOpenBible={() => setView("bible")}

@@ -499,6 +499,21 @@ impl flacenc::source::Source for PcmSource<'_> {
     fn len_hint(&self) -> Option<usize> { Some(self.pcm.len() / 2) }
 }
 
+/// flacenc records the short final block as STREAMINFO's minimum block size,
+/// so a fixed-blocksize stream reads as variable (min 288, max 4096). Apple's
+/// decoder — WebKit's <audio>, i.e. every preview in the app — then reports a
+/// 0 s duration and play() never starts. The reference encoder writes
+/// min == max for fixed-blocksize streams; do the same.
+pub fn fix_min_block_size(bytes: &mut [u8]) -> bool {
+    // "fLaC", then the STREAMINFO block header (4 bytes): min at 8..10, max at 10..12.
+    if bytes.len() < 12 || &bytes[..4] != b"fLaC" || bytes[4] & 0x7f != 0 || bytes[8..10] == bytes[10..12] {
+        return false;
+    }
+    let (min, max) = bytes.split_at_mut(10);
+    min[8..10].copy_from_slice(&max[..2]);
+    true
+}
+
 fn write_flac(path: &Path, pcm: &[i16], channels: usize) -> Result<()> {
     use flacenc::component::BitRepr;
     use flacenc::error::Verify;
@@ -510,7 +525,9 @@ fn write_flac(path: &Path, pcm: &[i16], channels: usize) -> Result<()> {
         .map_err(|e| Error::Other(format!("flac encode {}: {:?}", path.display(), e)))?;
     let mut sink = flacenc::bitsink::ByteSink::new();
     stream.write(&mut sink).map_err(|e| Error::Other(format!("flac write: {:?}", e)))?;
-    std::fs::write(path, sink.as_slice())?;
+    let mut bytes = sink.as_slice().to_vec();
+    fix_min_block_size(&mut bytes);
+    std::fs::write(path, bytes)?;
     Ok(())
 }
 
@@ -1045,6 +1062,9 @@ mod tests {
         assert_eq!(crate::app_support::audio_channels(&p(&mono)), Some(1));
         assert_eq!(crate::app_support::audio_channels(&p(&stereo)), Some(2));
         assert_eq!(crate::app_support::wav_info(&p(&mono)).unwrap().frames, 10_000);
+        // Fixed block size declared as such (min == max), or WebKit won't play it.
+        let head = std::fs::read(&mono).unwrap();
+        assert_eq!(head[8..10], head[10..12]);
         assert_eq!(crate::app_support::wav_info(&p(&mono)).unwrap().sample_rate, SR);
         // Lossless at 16 bits: samples come back within one quantisation step.
         let mut worst = 0f32;
