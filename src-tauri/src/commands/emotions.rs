@@ -160,12 +160,12 @@ fn feature(u: &Value, k: usize) -> Option<f64> {
 
 fn feature_stats(utts: &[&Value]) -> [(f64, f64); 5] {
     let mut out = [(0.0, 1.0); 5];
-    for k in 0..FEATURES.len() {
+    for (k, slot) in out.iter_mut().enumerate() {
         let xs: Vec<f64> = utts.iter().filter_map(|u| feature(u, k)).collect();
         if xs.len() >= 5 {
             let m = xs.iter().sum::<f64>() / xs.len() as f64;
             let sd = (xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / xs.len() as f64).sqrt();
-            out[k] = (m, sd.max(1e-6));
+            *slot = (m, sd.max(1e-6));
         }
     }
     out
