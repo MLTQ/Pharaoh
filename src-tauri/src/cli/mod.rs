@@ -109,6 +109,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speakers, emotion, rest @ ..] if group == "dissect" && action == "clips" => {
             dissect::clips(&config, import_id, speakers, emotion, rest)
         }
+        [group, action, library_id, rest @ ..] if group == "dissect" && action == "corpus" => {
+            dissect::corpus(&config, library_id, rest)
+        }
         [group, action, library_id, rest @ ..] if group == "dissect" && action == "palette" => {
             dissect::palette(&config, library_id, rest)
         }

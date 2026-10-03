@@ -163,7 +163,14 @@ pub async fn get_corpus_emotion_counts(
         let Some(stem) = path.file_stem().and_then(|s| s.to_str()) else {
             continue;
         };
-        *counts.entry(emotion_of(stem)).or_insert(0) += 1;
+        // The sidecar's emotion when it records one (lines lifted from a
+        // recording are named rec_<import>_<ms>); else the filename's prefix.
+        let from_meta = std::fs::read_to_string(dir.join(format!("{}.wav.meta.json", stem)))
+            .ok()
+            .and_then(|raw| serde_json::from_str::<serde_json::Value>(&raw).ok())
+            .and_then(|m| m["emotion"].as_str().map(str::to_string))
+            .filter(|e| !e.is_empty());
+        *counts.entry(from_meta.unwrap_or_else(|| emotion_of(stem))).or_insert(0) += 1;
     }
 
     let mut out: Vec<EmotionCorpusCount> = counts
@@ -222,20 +229,26 @@ pub async fn build_corpus(
     // Read through the same path the GUI uses: migrate_project_in_place also
     // absolutizes the character bundle's voice paths, and the Chatterbox server
     // needs an absolute ref_audio_path.
-    let project_path =
-        crate::app_support::project_dir(&projects_dir, &project_id).join("project.json");
-    let mut project: crate::models::Project = crate::app_support::read_json(&project_path)?;
-    crate::commands::project::migrate_project_in_place(&mut project, &projects_dir);
-    let character = project
-        .characters
-        .iter()
-        .find(|c| c.id == character_id)
-        .ok_or_else(|| {
-            Error::Other(format!(
-                "character {} not found in project {}",
-                character_id, project_id
-            ))
-        })?;
+    // The Library passes its own folder as the "project": its characters live
+    // in bundles (character.json), not a project.json.
+    let character = if project_id == crate::app_support::LIBRARY_DIR_NAME {
+        crate::commands::character::load_library_character(&projects_dir, &character_id)?
+    } else {
+        let project_path =
+            crate::app_support::project_dir(&projects_dir, &project_id).join("project.json");
+        let mut project: crate::models::Project = crate::app_support::read_json(&project_path)?;
+        crate::commands::project::migrate_project_in_place(&mut project, &projects_dir);
+        project
+            .characters
+            .into_iter()
+            .find(|c| c.id == character_id)
+            .ok_or_else(|| {
+                Error::Other(format!(
+                    "character {} not found in project {}",
+                    character_id, project_id
+                ))
+            })?
+    };
 
     // Only approved palette entries make good clone sources — an unapproved
     // take bakes its flaws into every one of the takes derived from it.
@@ -288,8 +301,25 @@ pub async fn build_corpus(
     let job_for_task = job_id.clone();
 
     tauri::async_runtime::spawn(async move {
+        let remote = crate::commands::inference::is_remote_url(&base_url);
         let mut take = 0usize;
         for (emotion, ref_audio) in &approved {
+            // A remote server can't read this Mac's files: upload the
+            // reference once per emotion, and download each take below.
+            let server_ref = if remote {
+                match crate::commands::inference::upload_input_file(&http, &base_url, ref_audio).await {
+                    Ok(p) => p,
+                    Err(e) => {
+                        update_job(&job_for_task, |j| {
+                            j.error = Some(format!("couldn't upload the '{}' reference: {}", emotion, e));
+                            j.done = true;
+                        });
+                        return;
+                    }
+                }
+            } else {
+                ref_audio.clone()
+            };
             for i in 0..per_emotion {
                 let tag = TAG_VARIANTS[take % TAG_VARIANTS.len()];
                 let line = CORPUS_LINES[take % CORPUS_LINES.len()];
@@ -305,15 +335,28 @@ pub async fn build_corpus(
                 let out_path = dir_for_task.join(format!("{}_{:03}.wav", emotion, i));
                 let body = serde_json::json!({
                     "text": text.trim(),
-                    "ref_audio_path": ref_audio,
+                    "ref_audio_path": server_ref,
                     "exaggeration": 0.45,
                     "cfg_weight": 0.5,
                     "temperature": 0.8,
                     "seed": i as i64,
-                    "output_path": out_path.to_string_lossy(),
+                    "output_path": if remote { String::new() } else { out_path.to_string_lossy().into_owned() },
                 });
 
-                match submit_and_wait(&http, &base_url, &body).await {
+                let result = match submit_and_wait(&http, &base_url, &body).await {
+                    Ok(job) if remote => crate::commands::inference::download_remote_file_to(
+                        &http, &base_url, &job, &out_path.to_string_lossy(),
+                    )
+                    .await
+                    .map(|_| ())
+                    .map_err(|e| format!("download failed: {e}")),
+                    Ok(_) => Ok(()),
+                    Err(e) => Err(e),
+                };
+                if result.is_ok() {
+                    write_take_meta(&out_path, text.trim(), emotion);
+                }
+                match result {
                     Ok(()) => update_job(&job_for_task, |j| j.completed += 1),
                     Err(e) => {
                         update_job(&job_for_task, |j| {
@@ -334,7 +377,20 @@ pub async fn build_corpus(
     Ok(BuildCorpusResult { job_id, total })
 }
 
-/// Submit one Chatterbox clone job and wait for it to finish.
+/// Duration sidecar so the corpus stats count the take's audio time.
+fn write_take_meta(path: &Path, text: &str, emotion: &str) {
+    if let Ok(info) = crate::app_support::wav_info(&path.to_string_lossy()) {
+        if let Some(ms) = info.duration_ms() {
+            let meta = serde_json::json!({ "duration_ms": ms, "text": text, "emotion": emotion, "source": "chatterbox" });
+            let _ = std::fs::write(
+                format!("{}.meta.json", path.to_string_lossy()),
+                serde_json::to_vec_pretty(&meta).unwrap_or_default(),
+            );
+        }
+    }
+}
+
+/// Submit one Chatterbox clone job and wait for it to finish; returns its job id.
 ///
 /// Corpus takes are generated serially: the Chatterbox server holds one model
 /// and `torch.manual_seed` is global, so firing all fifty at once would both
@@ -343,7 +399,7 @@ async fn submit_and_wait(
     http: &reqwest::Client,
     base_url: &str,
     body: &serde_json::Value,
-) -> std::result::Result<(), String> {
+) -> std::result::Result<String, String> {
     let resp: serde_json::Value = http
         .post(format!("{}/generate/clone", base_url))
         .json(body)
@@ -386,7 +442,7 @@ async fn submit_and_wait(
         };
 
         match status["status"].as_str().unwrap_or("") {
-            "complete" => return Ok(()),
+            "complete" => return Ok(job_id),
             "failed" => {
                 return Err(status["error"]
                     .as_str()

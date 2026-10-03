@@ -244,3 +244,11 @@ pub(super) fn palette(config: &AppConfig, library_id: &str, rest: &[String]) -> 
     let r = crate::commands::emotions::build_library_palette(&projects_dir(config), library_id, replace, per)?;
     print_json(&r.report)
 }
+
+/// `dissect corpus <library_id> [--minutes 15]` — fill a Library character's
+/// RVC corpus with its own clean lines from the dissected recording.
+pub(super) fn corpus(config: &AppConfig, library_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let minutes: f64 = flag_parse(&flags, "minutes", 15.0)?;
+    print_json(&crate::commands::emotions::corpus_for(&projects_dir(config), crate::app_support::LIBRARY_DIR_NAME, library_id, minutes)?)
+}

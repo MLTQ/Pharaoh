@@ -886,6 +886,11 @@ export interface PaletteBuild { filled: PaletteFill[]; missing: string[]; approv
 export const buildPaletteFromRecording = (libraryId: string, replaceGold?: boolean, perEmotion?: number): Promise<{ report: PaletteBuild; character: import("./types").Character }> =>
   invoke("build_palette_from_recording", { libraryId, replaceGold: replaceGold ?? false, perEmotion });
 
+export interface CorpusFromRecording { added: number; skipped: number; seconds: number; by_emotion: Record<string, number>; untagged: string[] }
+/** Fill a character's RVC corpus with its own clean lines from its dissected recording(s). */
+export const corpusFromDissect = (projectId: string, characterId: string, minutes?: number): Promise<CorpusFromRecording> =>
+  invoke("corpus_from_dissect", { projectId, characterId, minutes });
+
 /** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
 export const dissectExtractSound = (request: {
   import_id: string;

@@ -20,6 +20,7 @@ import React, { useState, useEffect, useCallback } from "react";
 import type { Character } from "../../lib/types";
 import {
   importAudioFilesIntoCorpus,
+  corpusFromDissect,
   getCorpusEmotionCounts,
   getCorpusJobStatus,
   buildCorpus,
@@ -154,6 +155,30 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
   const [emotionCounts, setEmotionCounts] = useState<EmotionCorpusCount[]>([]);
   const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
+  // Real lines from a dissected recording (the actor's own voice — the best
+  // RVC training data there is).
+  const fromRecording = (character.voice_provenance ?? []).some((p) => p.kind === "dissect");
+  const [recMinutes, setRecMinutes] = useState(15);
+  const [recNote, setRecNote] = useState<string | null>(null);
+  const handleFromRecording = useCallback(async () => {
+    setImporting(true);
+    setError(null);
+    setRecNote(null);
+    try {
+      const r = await corpusFromDissect(projectId, character.id, recMinutes);
+      await fetchEmotionCounts();
+      onCorpusUpdated();
+      const mix = Object.entries(r.by_emotion).sort((a, b) => b[1] - a[1]).map(([e, n]) => `${n} ${e}`).join(", ");
+      setRecNote(r.added > 0
+        ? `Added ${r.added} of ${character.name}'s own lines (${Math.round(r.seconds / 60 * 10) / 10} min): ${mix}.`
+        : "Nothing new to add — the corpus already has these lines.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setImporting(false);
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, character.id, character.name, recMinutes, onCorpusUpdated]);
 
   // Bulk-import real audio recordings into the corpus (Pharaoh-mo0q). Routes
   // via the synthetic "_library" projectId when CorpusBuilder is mounted from
@@ -267,7 +292,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
       setGenerationProgress({ completed: 0, total: result.total });
       setActiveJobId(result.job_id);
     } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : "Failed to start corpus generation.");
+      setError(e instanceof Error ? e.message : String(e) || "Failed to start corpus generation.");
       setIsGenerating(false);
     }
   }, [isGenerating, projectId, character.id]);
@@ -465,6 +490,34 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
           color: "var(--sfx)",
         }}>
           {error}
+        </div>
+      )}
+
+      {/* ── From the recording ── */}
+      {fromRecording && (
+        <div style={{
+          border: `1px solid color-mix(in oklch, ${STAGE_COLOR} 45%, var(--line-1))`, borderRadius: "var(--r)",
+          padding: "10px 12px", marginBottom: 12, background: `color-mix(in oklch, ${STAGE_COLOR} 5%, var(--bg-1))`,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button className="btn btn-primary" disabled={isGenerating || importing} onClick={handleFromRecording}
+                    style={{ background: STAGE_COLOR, borderColor: STAGE_COLOR, color: "var(--bg-0)", fontFamily: "var(--font-mono)", fontSize: 11 }}
+                    title="Fill the corpus with this character's own clean lines from the dissected recording">
+              {importing ? "Adding…" : "⤓ Use lines from the recording"}
+            </button>
+            <label style={{ fontSize: 10.5, color: "var(--fg-3)", display: "flex", alignItems: "center", gap: 4 }}>
+              up to
+              <select value={recMinutes} onChange={(e) => setRecMinutes(Number(e.target.value))} className="input"
+                      style={{ fontSize: 11, padding: "1px 4px" }}>
+                {[5, 10, 15, 20, 30].map((m) => <option key={m} value={m}>{m} min</option>)}
+              </select>
+            </label>
+            <span style={{ flex: 1, minWidth: 220, fontSize: 10.5, color: "var(--fg-4)", lineHeight: 1.5 }}>
+              The actor's real voice — clean lines without cross-talk, spread across their emotional range. Trains a
+              far better model than synthetic takes; no generation needed.
+            </span>
+          </div>
+          {recNote && <div style={{ marginTop: 6, fontSize: 11, color: "var(--st-rendered)" }}>{recNote}</div>}
         </div>
       )}
 

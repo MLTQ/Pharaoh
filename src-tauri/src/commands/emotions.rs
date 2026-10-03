@@ -606,6 +606,141 @@ pub fn build_library_palette(projects_dir: &Path, library_id: &str, replace_gold
     Ok(PaletteBuildResult { report, character })
 }
 
+
+// ── RVC corpus from the recording ─────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorpusFromRecording {
+    pub added: usize,
+    pub skipped: usize,
+    pub seconds: f64,
+    /// Lines per top emotion, for the summary.
+    pub by_emotion: HashMap<String, usize>,
+    pub untagged: Vec<String>,
+}
+
+/// Fill a character's RVC corpus with its own clean lines from the dissected
+/// performance — the actor's real voice, which trains a far better model than
+/// synthetic takes. Lines without cross-talk, 2.5–15 s, with a recognisable
+/// tone, taken round-robin across emotions so the model hears the whole
+/// range, up to `minutes` of audio. Written as 48 kHz mono 16-bit WAV with
+/// duration sidecars, like "Import audio files".
+pub fn corpus_from_recording(projects_dir: &Path, c: &Character, corpus_dir: &Path, minutes: f64) -> Result<CorpusFromRecording> {
+    let mut out = CorpusFromRecording { added: 0, skipped: 0, seconds: 0.0, by_emotion: HashMap::new(), untagged: vec![] };
+    // (import, clip) candidates grouped by top emotion.
+    let mut groups: std::collections::BTreeMap<String, Vec<(String, EmotionClip)>> = Default::default();
+    let mut seen_import = std::collections::HashSet::new();
+    for p in c.voice_provenance.iter().filter(|p| p.kind == "dissect") {
+        if !seen_import.insert(p.import_id.clone()) {
+            continue;
+        }
+        let speakers: Vec<String> = c.voice_provenance.iter()
+            .filter(|q| q.kind == "dissect" && q.import_id == p.import_id)
+            .map(|q| q.speaker_id.clone())
+            .collect();
+        let Some((_, data)) = load(projects_dir, &p.import_id)? else {
+            out.untagged.push(p.source_name.clone());
+            continue;
+        };
+        let utts = data["utterances"].as_array().cloned().unwrap_or_default();
+        let (_, refs) = usable(&utts, &speakers);
+        for i in refs {
+            let u = &utts[i];
+            let len = u["end"].as_f64().unwrap_or(0.0) - u["start"].as_f64().unwrap_or(0.0);
+            if len > 15.0 {
+                continue;
+            }
+            let z = [None; 5];
+            if let Some(cl) = clip(u, &z, 0.0) {
+                if cl.clarity >= 0.3 {
+                    groups.entry(cl.top.clone()).or_default().push((p.import_id.clone(), cl));
+                }
+            }
+        }
+    }
+    if groups.is_empty() {
+        return Err(Error::Other(if out.untagged.is_empty() {
+            format!("{} has no clean lines in a dissected recording", c.name)
+        } else {
+            format!("read the emotions of {} first (open an emotion in the Palette → Read emotions)", out.untagged.join(", "))
+        }));
+    }
+    // Clearest lines first within each emotion.
+    for v in groups.values_mut() {
+        v.sort_by(|a, b| b.1.top_score.partial_cmp(&a.1.top_score).unwrap_or(std::cmp::Ordering::Equal));
+    }
+    std::fs::create_dir_all(corpus_dir)?;
+    let budget = minutes.max(1.0) * 60.0;
+    let mut cursors: HashMap<String, usize> = HashMap::new();
+    'fill: loop {
+        let mut progressed = false;
+        for (emotion, items) in &groups {
+            let k = cursors.entry(emotion.clone()).or_insert(0);
+            let Some((import, cl)) = items.get(*k) else { continue };
+            *k += 1;
+            progressed = true;
+            let name = format!("rec_{}_{}.wav", &import[..8.min(import.len())], (cl.start * 1000.0) as i64);
+            let dest = corpus_dir.join(&name);
+            if dest.is_file() {
+                continue; // already in the corpus from an earlier run
+            }
+            let cut = match clip_for(projects_dir, import, "dialogue", cl.start, cl.end) {
+                Ok(p) => p,
+                Err(_) => { out.skipped += 1; continue; }
+            };
+            let ok = Command::new("ffmpeg")
+                .args(["-nostdin", "-y", "-loglevel", "error", "-i"])
+                .arg(&cut)
+                .args(["-ar", "48000", "-ac", "1", "-sample_fmt", "s16"])
+                .arg(&dest)
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false);
+            if !ok {
+                out.skipped += 1;
+                continue;
+            }
+            let secs = cl.end - cl.start;
+            let meta = serde_json::json!({
+                "duration_ms": (secs * 1000.0) as u64, "text": cl.text, "emotion": cl.top,
+                "source": "recording", "import_id": import, "start": cl.start, "end": cl.end,
+            });
+            let _ = std::fs::write(corpus_dir.join(format!("{}.meta.json", name)), serde_json::to_vec_pretty(&meta).unwrap_or_default());
+            out.added += 1;
+            out.seconds += secs;
+            *out.by_emotion.entry(emotion.clone()).or_insert(0) += 1;
+            if out.seconds >= budget {
+                break 'fill;
+            }
+        }
+        if !progressed {
+            break;
+        }
+    }
+    Ok(out)
+}
+
+/// Fill a character's RVC corpus from its dissected recording(s).
+#[tauri::command]
+pub async fn corpus_from_dissect(app: AppHandle, project_id: String, character_id: String, minutes: Option<f64>) -> Result<CorpusFromRecording> {
+    let projects_dir = app_projects_dir(&app)?;
+    tokio::task::spawn_blocking(move || corpus_for(&projects_dir, &project_id, &character_id, minutes.unwrap_or(15.0)))
+        .await
+        .map_err(|e| Error::Other(format!("corpus task: {}", e)))?
+}
+
+pub fn corpus_for(projects_dir: &Path, project_id: &str, character_id: &str, minutes: f64) -> Result<CorpusFromRecording> {
+    let c = if project_id == crate::app_support::LIBRARY_DIR_NAME {
+        load_library_character(projects_dir, character_id)?
+    } else {
+        let project: crate::models::Project = read_json(&crate::app_support::project_dir(projects_dir, project_id).join("project.json"))?;
+        project.characters.into_iter().find(|c| c.id == character_id)
+            .ok_or_else(|| Error::Other(format!("character {} not found", character_id)))?
+    };
+    let dir = projects_dir.join(project_id).join("characters").join(character_id).join("rvc_corpus");
+    corpus_from_recording(projects_dir, &c, &dir, minutes)
+}
+
 // ── Tagging an existing import ────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
