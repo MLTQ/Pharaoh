@@ -29,7 +29,7 @@ from typing import Optional
 import uvicorn
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response, StreamingResponse
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
@@ -198,7 +198,7 @@ class EmotionParams(BaseModel):
     job_id: Optional[str] = None
     # 16 kHz mono rendering of an import's dialogue stem (uploaded by remote clients).
     input_path: str
-    # Manifest turn rows: speaker, start, end, text, overlap.
+    # Manifest turn rows: speaker, start, end, text, overlap, words (optional).
     turns: list[dict]
 
 
@@ -226,8 +226,9 @@ async def _run_emotions(job_id: str, p: EmotionParams) -> None:
                 models.emotion = models.emotion or de.EmotionTagger(models.device)
                 return de.tag_file(models.emotion, input_path, p.turns, progress)
 
-            res = await asyncio.to_thread(work)
+            res, vecs = await asyncio.to_thread(work)
             out.parent.mkdir(parents=True, exist_ok=True)
+            (out.parent / de.VECS_FILE).write_bytes(vecs.astype("<f2").tobytes())
             out.write_text(json.dumps(res))
             jobs.update(job_id, status="complete", progress=1.0, message="Done", output_path=str(out))
         except dp.DissectCancelled:
@@ -257,15 +258,32 @@ async def generate_emotions(p: EmotionParams) -> dict:
     return {"job_id": job_id, "status": "queued"}
 
 
-@app.get("/emotions/{job_id}")
-async def get_emotions(job_id: str):
-    """The finished tagging result; deleted from the server once read."""
+def _emotion_result(job_id: str) -> Path:
     job = jobs.get(job_id)
     if job is None or job.get("status") != "complete" or not job.get("output_path"):
         raise HTTPException(status_code=404, detail="no finished emotion result for this job")
     path = Path(job["output_path"])
     if not path.is_file():
         raise HTTPException(status_code=410, detail="result already collected")
+    return path
+
+
+@app.get("/emotions/{job_id}/vectors")
+async def get_emotion_vectors(job_id: str) -> Response:
+    """The utterance embeddings (N × 1024 float16, utterance order). Fetch
+    these before /emotions/{job_id}, which collects and deletes the result."""
+    import dissect_emotion as de
+
+    vecs = _emotion_result(job_id).parent / de.VECS_FILE
+    if not vecs.is_file():
+        raise HTTPException(status_code=404, detail="no vectors for this job")
+    return Response(content=vecs.read_bytes(), media_type="application/octet-stream")
+
+
+@app.get("/emotions/{job_id}")
+async def get_emotions(job_id: str):
+    """The finished tagging result; deleted from the server once read."""
+    path = _emotion_result(job_id)
     data = json.loads(path.read_text())
     if is_server_owned(str(path)):
         shutil.rmtree(path.parent, ignore_errors=True)

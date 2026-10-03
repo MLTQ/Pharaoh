@@ -1,7 +1,7 @@
 """dissect_emotion.utterances: diarization turns -> clone-length utterances."""
 import numpy as np
 
-from dissect_emotion import LABELS, tag, utterances
+from dissect_emotion import EMB_DIM, LABELS, prosody, speaking_rate, tag, utterances
 
 
 def T(spk, a, b, text="", overlap=False):
@@ -32,11 +32,33 @@ def test_drops_fragments_and_carries_overlap():
     assert len(u) == 1 and u[0]["speaker"] == "S2" and u[0]["overlap"] is True
 
 
-def test_tag_scores_every_utterance_with_the_argmax_emotion():
+def test_tag_scores_every_utterance_with_the_argmax_emotion_and_embedding():
     class Fake:
         def scores(self, clips):
-            return [{k: (0.9 if k == "angry" else 0.01) for k in LABELS} for _ in clips]
+            v = np.ones(EMB_DIM, np.float32) / np.sqrt(EMB_DIM)
+            return [({k: (0.9 if k == "angry" else 0.01) for k in LABELS}, v) for _ in clips]
 
     utts = utterances([T("S1", 0, 2), T("S2", 3, 5)])
-    tag(Fake(), utts, lambda a, b: np.zeros(int((b - a) * 16000), np.float32))
+    utts, vecs = tag(Fake(), utts, lambda a, b: np.zeros(int((b - a) * 16000), np.float32))
     assert all(x["emotion"] == "angry" and set(x["scores"]) == set(LABELS) for x in utts)
+    assert vecs.shape == (2, EMB_DIM) and abs(float(np.linalg.norm(vecs[0].astype(np.float32))) - 1) < 1e-2
+
+
+def test_speaking_rate_from_word_timings():
+    words = [{"word": w, "start": i * 0.5, "end": i * 0.5 + 0.4} for i, w in enumerate("one two three four five".split())]
+    assert speaking_rate(words) == round(5 / 2.4, 2)
+    assert speaking_rate(words[:2]) is None
+    u = utterances([T("S1", 0, 2.4) | {"words": words}])
+    assert u[0]["rate"] == round(5 / 2.4, 2)
+
+
+def test_prosody_tells_a_pitched_tone_from_noise():
+    pytest = __import__("pytest")
+    pytest.importorskip("librosa")
+    t = np.arange(16000 * 2) / 16000
+    tone = (0.3 * np.sin(2 * np.pi * 220 * t)).astype(np.float32)
+    noise = (0.05 * np.random.default_rng(0).standard_normal(len(t))).astype(np.float32)
+    pt, pn = prosody(tone), prosody(noise)
+    assert abs(pt["f0_hz"] - 220) < 10 and pt["f0_var"] < 0.5
+    assert pn["flat"] > pt["flat"], "noise (breath, whisper) is spectrally flatter"
+    assert pt["loud_db"] > pn["loud_db"]

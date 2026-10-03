@@ -25,6 +25,31 @@ pub struct PaletteEntry {
     pub ref_transcript: Option<String>,
     /// "unreviewed" | "approved"
     pub qa_status: String,
+    /// How to find this emotion in a dissected recording; None = the built-in
+    /// recipe for the emotion's name (commands::emotions::default_recipe).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub recipe: Option<EmotionRecipe>,
+}
+
+/// A palette emotion as a blend: weights over emotion2vec's seven classes
+/// (angry, disgusted, fearful, happy, neutral, sad, surprised; negative =
+/// avoid) plus delivery targets in -1..1 relative to the character's own
+/// average (loud: louder/softer, pace: faster/slower, pitch: higher/lower,
+/// movement: more/less animated, breathy: breathier/clearer).
+#[derive(Debug, Clone, Serialize, Deserialize, Default, PartialEq)]
+pub struct EmotionRecipe {
+    #[serde(default)]
+    pub classes: std::collections::BTreeMap<String, f32>,
+    #[serde(default)]
+    pub loud: f32,
+    #[serde(default)]
+    pub pace: f32,
+    #[serde(default)]
+    pub pitch: f32,
+    #[serde(default)]
+    pub movement: f32,
+    #[serde(default)]
+    pub breathy: f32,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

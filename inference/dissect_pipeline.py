@@ -1094,8 +1094,10 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         try:
             import dissect_emotion as de
             models.emotion = models.emotion or de.EmotionTagger(models.device)
-            utts = de.tag(models.emotion, de.utterances(turn_rows),
-                          lambda a, b: mono16[int(a * ML_SR):int(b * ML_SR)], stage(0.96, 0.995))
+            rows = [dict(r, words=t.words) for r, t in zip(turn_rows, turns)]
+            utts, vecs = de.tag(models.emotion, de.utterances(rows),
+                                lambda a, b: mono16[int(a * ML_SR):int(b * ML_SR)], stage(0.96, 0.995))
+            (out_dir / de.VECS_FILE).write_bytes(vecs.astype("<f2").tobytes())
             (out_dir / "emotions.json").write_text(json.dumps(de.result(utts)))
             emotions_file = "emotions.json"
         except DissectCancelled:
