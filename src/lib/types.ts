@@ -5,6 +5,20 @@
  * Each entry has its own Qwen3 VoiceDesign-generated reference clip used
  * as the conditioning signal for Chatterbox Turbo 0-shot cloning.
  */
+/**
+ * A palette emotion as a blend: weights over emotion2vec's classes (angry,
+ * disgusted, fearful, happy, neutral, sad, surprised; negative = avoid) plus
+ * delivery targets in -1..1 relative to the character's own average.
+ */
+export interface EmotionRecipe {
+  classes: Record<string, number>;
+  loud: number;
+  pace: number;
+  pitch: number;
+  movement: number;
+  breathy: number;
+}
+
 export interface PaletteEntry {
   /** Slug key used in script.csv `emotion` column (e.g. "neutral", "sardonic") */
   emotion: string;
@@ -31,6 +45,8 @@ export interface PaletteEntry {
   ref_audio_sources?: string[];
   ref_transcript: string | null;
   qa_status: "unreviewed" | "approved";
+  /** How to find this emotion in a dissected recording; absent = built-in recipe for its name. */
+  recipe?: EmotionRecipe;
 }
 
 /**

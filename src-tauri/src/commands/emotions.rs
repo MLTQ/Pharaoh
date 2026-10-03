@@ -8,9 +8,13 @@
 //! result next to the manifest.
 //!
 //! `dissect_emotion_clips` then ranks a character's own utterances for a
-//! palette emotion, so the palette can offer real angry / afraid / happy
-//! moments from the recording as clone references — Chatterbox copies a
-//! reference's delivery as much as its voice.
+//! palette emotion's *recipe* — weights over the seven classes plus delivery
+//! targets (loud, pace, pitch, movement, breathy) against that character's
+//! own average — so the palette can offer real tender / furious / weary
+//! moments from the recording as clone references. Chatterbox copies a
+//! reference's delivery as much as its voice. `dissect_similar_clips` finds
+//! the clips nearest one clip in emotion2vec's embedding space, for moods no
+//! recipe names.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -107,6 +111,9 @@ pub struct EmotionClip {
     pub top_score: f64,
     /// The utterance's class scores.
     pub scores: HashMap<String, f64>,
+    /// How much of emotion2vec's belief landed on the seven classes (the rest
+    /// is "other/unknown"); low = the reader couldn't tell.
+    pub clarity: f64,
     /// Plain words for its delivery against the character's average: "loud", "slow", "breathy"…
     pub traits: Vec<String>,
 }
@@ -192,6 +199,7 @@ fn clip(u: &Value, z: &[Option<f64>; 5], fit: f64) -> Option<EmotionClip> {
         text: u["text"].as_str().unwrap_or("").to_string(),
         fit,
         top_score: scores.get(&top).copied().unwrap_or(0.0),
+        clarity: scores.values().sum(),
         top,
         scores,
         traits: traits(z),
@@ -297,9 +305,12 @@ fn vector(bytes: &[u8], dim: usize, i: usize) -> Option<Vec<f32>> {
 }
 
 fn similar(utts: &[Value], bytes: &[u8], dim: usize, speakers: &[String], start: f64, limit: usize) -> Result<Vec<EmotionClip>> {
+    // The utterance starting at `start`, else the one containing it.
+    let at = |u: &Value| (u["start"].as_f64().unwrap_or(-1.0), u["end"].as_f64().unwrap_or(-1.0));
     let seed = utts
         .iter()
-        .position(|u| (u["start"].as_f64().unwrap_or(-1.0) - start).abs() < 0.05)
+        .position(|u| (at(u).0 - start).abs() < 0.05)
+        .or_else(|| utts.iter().position(|u| at(u).0 <= start && start < at(u).1))
         .ok_or_else(|| Error::Other("that clip isn't in this import's emotion tags".into()))?;
     let q = vector(bytes, dim, seed).ok_or_else(|| Error::Other("emotion vectors are missing — re-read emotions".into()))?;
     let (mine, refs) = usable(utts, speakers);

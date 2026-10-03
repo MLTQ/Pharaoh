@@ -495,6 +495,16 @@ export const LibraryPaletteTab: React.FC<{
                 onApprove={(audioPath) => handleApprovePaletteTake(entry.emotion, audioPath)}
                 recording={
                   <RecordingClips character={character} emotion={entry.emotion} disabled={dirty}
+                                  recipe={entry.recipe}
+                                  onRecipeChange={(recipe) => patch((c) => ({
+                                    ...c,
+                                    voice_assignment: {
+                                      ...c.voice_assignment,
+                                      emotional_palette: c.voice_assignment.emotional_palette.map((e, i) =>
+                                        i === idx ? { ...e, recipe } : e,
+                                      ),
+                                    },
+                                  }))}
                                   onUse={(importId, clip) => handleUseRecordingClip(entry.emotion, importId, clip)} />
                 }
                 onQa={(jobId, status) => {

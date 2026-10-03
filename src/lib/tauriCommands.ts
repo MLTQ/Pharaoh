@@ -3,6 +3,7 @@
 import { invoke } from "./transport";
 import type {
   Project,
+  EmotionRecipe,
   Scene,
   ScriptRow,
   AppConfig,
@@ -844,8 +845,25 @@ export const dissectRetry = (importId: string): Promise<DissectImport> =>
 export const dissectClip = (importId: string, stem: string, start: number, end: number): Promise<string> =>
   invoke("dissect_clip", { importId, stem, start, end });
 
-export interface EmotionClip { speaker: string; start: number; end: number; text: string; score: number; top: string }
-export interface EmotionClips { tagged: boolean; class: string | null; clips: EmotionClip[]; utterances: number }
+export interface EmotionClip {
+  speaker: string; start: number; end: number; text: string;
+  /** Recipe score, or cosine similarity for "more like this". */
+  fit: number;
+  top: string; top_score: number;
+  scores: Record<string, number>;
+  /** Share of the reader's belief on the seven classes; low = it couldn't tell. */
+  clarity: number;
+  /** Delivery against the character's average: "loud", "slow", "breathy"… */
+  traits: string[];
+}
+export interface EmotionClips {
+  tagged: boolean;
+  /** Tagged before delivery features existed: re-read for recipes' delivery targets and "more like this". */
+  needs_update: boolean;
+  recipe: EmotionRecipe | null;
+  clips: EmotionClip[];
+  utterances: number;
+}
 export interface EmotionJobStatus { import_id: string; done: boolean; progress: number; message: string; error: string | null }
 
 /** Tag an import's dialogue with emotions (imports dissected before tagging existed). Returns a job id. */
@@ -853,9 +871,12 @@ export const dissectTagEmotions = (importId: string): Promise<string> =>
   invoke("dissect_tag_emotions", { importId });
 export const dissectEmotionStatus = (jobId: string): Promise<EmotionJobStatus> =>
   invoke("dissect_emotion_status", { jobId });
-/** A character's best real clips for a palette emotion, from an import's emotion tags. */
-export const dissectEmotionClips = (importId: string, speakerIds: string[], emotion: string, limit?: number): Promise<EmotionClips> =>
-  invoke("dissect_emotion_clips", { importId, speakerIds, emotion, limit });
+/** A character's best real clips for a palette emotion (its recipe, or the built-in one for its name). */
+export const dissectEmotionClips = (importId: string, speakerIds: string[], emotion: string, recipe?: EmotionRecipe | null, limit?: number): Promise<EmotionClips> =>
+  invoke("dissect_emotion_clips", { importId, speakerIds, emotion, recipe: recipe ?? null, limit });
+/** The character's clips whose delivery is most like the one starting at `start`. */
+export const dissectSimilarClips = (importId: string, speakerIds: string[], start: number, limit?: number): Promise<EmotionClip[]> =>
+  invoke("dissect_similar_clips", { importId, speakerIds, start, limit });
 
 /** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
 export const dissectExtractSound = (request: {
