@@ -32,3 +32,4 @@ Background tracker for running dissect imports. Owns the job-queue row for each 
 | `DissectView.tsx` | `track` after submit / when resuming a running import; `statuses[importId]` updates | Renaming or removing the status map |
 | `DissectView.tsx` (toast) | `openRequest` set by the toast action (which switches to the Dissect tab), cleared with `requestOpen(null)` | Changing the handshake |
 | `jobStore.ts` / `JobQueue.tsx` | Rows use `model: "dissect"`; `output_path` is the manifest | Model kind rename (CSS `.model.dissect`) |
+- `tagEmotions(importId, name)` runs `dissect_tag_emotions` with a job-queue row; `tagging` holds live status lines and `emotionsReady` bumps per import when `emotions.json` lands, so palette views re-query.

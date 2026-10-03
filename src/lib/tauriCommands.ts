@@ -844,6 +844,19 @@ export const dissectRetry = (importId: string): Promise<DissectImport> =>
 export const dissectClip = (importId: string, stem: string, start: number, end: number): Promise<string> =>
   invoke("dissect_clip", { importId, stem, start, end });
 
+export interface EmotionClip { speaker: string; start: number; end: number; text: string; score: number; top: string }
+export interface EmotionClips { tagged: boolean; class: string | null; clips: EmotionClip[]; utterances: number }
+export interface EmotionJobStatus { import_id: string; done: boolean; progress: number; message: string; error: string | null }
+
+/** Tag an import's dialogue with emotions (imports dissected before tagging existed). Returns a job id. */
+export const dissectTagEmotions = (importId: string): Promise<string> =>
+  invoke("dissect_tag_emotions", { importId });
+export const dissectEmotionStatus = (jobId: string): Promise<EmotionJobStatus> =>
+  invoke("dissect_emotion_status", { jobId });
+/** A character's best real clips for a palette emotion, from an import's emotion tags. */
+export const dissectEmotionClips = (importId: string, speakerIds: string[], emotion: string, limit?: number): Promise<EmotionClips> =>
+  invoke("dissect_emotion_clips", { importId, speakerIds, emotion, limit });
+
 /** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
 export const dissectExtractSound = (request: {
   import_id: string;

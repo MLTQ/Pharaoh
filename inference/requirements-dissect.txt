@@ -14,3 +14,5 @@ pyyaml>=6
 einops>=0.8
 spafe>=0.3.3
 ml-collections>=1.0
+# Emotion tagging of dialogue (emotion2vec+ large, dissect_emotion.py)
+funasr>=1.2

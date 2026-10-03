@@ -24,6 +24,39 @@ export function clonesVoice(char: Character | undefined): boolean {
   return !!va?.ref_audio_path && (va.production_pipeline ?? "chatterbox").startsWith("chatterbox");
 }
 
+/**
+ * The palette entry a delivery note asks for: an exact emotion key/label, or
+ * a note mentioning one ("angrily, through gritted teeth" → angry). Only
+ * entries with a reference count.
+ */
+export function paletteEntryFor(char: Character | undefined, note: string | undefined) {
+  const n = (note ?? "").trim().toLowerCase();
+  if (!char || !n) return undefined;
+  const entries = (char.voice_assignment.emotional_palette ?? []).filter((e) => e.ref_audio_path);
+  const exact = entries.find((e) => e.emotion.toLowerCase() === n || e.label.toLowerCase() === n);
+  if (exact) return exact;
+  // Word stems: "angrily" / "anger" ~ "angry", "sadly" ~ "sad", "afraid" ~ "afraid".
+  const SYNONYMS: Record<string, string> = {
+    furious: "angry", irate: "angry", annoyed: "angry", livid: "angry", rage: "angry", raging: "angry",
+    terrified: "afraid", scared: "afraid", frightened: "afraid", fearful: "afraid", fearfully: "afraid", panicked: "afraid",
+    joyful: "happy", cheerful: "happy", glad: "happy", delighted: "happy", cheerfully: "happy",
+    sorrowful: "sad", grieving: "sad", tearful: "sad", miserable: "sad", tearfully: "sad",
+    hushed: "whisper", quietly: "whisper", softly: "tender", gently: "tender", warmly: "tender",
+    sarcastic: "sardonic", sarcastically: "sardonic", dry: "sardonic", dryly: "sardonic",
+    thrilled: "excited", eager: "excited", eagerly: "excited",
+  };
+  const words = n.split(/[^a-z]+/).filter(Boolean).map((w) => SYNONYMS[w] ?? w);
+  const strip = (w: string) => w.replace(/(ily|ly|ness|ed|ing|er|y)$/, "");
+  const stem = (w: string) => strip(strip(w)).slice(0, 5);
+  return entries.find((e) => {
+    const k = stem(e.emotion.toLowerCase());
+    return k.length >= 3 && words.some((w) => {
+      const v = stem(w);
+      return v.length >= 3 && (v.startsWith(k) || k.startsWith(v));
+    });
+  });
+}
+
 interface SubmitResult {
   jobId: string;
 }
@@ -53,6 +86,9 @@ export function useGenerateJob() {
     rowIndex?: number;
     /** Chatterbox only: 0–1 expressiveness (0.5 = like the reference). */
     exaggeration?: number;
+    /** Chatterbox only: palette emotion (key, label, or a delivery note that
+     *  names one); its reference replaces the gold clip. */
+    emotion?: string;
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
     const ts = Date.now();
@@ -61,16 +97,16 @@ export function useGenerateJob() {
     const speaker = params.speaker || char?.voice_assignment.speaker || "Vivian";
     const instruct = params.instruct ?? char?.voice_assignment.instruct_default ?? "";
 
+    const palette = clonesVoice(char) ? paletteEntryFor(char, params.emotion) : undefined;
+    const refPath = palette?.ref_audio_path ?? char?.voice_assignment.ref_audio_path ?? "";
     const jobId = char && clonesVoice(char)
       ? await submitChatterboxClone({
           projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
           params: {
             text: params.text,
             // Relative bundle paths live under the project's copy of the character.
-            ref_audio_path: char.voice_assignment.ref_audio_path!.startsWith("/")
-              ? char.voice_assignment.ref_audio_path!
-              : `${pDir}/${projectId}/characters/${char.id}/${char.voice_assignment.ref_audio_path}`,
-            ref_transcript: char.voice_assignment.ref_transcript ?? "",
+            ref_audio_path: refPath.startsWith("/") ? refPath : `${pDir}/${projectId}/characters/${char.id}/${refPath}`,
+            ref_transcript: (palette ? palette.ref_transcript : char.voice_assignment.ref_transcript) ?? "",
             exaggeration: params.exaggeration ?? 0.5,
             cfg_weight: 0.5,
             seed: params.seed ?? Math.floor(Math.random() * 99999),
@@ -95,7 +131,7 @@ export function useGenerateJob() {
     const job: Job = {
       id: jobId,
       model: "tts",
-      description: `${char?.name ?? params.speaker} · "${params.text.replace(/\[.*?\]/g, "").trim().slice(0, 45)}${params.text.length > 45 ? "…" : ""}"`,
+      description: `${char?.name ?? params.speaker}${palette ? ` (${palette.label})` : ""} · "${params.text.replace(/\[.*?\]/g, "").trim().slice(0, 45)}${params.text.length > 45 ? "…" : ""}"`,
       status: "running",
       progress: 0,
       eta: "starting",

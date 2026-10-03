@@ -32,3 +32,5 @@ Shared frontend hook for submitting scene-level TTS, SFX, and music jobs. It res
 
 ## Notes
 - Character Designer bypasses this hook for character-level probe jobs because those use synthetic character slugs rather than scene rows.
+- `clonesVoice(char)`: a character with a gold reference and a Chatterbox pipeline speaks through `submit_chatterbox_clone`.
+- `paletteEntryFor(char, note)`: a delivery note that names a palette emotion (exact key/label, word stems like "angrily", or synonyms like "furious") swaps that emotion's reference in for the gold clip. Used by the TTS panel's Direction field and the script editor's parentheticals.

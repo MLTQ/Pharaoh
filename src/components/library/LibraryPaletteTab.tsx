@@ -21,8 +21,10 @@ import {
   submitTtsVoiceDesign,
   submitChatterboxClone,
   importAudioIntoLibraryBundle,
+  dissectClip,
 } from "../../lib/tauriCommands";
-import type { PaletteTakeFile } from "../../lib/tauriCommands";
+import type { EmotionClip, PaletteTakeFile } from "../../lib/tauriCommands";
+import { RecordingClips } from "./RecordingClips";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
 import type { Character, PaletteEntry, QaJobStatus } from "../../lib/types";
@@ -261,6 +263,46 @@ export const LibraryPaletteTab: React.FC<{
     }
   };
 
+  // A real clip from the dissected recording becomes this emotion's reference.
+  const handleUseRecordingClip = async (emotion: string, importId: string, clip: EmotionClip) => {
+    if (!character.library_id) { setPaletteGenError("Save the character first."); return; }
+    if (dirty) { setPaletteGenError("Save your changes first."); return; }
+    setPaletteGenError(null);
+    setSaving(true);
+    try {
+      const cut = await dissectClip(importId, "dialogue", clip.start, clip.end);
+      const { absolute_path } = await importAudioIntoLibraryBundle({
+        libraryId: character.library_id, sourcePath: cut, slot: "palette",
+        destName: `${emotion}_recording_${Math.round(clip.start * 1000)}.wav`,
+      });
+      const updated: Character = {
+        ...character,
+        voice_assignment: {
+          ...character.voice_assignment,
+          emotional_palette: character.voice_assignment.emotional_palette.map((e) =>
+            e.emotion === emotion
+              ? {
+                  ...e,
+                  ref_audio_sources: [...(e.ref_audio_sources ?? []).filter((p) => p !== absolute_path), absolute_path],
+                  ref_audio_path: absolute_path,
+                  ref_transcript: clip.text || e.ref_transcript,
+                  qa_status: "approved",
+                }
+              : e,
+          ),
+        },
+      };
+      setCharacter(updated);
+      const saved = await saveLibraryCharacter(updated);
+      setCharacter(saved);
+      setDirty(false);
+    } catch (e) {
+      setPaletteGenError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const handleApprovePaletteTake = async (emotion: string, audioPath: string) => {
     const updated: Character = {
       ...character,
@@ -451,6 +493,10 @@ export const LibraryPaletteTab: React.FC<{
                 onGenerateTake={() => handleGeneratePaletteTake(entry)}
                 onUploadTake={() => handleUploadPaletteReference(entry.emotion)}
                 onApprove={(audioPath) => handleApprovePaletteTake(entry.emotion, audioPath)}
+                recording={
+                  <RecordingClips character={character} emotion={entry.emotion} disabled={dirty}
+                                  onUse={(importId, clip) => handleUseRecordingClip(entry.emotion, importId, clip)} />
+                }
                 onQa={(jobId, status) => {
                   if (!jobId.startsWith("disk::")) setQaStatus(jobId, status);
                 }}
@@ -476,7 +522,9 @@ const PaletteRow: React.FC<{
   onUploadTake: () => void;
   onApprove: (audioPath: string) => void;
   onQa: (jobId: string, status: QaJobStatus) => void;
-}> = ({ entry, allTakes, running, canGenerate, onChangeDirection, onGenerateTake, onUploadTake, onApprove, onQa }) => {
+  /** Real clips from a dissected source (RecordingClips), when the character has one. */
+  recording?: React.ReactNode;
+}> = ({ entry, allTakes, running, canGenerate, onChangeDirection, onGenerateTake, onUploadTake, onApprove, onQa, recording }) => {
   const [expanded, setExpanded] = useState(false);
   const approved = entry.qa_status === "approved";
   return (
@@ -517,6 +565,7 @@ const PaletteRow: React.FC<{
       </div>
       {expanded && (
         <div style={{ padding: "10px 14px 12px", borderTop: "1px solid var(--line-1)" }}>
+          {recording}
           <label style={labelStyle}>Emotional direction</label>
           <textarea
             className="input"

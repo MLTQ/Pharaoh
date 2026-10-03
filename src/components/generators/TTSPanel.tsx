@@ -3,7 +3,7 @@ import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
 import { PlayButton } from "../shared/PlayButton";
 import { SceneRouter } from "./RichDirector";
-import { useGenerateJob, clonesVoice } from "../../hooks/useGenerateJob";
+import { useGenerateJob, clonesVoice, paletteEntryFor } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
@@ -177,6 +177,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         speaker: customSpeaker,
         character: selectedChar,
         instruct: direction.trim(),
+        emotion: direction.trim(),
         seed,
         temperature,
         topP,
@@ -235,7 +236,8 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
             <span className="desc">
               {clonesVoice(selectedChar)
                 ? <>{selectedChar!.name} speaks in the voice of their gold reference clip. Inline tags
-                  like [laugh] or [sigh] are performed; Chatterbox takes no written direction.</>
+                  like [laugh] or [sigh] are performed. Direction picks a palette emotion ("angry", "sadly…") — its
+                  reference sets the delivery; anything else uses the gold clip.</>
                 : <>Write the spoken line separately from the performance direction. Direction is sent as
                   Qwen CustomVoice instruction text, not spoken dialogue.</>}
             </span>
@@ -322,13 +324,29 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           <div className="field">
             <div className="field-label">
               <span>Direction</span>
-              <span className="hint">{clonesVoice(selectedChar) ? "not used by Chatterbox" : "CustomVoice instruct"}</span>
+              <span className="hint">
+                {clonesVoice(selectedChar)
+                  ? `emotion → ${paletteEntryFor(selectedChar, direction)?.label ?? "gold reference"}`
+                  : "CustomVoice instruct"}
+              </span>
             </div>
+            {clonesVoice(selectedChar) && (selectedChar?.voice_assignment.emotional_palette ?? []).some((e) => e.ref_audio_path) && (
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4, marginBottom: 6 }}>
+                {(selectedChar?.voice_assignment.emotional_palette ?? []).filter((e) => e.ref_audio_path).map((e) => (
+                  <button key={e.emotion} className="btn btn-sm" onClick={() => setDirection(e.emotion)}
+                          style={{ padding: "1px 7px", fontSize: 10,
+                                   borderColor: paletteEntryFor(selectedChar, direction)?.emotion === e.emotion ? "var(--tts)" : undefined }}
+                          title={`Speak with the ${e.label} palette reference`}>{e.label}</button>
+                ))}
+              </div>
+            )}
             <textarea
               className="textarea"
               value={direction}
               onChange={(e) => setDirection(e.target.value)}
-              placeholder="Describe delivery, emotion, pacing, proximity, or accent."
+              placeholder={clonesVoice(selectedChar)
+                ? "Name a palette emotion (angry, tender, sadly…) — or leave blank for the gold reference."
+                : "Describe delivery, emotion, pacing, proximity, or accent."}
               style={{ minHeight: 148, fontSize: 12, lineHeight: 1.55 }}
             />
           </div>

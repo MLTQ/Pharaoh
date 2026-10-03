@@ -1159,6 +1159,10 @@ def prefetch() -> None:
     tagger = "MIT/ast-finetuned-audioset-10-10-0.4593"
     path = snapshot_download(tagger, allow_patterns=["*.json", "*.safetensors"])
     print(f"  ✓ {tagger} → {path}", flush=True)
+    # Emotion tagger for per-emotion palette references (dissect_emotion.py).
+    from dissect_emotion import MODEL_ID as EMOTION_ID
+    path = snapshot_download(EMOTION_ID)
+    print(f"  ✓ {EMOTION_ID} → {path}", flush=True)
 
 
 def check(deep: bool = True) -> bool:

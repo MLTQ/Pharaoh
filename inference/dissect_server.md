@@ -41,3 +41,4 @@ FastAPI shell on port 18007 around `dissect_pipeline.py`: takes an existing audi
 ## Notes
 - Linux + NVIDIA only in practice. NeMo on macOS is untested; without NeMo the server runs in stub mode.
 - The ufw firewall on an inference box must allow 18007 for LAN clients.
+- `POST /generate/emotions` tags an existing import's dialogue (16 kHz mono upload + manifest turns) under the GPU lock; `GET /emotions/{job_id}` returns the result once and deletes it.

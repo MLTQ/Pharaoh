@@ -476,6 +476,8 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
           speaker: character.voice_assignment.speaker ?? "Vivian",
           character,
           instruct: block.parenthetical || character.voice_assignment.instruct_default || "",
+          // "(angrily)" picks the character's angry palette reference.
+          emotion: block.parenthetical,
           rowIndex,
         });
         toast("info", `Generating dialogue for ${character.name}`);

@@ -14,7 +14,7 @@
 
 import { create } from "zustand";
 import type { DissectStatus, Job } from "../lib/types";
-import { dissectCancel, dissectRebuildStatus, dissectRetry, dissectStatus, listDissectImports } from "../lib/tauriCommands";
+import { dissectCancel, dissectEmotionStatus, dissectRebuildStatus, dissectRetry, dissectStatus, dissectTagEmotions, listDissectImports } from "../lib/tauriCommands";
 import type { RebuildStatus } from "../lib/types";
 import { openProjectById } from "../lib/openProject";
 import { useJobStore } from "./jobStore";
@@ -54,12 +54,62 @@ interface DissectState {
   /** Resolves false (with the queue row failed and a toast) if the re-run couldn't start. */
   retry: (importId: string, sourceName?: string) => Promise<boolean>;
   requestOpen: (importId: string | null) => void;
+  /** Emotion tagging in flight, by import id → status line. */
+  tagging: Record<string, string>;
+  /** Bumped per import when its emotions.json is written, so views re-query. */
+  emotionsReady: Record<string, number>;
+  /** Tag an import's dialogue with emotions; a queue row follows it. */
+  tagEmotions: (importId: string, sourceName: string) => Promise<void>;
 }
 
 export const useDissectStore = create<DissectState>((set, get) => ({
   statuses: {},
   openRequest: null,
   rebuilds: {},
+  tagging: {},
+  emotionsReady: {},
+
+  tagEmotions: async (importId, sourceName) => {
+    if (get().tagging[importId]) return;
+    const rowId = `emotions-${importId}`;
+    const jobs = useJobStore.getState();
+    const row = {
+      id: rowId, model: "dissect" as const, description: `Read emotions · ${sourceName}`, status: "running" as const,
+      progress: 0, eta: "starting", started_at: new Date().toISOString(), scene_id: null, scene_slug: null,
+      row_index: null, output_path: null, peaks: null, qa_status: "unreviewed" as const, error: null,
+    };
+    if (jobs.jobs.some((j) => j.id === rowId)) jobs.updateJob(rowId, row); else jobs.addJob(row);
+    set((st) => ({ tagging: { ...st.tagging, [importId]: "Starting" } }));
+    const finish = (error: string | null) => {
+      set((st) => {
+        const { [importId]: _done, ...rest } = st.tagging;
+        return { tagging: rest, emotionsReady: error ? st.emotionsReady : { ...st.emotionsReady, [importId]: Date.now() } };
+      });
+      useJobStore.getState().updateJob(rowId, error
+        ? { status: "failed", eta: "failed", error }
+        : { status: "complete", progress: 100, eta: "emotions ready" });
+      if (error) useToastStore.getState().push({ kind: "error", title: `Reading emotions failed · ${sourceName}`, body: error });
+    };
+    let jobId: string;
+    try {
+      jobId = await dissectTagEmotions(importId);
+    } catch (e) {
+      finish(String(e));
+      return;
+    }
+    const tick = async () => {
+      try {
+        const s = await dissectEmotionStatus(jobId);
+        if (s.done) { finish(s.error); return; }
+        set((st) => ({ tagging: { ...st.tagging, [importId]: s.message } }));
+        useJobStore.getState().updateJob(rowId, { progress: Math.round(s.progress * 100), eta: s.message });
+        window.setTimeout(tick, 1500);
+      } catch (e) {
+        finish(String(e));
+      }
+    };
+    void tick();
+  },
 
   trackRebuild: (jobId, title) => {
     const id = `rebuild-${jobId}`;
