@@ -21,6 +21,7 @@ as 16 kHz mono), and standalone for imports dissected before this existed
 from __future__ import annotations
 
 import logging
+import re
 from typing import Callable, Optional
 
 import numpy as np
@@ -88,10 +89,22 @@ def utterances(turns: list[dict], max_s: float = MAX_UTT_S, gap_s: float = JOIN_
     return out
 
 
+def syllables(word: str) -> int:
+    """Rough English syllable count: vowel groups, minus a silent final e."""
+    w = "".join(c for c in word.lower() if c.isalpha())
+    if not w:
+        return 0
+    groups = len(re.findall(r"[aeiouy]+", w))
+    if w.endswith("e") and not w.endswith(("le", "ee")) and groups > 1:
+        groups -= 1
+    return max(1, groups)
+
+
 def speaking_rate(words: list[dict]) -> Optional[float]:
-    """Articulation rate: words per second of actual speech — pauses between
-    words (beyond a normal 0.25 s gap) don't count, so a quick line broken by
-    a beat still reads as quick. None without word timings."""
+    """Articulation rate: syllables per second of actual speech. Syllables, not
+    words, so "amazing" counts for more than "to"; pauses between words beyond
+    a normal 0.25 s don't count, so a quick line broken by a beat still reads
+    as quick. None without word timings."""
     if len(words) < 3:
         return None
     talk = 0.0
@@ -99,7 +112,8 @@ def speaking_rate(words: list[dict]) -> Optional[float]:
         talk += max(0.0, w["end"] - w["start"])
         if i + 1 < len(words):
             talk += min(0.25, max(0.0, words[i + 1]["start"] - w["end"]))
-    return round(len(words) / talk, 2) if talk > 0.5 else None
+    n = sum(syllables(w.get("word", "")) for w in words)
+    return round(n / talk, 2) if talk > 0.5 else None
 
 
 def prosody(x: np.ndarray) -> dict:

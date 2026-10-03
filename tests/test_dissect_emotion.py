@@ -1,7 +1,7 @@
 """dissect_emotion.utterances: diarization turns -> clone-length utterances."""
 import numpy as np
 
-from dissect_emotion import EMB_DIM, LABELS, prosody, speaking_rate, tag, utterances
+from dissect_emotion import EMB_DIM, LABELS, prosody, speaking_rate, syllables, tag, utterances
 
 
 def T(spk, a, b, text="", overlap=False):
@@ -44,8 +44,12 @@ def test_tag_scores_every_utterance_with_the_argmax_emotion_and_embedding():
     assert vecs.shape == (2, EMB_DIM) and abs(float(np.linalg.norm(vecs[0].astype(np.float32))) - 1) < 1e-2
 
 
+def test_syllables():
+    assert [syllables(w) for w in ["to", "amazing", "happened!", "come", "little", "quickly"]] == [1, 3, 3, 1, 2, 2]
+
+
 def test_speaking_rate_from_word_timings():
-    words = [{"word": w, "start": i * 0.5, "end": i * 0.5 + 0.4} for i, w in enumerate("one two three four five".split())]
+    words = [{"word": w, "start": i * 0.5, "end": i * 0.5 + 0.4} for i, w in enumerate("one two three four five".split())]  # 1 syllable each
     # 5 words of 0.4 s with 0.1 s gaps: 2.0 s + 0.4 s of gaps.
     assert speaking_rate(words) == round(5 / 2.4, 2)
     paused = [dict(w, start=w["start"] + (3 if i >= 3 else 0), end=w["end"] + (3 if i >= 3 else 0)) for i, w in enumerate(words)]
