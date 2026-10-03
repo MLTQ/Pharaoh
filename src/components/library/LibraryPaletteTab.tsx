@@ -19,17 +19,21 @@ import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList"
 import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
+  submitChatterboxClone,
   importAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
 import type { Character, PaletteEntry, QaJobStatus } from "../../lib/types";
+import { clonesVoice } from "../../hooks/useGenerateJob";
 import {
   LIBRARY_PROJECT_ID,
   LIBRARY_PALETTE_ROW,
   DEFAULT_TEST_LINE,
+  BASELINE_EMOTIONS,
   libraryPaletteSlug,
+  libraryBundlePath,
   labelStyle,
   pickAudioFiles,
 } from "./libraryShared";
@@ -103,10 +107,55 @@ export const LibraryPaletteTab: React.FC<{
     setPaletteGenError(null);
   };
 
+  const handleAddBaseline = () => {
+    const existing = new Set((character.voice_assignment.emotional_palette ?? []).map((e) => e.emotion));
+    const added: PaletteEntry[] = BASELINE_EMOTIONS.filter((b) => !existing.has(b.emotion)).map((b) => ({
+      emotion: b.emotion, label: b.label, direction: b.direction,
+      ref_audio_path: null, ref_transcript: null, qa_status: "unreviewed",
+    }));
+    if (added.length === 0) { setPaletteGenError("The baseline emotions are all here already."); return; }
+    patch((c) => ({
+      ...c,
+      voice_assignment: { ...c.voice_assignment, emotional_palette: [...(c.voice_assignment.emotional_palette ?? []), ...added] },
+    }));
+    setPaletteGenError(null);
+  };
+
   const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
     if (!character.library_id || !projectsDir) return;
     if (dirty) {
       setPaletteGenError("Save your changes first — generation uses the saved character state.");
+      return;
+    }
+    // A cloned voice (gold reference + Chatterbox): clone the gold, with the
+    // emotion carried by the line's words and the expressiveness setting.
+    if (clonesVoice(character)) {
+      const base = BASELINE_EMOTIONS.find((b) => b.emotion === entry.emotion);
+      const seed = Math.floor(Math.random() * 9999);
+      const slug = libraryPaletteSlug(character.library_id, entry.emotion);
+      const outputPath = `${projectsDir}/_library/characters/${character.library_id}/palette/${entry.emotion}_${seed}_${Date.now()}.wav`;
+      setPaletteGenError(null);
+      try {
+        const jobId = await submitChatterboxClone({
+          projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_PALETTE_ROW,
+          params: {
+            text: paletteTestLine.trim() || base?.line || DEFAULT_TEST_LINE,
+            ref_audio_path: libraryBundlePath(projectsDir, character.library_id, character.voice_assignment.ref_audio_path!),
+            ref_transcript: character.voice_assignment.ref_transcript ?? "",
+            exaggeration: base?.exaggeration ?? 0.5,
+            cfg_weight: 0.5,
+            seed,
+            output_path: outputPath,
+          },
+        });
+        addJob({
+          id: jobId, model: "tts", description: `Library palette · ${character.name} · ${entry.label} (clone)`,
+          status: "pending", progress: 0, eta: "…", started_at: new Date().toISOString(), scene_id: null,
+          scene_slug: slug, row_index: LIBRARY_PALETTE_ROW, output_path: null, peaks: null, qa_status: "unreviewed", error: null,
+        });
+      } catch (e) {
+        setPaletteGenError(e instanceof Error ? e.message : "Generation failed");
+      }
       return;
     }
     const baseDesc = (character.voice_assignment.base_voice_description ?? "").trim();
@@ -258,6 +307,14 @@ export const LibraryPaletteTab: React.FC<{
           style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 8px" }}
         >+ Add emotion</button>
       </div>
+      <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -2, marginBottom: 8 }}>
+        <button
+          className="btn btn-sm"
+          onClick={handleAddBaseline}
+          title={BASELINE_EMOTIONS.map((b) => b.label).join(", ")}
+          style={{ padding: "2px 8px" }}
+        >+ Baseline set ({BASELINE_EMOTIONS.length})</button>
+      </div>
 
       {/* Test line for take generation */}
       {character.voice_assignment.emotional_palette.length > 0 && (
@@ -266,7 +323,9 @@ export const LibraryPaletteTab: React.FC<{
             className="input"
             value={paletteTestLine}
             onChange={(e) => setPaletteTestLine(e.target.value)}
-            placeholder="Test line to synthesise for palette takes…"
+            placeholder={clonesVoice(character)
+              ? "Optional: one line for every emotion (blank = each emotion's own sample line)…"
+              : "Test line to synthesise for palette takes…"}
             style={{ width: "100%", fontSize: 12 }}
           />
         </div>
@@ -334,7 +393,7 @@ export const LibraryPaletteTab: React.FC<{
           border: "1px dashed var(--line-2)", borderRadius: "var(--r)",
           color: "var(--fg-4)", fontSize: 11.5, lineHeight: 1.6,
         }}>
-          No palette entries. Click "+ Add emotion" to start.
+          No palette entries. Click "+ Baseline set" for a ready-made starting palette, or "+ Add emotion".
         </div>
       ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>

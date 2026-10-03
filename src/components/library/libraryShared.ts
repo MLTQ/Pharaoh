@@ -25,6 +25,42 @@ export function libraryPaletteSlug(libraryId: string, emotion: string): string {
   return `__library_palette__${libraryId}__${emotion}`;
 }
 
+/**
+ * Baseline emotional palette. `direction` drives Voice Design (text-described
+ * voices); `line` and `exaggeration` drive Chatterbox clones, which take no
+ * written direction — the emotion has to be in the words and the
+ * expressiveness setting.
+ */
+export const BASELINE_EMOTIONS: { emotion: string; label: string; direction: string; line: string; exaggeration: number }[] = [
+  { emotion: "neutral", label: "Neutral", exaggeration: 0.5,
+    direction: "Even and conversational, natural pace.",
+    line: "The train leaves at eleven, so we really ought to get going." },
+  { emotion: "happy", label: "Happy", exaggeration: 0.6,
+    direction: "Bright and warm, smiling through the words.",
+    line: "Oh, that's wonderful! I knew you could do it!" },
+  { emotion: "excited", label: "Excited", exaggeration: 0.75,
+    direction: "Fast and high-energy, words tumbling out.",
+    line: "You'll never guess what just happened — come on, quickly!" },
+  { emotion: "tender", label: "Tender", exaggeration: 0.4,
+    direction: "Soft, warm and close; gentle reassurance.",
+    line: "It's all right. I'm here, and I'm not going anywhere." },
+  { emotion: "sad", label: "Sad", exaggeration: 0.55,
+    direction: "Quiet and heavy, slower, falling at the ends of phrases.",
+    line: "I just thought... it would all turn out differently." },
+  { emotion: "angry", label: "Angry", exaggeration: 0.8,
+    direction: "Hard, clipped consonants; rising force, barely held back.",
+    line: "Don't you dare walk away while I'm talking to you!" },
+  { emotion: "afraid", label: "Afraid", exaggeration: 0.7,
+    direction: "Breathy and quick, voice tight with fear.",
+    line: "Did you hear that? There's something out there." },
+  { emotion: "sardonic", label: "Sardonic", exaggeration: 0.5,
+    direction: "Dry and unimpressed; flat delivery with a slight sneer.",
+    line: "Oh, brilliant. Another plan that can't possibly go wrong." },
+  { emotion: "whisper", label: "Whisper", exaggeration: 0.35,
+    direction: "Hushed and close, conspiratorial.",
+    line: "Keep your voice down — they'll hear us." },
+];
+
 /** Absolute path of a bundle file; library voice paths are stored relative. */
 export function libraryBundlePath(projectsDir: string, libraryId: string, path: string): string {
   return path.startsWith("/") ? path : `${projectsDir}/_library/characters/${libraryId}/${path}`;

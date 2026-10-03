@@ -8,7 +8,8 @@ Stage-2 "Palette" tab of the library character editor: add emotions, generate pe
 ### `LibraryPaletteTab`
 - **Does**: Owns the palette action handlers:
   - `handleAddEmotion` — validates/slugifies the new-emotion form (dupes rejected via `paletteGenError`) and appends a `PaletteEntry` through `patch` (marks dirty; saved with the Save button).
-  - `handleGeneratePaletteTake` — submits a Voice Design job with instruct = base voice description + entry direction, output into `<bundle>/palette/`, slug `__library_palette__<id>__<emotion>`; refuses while `dirty`.
+  - `handleAddBaseline` — "+ Baseline set": appends the missing `BASELINE_EMOTIONS` (neutral, happy, excited, tender, sad, angry, afraid, sardonic, whisper) with written directions; marks dirty.
+  - `handleGeneratePaletteTake` — for a cloned voice (`clonesVoice`: gold reference + Chatterbox) clones the gold with that emotion's sample line and expressiveness (Chatterbox takes no written direction; the test line, if set, overrides the sample line). Otherwise submits a Voice Design job with instruct = base voice description + entry direction, output into `<bundle>/palette/`, slug `__library_palette__<id>__<emotion>`; refuses while `dirty`.
   - `handleUploadPaletteReference` — per-emotion upload-as-source (mirrors voice-tab semantics: first upload promoted to gold + auto-approved if no existing ref); auto-saves.
   - `handleApprovePaletteTake` — promotes a take to the entry's `ref_audio_path`, persists immediately (approval is high-value; no manual Save needed), then `refreshList`.
 - **Props**: `character` (non-null), `dirty`, `patch`, `setCharacter`, `setDirty`, `setSaving`, `setError`, `refreshList`, plus lifted UI state (`paletteTestLine`, add-emotion form fields, `paletteGenError` + setters) and `paletteDiskTakes` (disk-scanned takes, refreshed by LibraryView on character change).
