@@ -168,6 +168,22 @@ export const submitTtsVoiceClone = (args: {
   };
 }): Promise<string> => invoke("submit_tts_voice_clone", args);
 
+/** Chatterbox Turbo zero-shot clone from a character's reference clip. */
+export const submitChatterboxClone = (args: {
+  projectId: string;
+  sceneSlug: string;
+  rowIndex: number;
+  params: {
+    text: string;
+    ref_audio_path: string;
+    ref_transcript?: string;
+    exaggeration: number;
+    cfg_weight: number;
+    seed: number;
+    output_path: string;
+  };
+}): Promise<string> => invoke("submit_chatterbox_clone", args);
+
 export const submitTtsVoiceDesign = (args: {
   projectId: string;
   sceneSlug: string;

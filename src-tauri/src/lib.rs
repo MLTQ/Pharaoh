@@ -71,6 +71,7 @@ pub fn run() {
             commands::inference::submit_tts_custom_voice,
             commands::inference::submit_tts_voice_design,
             commands::inference::submit_tts_voice_clone,
+            commands::inference::submit_chatterbox_clone,
             commands::inference::submit_sfx_t2a,
             commands::inference::submit_music_text2music,
             // Settings / config

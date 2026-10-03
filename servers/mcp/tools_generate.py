@@ -286,7 +286,8 @@ def generate_chatterbox(
     honoured (e.g. '[sigh] I knew it.' or 'That's funny. [chuckle]').
 
     ref_audio_path: if empty, auto-resolves from the character's emotional palette
-                    using the row's 'emotion' field (falls back to first palette entry).
+                    using the row's 'emotion' field (falls back to first palette entry,
+                    then to the character's gold reference clip).
     emotion:        override the emotion key (ignores row's 'emotion' field).
     exaggeration:   0–1, how strongly to colour the vocal performance.
     cfg_weight:     classifier-free guidance strength.
@@ -326,6 +327,12 @@ def generate_chatterbox(
                     resolved_ref = _resolve_voice_path(
                         project_id, character["id"], entry["ref_audio_path"]
                     )
+                elif character.get("voice_assignment", {}).get("ref_audio_path"):
+                    # No palette (e.g. a voice lifted by Dissect): clone the
+                    # character's gold reference clip.
+                    resolved_ref = _resolve_voice_path(
+                        project_id, character["id"], character["voice_assignment"]["ref_audio_path"]
+                    )
         except Exception as exc:
             return json.dumps({"error": (
                 f"palette resolution failed for character '{char_id}' "
@@ -334,8 +341,8 @@ def generate_chatterbox(
 
     if not resolved_ref:
         return json.dumps({"error": (
-            "ref_audio_path not supplied and no approved palette entry found. "
-            "Generate and approve a palette take first."
+            "ref_audio_path not supplied, and the character has no approved palette entry "
+            "or gold reference clip. Pick a gold reference or approve a palette take first."
         )})
 
     result = _post("chatterbox", "/generate/clone", {

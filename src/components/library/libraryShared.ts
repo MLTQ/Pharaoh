@@ -17,10 +17,17 @@ import { reportError } from "../../lib/errors";
 export const LIBRARY_PROJECT_ID = "_library";
 export const LIBRARY_PALETTE_ROW = 0;
 export const LIBRARY_DESIGN_ROW = 0;
+/** Clone test takes share the design slug on their own row, so they list apart. */
+export const LIBRARY_CLONE_ROW = 1;
 export const DEFAULT_TEST_LINE = "And then she said — nothing at all.";
 
 export function libraryPaletteSlug(libraryId: string, emotion: string): string {
   return `__library_palette__${libraryId}__${emotion}`;
+}
+
+/** Absolute path of a bundle file; library voice paths are stored relative. */
+export function libraryBundlePath(projectsDir: string, libraryId: string, path: string): string {
+  return path.startsWith("/") ? path : `${projectsDir}/_library/characters/${libraryId}/${path}`;
 }
 
 export function libraryDesignSlug(libraryId: string): string {

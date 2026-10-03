@@ -17,6 +17,7 @@ import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList"
 import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
+  submitChatterboxClone,
   importAudioIntoLibraryBundle,
   concatAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
@@ -26,8 +27,10 @@ import type { Character } from "../../lib/types";
 import {
   LIBRARY_PROJECT_ID,
   LIBRARY_DESIGN_ROW,
+  LIBRARY_CLONE_ROW,
   DEFAULT_TEST_LINE,
   libraryDesignSlug,
+  libraryBundlePath,
   labelStyle,
   pickAudioFiles,
 } from "./libraryShared";
@@ -59,6 +62,48 @@ export const LibraryVoiceTab: React.FC<{
   const { projectsDir } = useProjectStore();
 
   // ── Voice Design generation (moved from CharacterDesignerView, library-scoped) ──
+
+  // ── Clone test: speak a line in the gold reference's voice (Chatterbox) ──
+  const [cloneLine, setCloneLine] = React.useState("");
+  const [exaggeration, setExaggeration] = React.useState(0.5);
+  const [cloning, setCloning] = React.useState(false);
+  const [cloneError, setCloneError] = React.useState<string | null>(null);
+
+  const handleClone = async () => {
+    const gold = character.voice_assignment.ref_audio_path;
+    if (!character.library_id || !projectsDir) return;
+    if (!gold) { setCloneError("Pick a gold reference clip first (the dot)."); return; }
+    const text = (cloneLine || voiceDesignTestLine || DEFAULT_TEST_LINE).trim();
+    setCloning(true);
+    setCloneError(null);
+    const slug = libraryDesignSlug(character.library_id);
+    const outputPath = `${projectsDir}/_library/characters/${character.library_id}/design/clone_${Date.now()}.wav`;
+    try {
+      const jobId = await submitChatterboxClone({
+        projectId: LIBRARY_PROJECT_ID,
+        sceneSlug: slug,
+        rowIndex: LIBRARY_CLONE_ROW,
+        params: {
+          text,
+          ref_audio_path: libraryBundlePath(projectsDir, character.library_id, gold),
+          ref_transcript: character.voice_assignment.ref_transcript ?? "",
+          exaggeration,
+          cfg_weight: 0.5,
+          seed: Math.floor(Math.random() * 9999),
+          output_path: outputPath,
+        },
+      });
+      addJob({
+        id: jobId, model: "tts", description: `Clone · ${character.name}`, status: "pending", progress: 0, eta: "…",
+        started_at: new Date().toISOString(), scene_id: null, scene_slug: slug, row_index: LIBRARY_CLONE_ROW,
+        output_path: null, peaks: null, qa_status: "unreviewed", error: null,
+      });
+    } catch (e) {
+      setCloneError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCloning(false);
+    }
+  };
 
   const handleGenerateDesign = async () => {
     if (!character.library_id || !projectsDir) return;
@@ -348,7 +393,7 @@ export const LibraryVoiceTab: React.FC<{
       const designJobs = [...jobs]
         .filter((j) => j.scene_slug === slug && j.row_index === LIBRARY_DESIGN_ROW && j.status === "complete" && j.output_path)
         .reverse();
-      const runningDesign = jobs.some((j) => j.scene_slug === slug && (j.status === "running" || j.status === "pending"));
+      const runningDesign = jobs.some((j) => j.scene_slug === slug && j.row_index === LIBRARY_DESIGN_ROW && (j.status === "running" || j.status === "pending"));
       return (
         <>
           {runningDesign && <RunningBadge label="Synthesising voice…" />}
@@ -460,6 +505,64 @@ export const LibraryVoiceTab: React.FC<{
         style={{ width: "100%", fontSize: 12, marginBottom: 12 }}
         placeholder="What is spoken in the reference audio…"
       />
+
+      {/* Speak with this voice — Chatterbox clones the gold clip */}
+      <div style={{
+        margin: "4px 0 16px", padding: "12px 12px 10px",
+        border: "1px solid var(--line-2)", borderRadius: "var(--r)", background: "var(--bg-1)",
+      }}>
+        <label style={{ ...labelStyle, marginBottom: 4 }}>Speak with this voice</label>
+        <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 8, lineHeight: 1.6 }}>
+          Chatterbox clones the gold clip above — no description needed. Scene dialogue for this
+          character uses the same clone. Tags like [laugh] or [sigh] in the line are performed.
+        </p>
+        <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+          <input
+            className="input"
+            value={cloneLine}
+            onChange={(e) => setCloneLine(e.target.value)}
+            onKeyDown={(e) => { if (e.key === "Enter") void handleClone(); }}
+            style={{ flex: 1, fontSize: 12 }}
+            placeholder={voiceDesignTestLine || DEFAULT_TEST_LINE}
+          />
+          <button
+            className="btn btn-primary"
+            onClick={handleClone}
+            disabled={cloning || !character.voice_assignment.ref_audio_path}
+            title={character.voice_assignment.ref_audio_path ? "Generate this line in the gold reference's voice" : "Pick a gold reference first"}
+            style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
+          >{cloning ? "Sending…" : "Speak"}</button>
+        </div>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}>
+          Expressiveness
+          <input type="range" min={0} max={1} step={0.05} value={exaggeration}
+                 onChange={(e) => setExaggeration(Number(e.target.value))} style={{ flex: 1, maxWidth: 220 }} />
+          <span style={{ fontFamily: "var(--font-mono)", width: 32 }}>{exaggeration.toFixed(2)}</span>
+          <span style={{ color: "var(--fg-4)" }}>0.5 = like the reference</span>
+        </label>
+        {cloneError && <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{cloneError}</div>}
+        {(() => {
+          if (!character.library_id) return null;
+          const slug = libraryDesignSlug(character.library_id);
+          const mine = jobs.filter((j) => j.scene_slug === slug && j.row_index === LIBRARY_CLONE_ROW);
+          const done = mine.filter((j) => j.status === "complete" && j.output_path).reverse();
+          const running = mine.some((j) => j.status === "running" || j.status === "pending");
+          const failed = mine.filter((j) => j.status === "failed").slice(-1)[0];
+          return (
+            <div style={{ marginTop: 8 }}>
+              {running && <RunningBadge label="Cloning…" />}
+              {failed && !running && <div style={{ fontSize: 11, color: "var(--sfx)" }}>Last clone failed: {failed.error ?? "unknown error"}</div>}
+              {done.length > 0 && (
+                <TakeList label={`Clone takes · ${done.length}`}>
+                  {done.map((job, i) => (
+                    <TakeRow key={job.id} job={job} index={i} onQa={(st) => setQaStatus(job.id, st)} />
+                  ))}
+                </TakeList>
+              )}
+            </div>
+          );
+        })()}
+      </div>
 
       <label style={labelStyle}>Voice instructions</label>
       <textarea

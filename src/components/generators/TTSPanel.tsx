@@ -3,7 +3,7 @@ import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
 import { PlayButton } from "../shared/PlayButton";
 import { SceneRouter } from "./RichDirector";
-import { useGenerateJob } from "../../hooks/useGenerateJob";
+import { useGenerateJob, clonesVoice } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
@@ -227,12 +227,17 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
         <div className="panel-header">
           <div className="panel-header-left">
             <span className="eyebrow tts">
-              qwen3-tts · customvoice · {customSpeaker}
+              {clonesVoice(selectedChar)
+                ? <>chatterbox · cloned from {selectedChar!.voice_assignment.ref_audio_path!.split("/").pop()}</>
+                : <>qwen3-tts · customvoice · {customSpeaker}</>}
             </span>
             <span className="ttl">Voice / Dialogue</span>
             <span className="desc">
-              Write the spoken line separately from the performance direction. Direction is sent as
-              Qwen CustomVoice instruction text, not spoken dialogue.
+              {clonesVoice(selectedChar)
+                ? <>{selectedChar!.name} speaks in the voice of their gold reference clip. Inline tags
+                  like [laugh] or [sigh] are performed; Chatterbox takes no written direction.</>
+                : <>Write the spoken line separately from the performance direction. Direction is sent as
+                  Qwen CustomVoice instruction text, not spoken dialogue.</>}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -317,7 +322,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
           <div className="field">
             <div className="field-label">
               <span>Direction</span>
-              <span className="hint">CustomVoice instruct</span>
+              <span className="hint">{clonesVoice(selectedChar) ? "not used by Chatterbox" : "CustomVoice instruct"}</span>
             </div>
             <textarea
               className="textarea"

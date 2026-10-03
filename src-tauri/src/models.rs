@@ -571,6 +571,22 @@ pub struct TtsVoiceCloneRequest {
     pub output_path: String,
 }
 
+/// Chatterbox Turbo zero-shot clone: the voice comes from `ref_audio_path`
+/// (a character's gold reference), the words from `text`.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChatterboxCloneRequest {
+    pub text: String,
+    pub ref_audio_path: String,
+    #[serde(default)]
+    pub ref_transcript: String,
+    /// 0–1: how strongly to colour the performance (0.5 = neutral).
+    pub exaggeration: f32,
+    /// Classifier-free guidance; lower = slower, more deliberate pacing.
+    pub cfg_weight: f32,
+    pub seed: i64,
+    pub output_path: String,
+}
+
 // ── SFX request models ───────────────────────────────────────────────────
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

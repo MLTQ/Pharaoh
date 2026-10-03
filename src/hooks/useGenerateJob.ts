@@ -3,6 +3,7 @@ import { useJobStore } from "../store/jobStore";
 import { useUiStore } from "../store/uiStore";
 import {
   submitTtsCustomVoice,
+  submitChatterboxClone,
   submitSfxT2a,
   submitMusicText2Music,
 } from "../lib/tauriCommands";
@@ -14,6 +15,13 @@ function now() {
 
 function makeOutputPath(projectsDir: string, projectId: string, sceneSlug: string, filename: string) {
   return `${projectsDir}/${projectId}/scenes/${sceneSlug}/assets/${filename}`;
+}
+
+/** A character speaks in its cloned voice when it has a gold reference clip
+ *  and a Chatterbox pipeline; otherwise Qwen CustomVoice's preset speaker. */
+export function clonesVoice(char: Character | undefined): boolean {
+  const va = char?.voice_assignment;
+  return !!va?.ref_audio_path && (va.production_pipeline ?? "chatterbox").startsWith("chatterbox");
 }
 
 interface SubmitResult {
@@ -43,6 +51,8 @@ export function useGenerateJob() {
     topP?: number;
     maxNewTokens?: number;
     rowIndex?: number;
+    /** Chatterbox only: 0–1 expressiveness (0.5 = like the reference). */
+    exaggeration?: number;
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
     const ts = Date.now();
@@ -51,7 +61,23 @@ export function useGenerateJob() {
     const speaker = params.speaker || char?.voice_assignment.speaker || "Vivian";
     const instruct = params.instruct ?? char?.voice_assignment.instruct_default ?? "";
 
-    const jobId = await submitTtsCustomVoice({
+    const jobId = char && clonesVoice(char)
+      ? await submitChatterboxClone({
+          projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
+          params: {
+            text: params.text,
+            // Relative bundle paths live under the project's copy of the character.
+            ref_audio_path: char.voice_assignment.ref_audio_path!.startsWith("/")
+              ? char.voice_assignment.ref_audio_path!
+              : `${pDir}/${projectId}/characters/${char.id}/${char.voice_assignment.ref_audio_path}`,
+            ref_transcript: char.voice_assignment.ref_transcript ?? "",
+            exaggeration: params.exaggeration ?? 0.5,
+            cfg_weight: 0.5,
+            seed: params.seed ?? Math.floor(Math.random() * 99999),
+            output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
+          },
+        })
+      : await submitTtsCustomVoice({
       projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
       params: {
         text: params.text,

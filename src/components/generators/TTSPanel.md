@@ -42,5 +42,6 @@ Dialogue-generation panel for scene-level spoken lines. It collects a character,
 | Users | Completed current-session and persisted takes can be selected and routed to a scene | Making the take list review-only |
 
 ## Notes
+- A character with a gold reference clip and a Chatterbox pipeline (`clonesVoice` in `useGenerateJob.ts`) speaks through Chatterbox clone instead of CustomVoice — here and in the script editor's per-row generate. Direction is not used in that mode; inline tags like [laugh] are.
 - Character Designer still owns voice clone and voice design probes. This panel is for production dialogue takes that need direction control.
 - “Send to scene” targets dialogue rows in the selected scene; scenes with no assignable dialogue rows report an error instead of silently dropping the assignment.

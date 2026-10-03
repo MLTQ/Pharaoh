@@ -359,7 +359,7 @@ export const LibraryView: React.FC = () => {
             {(() => {
               const approvedPalette = (character.voice_assignment.emotional_palette ?? [])
                 .filter((e) => e.qa_status === "approved");
-              const stage1Done = (character.voice_assignment.base_voice_description ?? "").trim().length > 0;
+              const stage1Done = (character.voice_assignment.base_voice_description ?? "").trim().length > 0 || !!character.voice_assignment.ref_audio_path;
               const stage2Done = approvedPalette.length >= 2;
               const corpusCount = character.voice_assignment.rvc?.corpus_count ?? 0;
               const corpusDurationMs = character.voice_assignment.rvc?.corpus_duration_ms ?? 0;
