@@ -128,6 +128,7 @@ pub fn run() {
             commands::audiobook::get_episode_chapters,
             commands::audiobook::get_project_cover,
             commands::audiobook::export_episode_m4b,
+            commands::layout::layout_scene_rows,
             commands::emotions::dissect_tag_emotions,
             commands::emotions::dissect_emotion_status,
             commands::emotions::dissect_emotion_clips,

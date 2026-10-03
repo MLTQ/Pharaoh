@@ -58,6 +58,7 @@ log = logging.getLogger(__name__)
 
 PORT          = int(os.environ.get("PHARAOH_SFX_PORT",    18002))
 MODEL_VARIANT = os.environ.get("PHARAOH_SFX_VARIANT",  "Woosh-DFlow")
+WOOSH_MAX_S = 10.0
 WOOSH_DIR   = Path(os.environ.get("PHARAOH_WOOSH_DIR",  "")).expanduser()
 AUDIO_LDM_MODEL_ID = "cvssp/audioldm-s-full-v2"
 AUDIO_LDM_LOCAL_DIR = Path(
@@ -516,7 +517,10 @@ async def _run_woosh_sfx(job_id: str, params: dict) -> None:
         steps    = int(params.get("steps", 4))
         seed     = int(params.get("seed", 0))
         cfg_scale = float(params.get("cfg_scale", 4.5))
-        duration = float(params.get("duration_seconds", 3.0))
+        # Woosh-DFlow generates at most ~10 s; longer requests died with a
+        # tensor shape error ("shape '[1, 1103, 1, 56]' is invalid…"). Beds
+        # longer than this are looped by the renderer.
+        duration = min(float(params.get("duration_seconds", 3.0)), WOOSH_MAX_S)
         out_path = remap_path(params.get("output_path")) or server_output_path(job_id)
 
         torch.manual_seed(seed)

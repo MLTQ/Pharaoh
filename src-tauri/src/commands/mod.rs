@@ -8,6 +8,7 @@ pub mod character;
 pub mod corpus;
 pub mod dissect;
 pub mod emotions;
+pub mod layout;
 pub mod inference;
 pub mod llm;
 pub mod setup_check;

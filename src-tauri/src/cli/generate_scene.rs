@@ -421,6 +421,8 @@ async fn generate_sfx(
         eprintln!("note: AudioLDM isn't usable on {} (see `pharaoh server health sfx`); using Woosh for row {}", config.sfx_url, row_index);
     }
 
+    // Woosh tops out at 10 s; a longer bed is looped by the renderer.
+    let duration_seconds = if use_audioldm { duration_seconds } else { duration_seconds.min(10.0) };
     let params = SfxT2ARequest {
         prompt: row.prompt.clone(),
         duration_seconds,

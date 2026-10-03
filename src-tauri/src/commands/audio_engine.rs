@@ -551,7 +551,12 @@ pub async fn render_scene_with_projects_dir(
     let mut cmd = tokio::process::Command::new("ffmpeg");
     cmd.arg("-y");
 
-    for file in &effective_files {
+    for (i, file) in effective_files.iter().enumerate() {
+        // A looped row (an ambience bed shorter than its scene) repeats its
+        // input; the per-clip atrim below cuts it to the row's duration.
+        if placed[i].r#loop.trim().eq_ignore_ascii_case("true") {
+            cmd.args(["-stream_loop", "-1"]);
+        }
         cmd.args(["-i", file]);
     }
 

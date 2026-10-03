@@ -274,3 +274,17 @@ pub(super) fn library_add(config: &AppConfig, project_id: &str, library_id: &str
     let flags = parse_flags(rest)?;
     print_json(&crate::commands::character::import_into_project(&projects_dir(config), project_id, library_id, flag_opt(&flags, "name"))?)
 }
+
+/// `script layout <project_id> <scene_slug>` — place generated rows on the timeline.
+pub(super) fn layout(config: &AppConfig, project_id: &str, scene_slug: &str, rest: &[String]) -> Result<()> {
+    use crate::commands::layout::{layout_scene, LayoutOptions};
+    let flags = parse_flags(rest)?;
+    let d = LayoutOptions::default();
+    let opts = LayoutOptions {
+        replace: matches!(flag_opt(&flags, "replace").as_deref(), Some("true" | "yes" | "1")),
+        gap_ms: flag_parse(&flags, "gap_ms", d.gap_ms)?,
+        lead_in_ms: flag_parse(&flags, "lead_in_ms", d.lead_in_ms)?,
+        ..d
+    };
+    print_json(&layout_scene(&projects_dir(config), project_id, scene_slug, &opts)?)
+}

@@ -109,6 +109,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speakers, emotion, rest @ ..] if group == "dissect" && action == "clips" => {
             dissect::clips(&config, import_id, speakers, emotion, rest)
         }
+        [group, action, project_id, scene_slug, rest @ ..] if group == "script" && action == "layout" => {
+            dissect::layout(&config, project_id, scene_slug, rest)
+        }
         [group, action] if group == "library" && action == "list" => dissect::library_list(&config),
         [group, action, library_id, rest @ ..] if group == "library" && action == "export" => {
             dissect::library_export(&config, library_id, rest)
@@ -314,6 +317,7 @@ fn usage() -> &'static str {
   pharaoh script fountain-write <project_id> <scene_slug> <script.fountain|-> [--compile true|false]
   pharaoh script update-row <project_id> <scene_slug> <row_index> [--prompt <text>] [--instruct <text>] [--file <path>]
   pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--space <slug>] [--wet <0-1>] [--clear]
+  pharaoh script layout <project_id> <scene_slug> [--replace true] [--gap-ms 350] [--lead-in-ms 1500]
   pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
   pharaoh character list <project_id>
   pharaoh character create <project_id> --name <name> [--description <text>]
