@@ -112,7 +112,7 @@ export const RecordingClips: React.FC<{
     const id = `${s.importId}:${c.start}`;
     return (
       <div key={id} style={{
-        display: "grid", gridTemplateColumns: "auto 1fr auto auto auto", gap: 6, alignItems: "center",
+        display: "grid", gridTemplateColumns: "auto minmax(0, 1fr) auto auto auto", gap: 6, alignItems: "center",
         padding: "4px 6px", borderBottom: "1px solid var(--line-1)", fontSize: 11,
       }}>
         <button className="btn btn-sm" onClick={() => void audition(s.importId, c)} disabled={busy === id}
