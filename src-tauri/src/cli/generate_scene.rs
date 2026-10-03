@@ -379,6 +379,19 @@ async fn generate_cloned(
     })
 }
 
+/// Whether the SFX server reports AudioLDM usable (checked once per run).
+async fn audioldm_ready(http: &reqwest::Client, sfx_url: &str) -> bool {
+    static READY: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
+    *READY
+        .get_or_init(|| async {
+            match http.get(format!("{}/health", sfx_url)).timeout(std::time::Duration::from_secs(10)).send().await {
+                Ok(r) => r.json::<serde_json::Value>().await.ok().and_then(|h| h["audioldm_ready"].as_bool()).unwrap_or(false),
+                Err(_) => false,
+            }
+        })
+        .await
+}
+
 async fn generate_sfx(
     config: &crate::models::AppConfig,
     projects_dir: &Path,
@@ -401,7 +414,12 @@ async fn generate_sfx(
         .ok()
         .map(|ms| (ms / 1000.0).max(0.5))
         .unwrap_or(3.0);
-    let use_audioldm = row.track_type == "BED" || duration_seconds > 5.0;
+    // Beds and long effects prefer AudioLDM — when the server says it's usable.
+    let wants_audioldm = row.track_type == "BED" || duration_seconds > 5.0;
+    let use_audioldm = wants_audioldm && audioldm_ready(&http, &config.sfx_url).await;
+    if wants_audioldm && !use_audioldm {
+        eprintln!("note: AudioLDM isn't usable on {} (see `pharaoh server health sfx`); using Woosh for row {}", config.sfx_url, row_index);
+    }
 
     let params = SfxT2ARequest {
         prompt: row.prompt.clone(),

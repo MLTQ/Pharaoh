@@ -249,6 +249,18 @@ def _audioldm_status() -> dict:
                     "Run: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
                 ),
             }
+        # A failed download can leave an HTML error page where the checkpoint
+        # should be (seen: a 92-byte "504 Gateway Time-out"), and every job
+        # then dies in torch.load. The real checkpoints are hundreds of MB.
+        ckpt = AUDIOLDM_CACHE_DIR / f"{_native_audioldm_model_name()}.ckpt"
+        if ckpt.exists() and ckpt.stat().st_size < 50_000_000:
+            return {
+                "ok": False,
+                "reason": (
+                    f"AudioLDM checkpoint {ckpt} is only {ckpt.stat().st_size} bytes — a failed "
+                    "download. Delete it and re-run: PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh"
+                ),
+            }
         return {"ok": True, "reason": ""}
 
     try:
