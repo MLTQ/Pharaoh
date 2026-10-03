@@ -159,15 +159,56 @@ pub(super) fn scene_not_found(scene_ref: &str, project_id: &str) -> Error {
 }
 
 /// POST a generation request to an inference server and return the job id.
+/// Local output path per remote job id: a remote server can't write into
+/// this Mac's projects folder, so `submit_job` blanks `output_path` and
+/// `poll_job` downloads the result here when the job completes.
+fn pending_downloads() -> &'static std::sync::Mutex<HashMap<String, String>> {
+    static P: std::sync::OnceLock<std::sync::Mutex<HashMap<String, String>>> = std::sync::OnceLock::new();
+    P.get_or_init(Default::default)
+}
+
+/// `http://host:port` of a job URL.
+fn base_of(url: &str) -> String {
+    let after = url.find("://").map(|i| i + 3).unwrap_or(0);
+    match url[after..].find('/') {
+        Some(j) => url[..after + j].to_string(),
+        None => url.to_string(),
+    }
+}
+
+/// Input-file fields a remote server needs uploaded first.
+const UPLOAD_FIELDS: [&str; 5] = ["ref_audio_path", "reference_audio_path", "input_path", "audio_path", "source_path"];
+
 pub(super) async fn submit_job<T: Serialize>(
     http: &reqwest::Client,
     url: String,
     params: &T,
     label: &str,
 ) -> Result<String> {
+    let mut body = serde_json::to_value(params)?;
+    let base = base_of(&url);
+    let mut local_out: Option<String> = None;
+    if crate::commands::inference::is_remote_url(&base) {
+        if let Some(obj) = body.as_object_mut() {
+            for f in UPLOAD_FIELDS {
+                if let Some(serde_json::Value::String(p)) = obj.get(f).cloned() {
+                    if !p.is_empty() && std::path::Path::new(&p).is_file() {
+                        let server = crate::commands::inference::upload_input_file(http, &base, &p).await?;
+                        obj.insert(f.to_string(), serde_json::Value::String(server));
+                    }
+                }
+            }
+            if let Some(serde_json::Value::String(o)) = obj.get("output_path").cloned() {
+                if !o.is_empty() {
+                    local_out = Some(o);
+                    obj.insert("output_path".into(), serde_json::Value::String(String::new()));
+                }
+            }
+        }
+    }
     let resp: serde_json::Value = http
         .post(&url)
-        .json(params)
+        .json(&body)
         .send()
         .await
         .map_err(|e| {
@@ -179,10 +220,16 @@ pub(super) async fn submit_job<T: Serialize>(
         .await
         .map_err(|e| Error::Other(format!("{label} response from {url} was not valid JSON: {e}")))?;
 
-    resp["job_id"]
+    let job_id = resp["job_id"]
         .as_str()
         .map(str::to_owned)
-        .ok_or_else(|| Error::Other(format!("{label} response from {url} missing job_id")))
+        .ok_or_else(|| Error::Other(format!("{label} response from {url} missing job_id: {resp}")))?;
+    if let Some(o) = local_out {
+        if let Ok(mut m) = pending_downloads().lock() {
+            m.insert(job_id.clone(), o);
+        }
+    }
+    Ok(job_id)
 }
 
 /// Poll a submitted job until it completes or fails.
@@ -212,7 +259,17 @@ pub(super) async fn poll_job(
             })?;
 
         match status.status.as_str() {
-            "complete" => return Ok(status),
+            "complete" => {
+                let local = pending_downloads().lock().ok().and_then(|mut m| m.remove(job_id));
+                let mut status = status;
+                if let Some(local) = local {
+                    let path = crate::commands::inference::download_remote_file_to(http, &base_of(&jobs_url), job_id, &local)
+                        .await
+                        .map_err(|e| Error::Other(format!("{label} job {job_id} finished but its output couldn't be downloaded: {e}")))?;
+                    status.output_path = Some(path);
+                }
+                return Ok(status);
+            }
             "failed" => {
                 return Err(Error::Other(
                     status

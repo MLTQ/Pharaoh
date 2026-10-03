@@ -252,3 +252,25 @@ pub(super) fn corpus(config: &AppConfig, library_id: &str, rest: &[String]) -> R
     let minutes: f64 = flag_parse(&flags, "minutes", 15.0)?;
     print_json(&crate::commands::emotions::corpus_for(&projects_dir(config), crate::app_support::LIBRARY_DIR_NAME, library_id, minutes)?)
 }
+
+// ── pharaoh library … ─────────────────────────────────────────────────────
+
+pub(super) fn library_list(config: &AppConfig) -> Result<()> {
+    print_json(&crate::commands::character::list_library(&projects_dir(config))?)
+}
+
+pub(super) fn library_export(config: &AppConfig, library_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let out = flag_opt(&flags, "output").ok_or_else(|| Error::Other("--output <file.zip> is required".into()))?;
+    let corpus = matches!(flag_opt(&flags, "include_corpus").as_deref(), Some("true" | "yes" | "1"));
+    print_json(&crate::commands::character::export_library_character_to(&projects_dir(config), library_id.to_string(), out, corpus)?)
+}
+
+pub(super) fn library_import(config: &AppConfig, file: &str) -> Result<()> {
+    print_json(&crate::commands::character::import_library_file(&projects_dir(config), file.to_string())?)
+}
+
+pub(super) fn library_add(config: &AppConfig, project_id: &str, library_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    print_json(&crate::commands::character::import_into_project(&projects_dir(config), project_id, library_id, flag_opt(&flags, "name"))?)
+}

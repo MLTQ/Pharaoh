@@ -133,17 +133,26 @@ fn is_parenthetical(line: &str) -> bool {
 // lines. We harvest title/author and skip the rest. Title page ends at the
 // first blank line followed by content.
 
+/// Fountain's title-page keys. Only these open a title page — a scene that
+/// starts with a cue ("BED: wind…", "SFX: a bell") is not one.
+fn is_title_key(line: &str) -> bool {
+    const KEYS: [&str; 12] = [
+        "title", "credit", "author", "authors", "source", "draft date", "date", "contact", "copyright",
+        "notes", "revision", "episode",
+    ];
+    line.split_once(':')
+        .map(|(k, _)| KEYS.contains(&k.trim().to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
 fn parse_title_page<'a>(lines: &'a [&str]) -> (Option<String>, Option<String>, usize) {
     let mut title: Option<String> = None;
     let mut author: Option<String> = None;
     let mut i = 0;
-    let has_title_page = lines.iter().take_while(|l| !l.trim().is_empty()).any(|l| {
-        let t = l.trim();
-        t.contains(':')
-            && t.split(':')
-                .next()
-                .map_or(false, |k| !k.is_empty() && !k.contains(' '))
-    });
+    let has_title_page = lines
+        .iter()
+        .find(|l| !l.trim().is_empty())
+        .is_some_and(|l| is_title_key(l.trim()));
     if !has_title_page {
         return (None, None, 0);
     }
@@ -159,9 +168,7 @@ fn parse_title_page<'a>(lines: &'a [&str]) -> (Option<String>, Option<String>, u
                 .skip(i)
                 .find(|l| !l.trim().is_empty())
                 .map(|s| s.trim());
-            let still_title_page = next_nonempty
-                .map(|s| s.contains(':') && s.split(':').next().map_or(false, |k| !k.contains(' ')))
-                .unwrap_or(false);
+            let still_title_page = next_nonempty.map(is_title_key).unwrap_or(false);
             if !still_title_page {
                 break;
             }
@@ -412,4 +419,24 @@ pub fn blocks_to_rows(
             }
         })
         .collect()
+}
+
+#[cfg(test)]
+mod title_page_tests {
+    use super::*;
+
+    #[test]
+    fn a_scene_opening_with_cues_is_not_a_title_page() {
+        let doc = parse_document("BED: Wind against high windows\n\nMUSIC: Low piano\n\nNARRATOR\nOn the cliffs.\n");
+        assert!(doc.title.is_none());
+        let kinds: Vec<&str> = doc.scenes.iter().flat_map(|s| s.blocks.iter().map(|b| b.block_type.as_str())).collect();
+        assert_eq!(kinds, vec!["BED", "MUSIC", "DIALOGUE"]);
+    }
+
+    #[test]
+    fn a_real_title_page_is_still_read() {
+        let doc = parse_document("Title: The Lantern Archive\nAuthor: Someone\nDraft date: today\n\nSFX: A bell\n");
+        assert_eq!(doc.title.as_deref(), Some("The Lantern Archive"));
+        assert_eq!(doc.scenes.iter().map(|s| s.blocks.len()).sum::<usize>(), 1);
+    }
 }

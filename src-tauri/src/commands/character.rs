@@ -37,8 +37,12 @@ const EXPORT_FORMAT_VERSION: u32 = 1;
 /// and stats the rvc/ directory, never scans the corpus.
 #[tauri::command]
 pub fn list_library_characters(app: AppHandle) -> Result<Vec<LibraryCharacterSummary>> {
-    let projects_dir = app_projects_dir(&app)?;
-    let root = library_root_dir(&projects_dir);
+    list_library(&app_projects_dir(&app)?)
+}
+
+/// Core of `list_library_characters` (also `pharaoh library list`).
+pub fn list_library(projects_dir: &Path) -> Result<Vec<LibraryCharacterSummary>> {
+    let root = library_root_dir(projects_dir);
     if !root.exists() {
         return Ok(vec![]);
     }
@@ -797,7 +801,17 @@ pub fn export_library_character(
     output_path: String,
     include_corpus: bool,
 ) -> Result<ExportResult> {
-    let projects_dir = app_projects_dir(&app)?;
+    export_library_character_to(&app_projects_dir(&app)?, library_id, output_path, include_corpus)
+}
+
+/// Core of `export_library_character` (also `pharaoh library export`).
+pub fn export_library_character_to(
+    projects_dir: &Path,
+    library_id: String,
+    output_path: String,
+    include_corpus: bool,
+) -> Result<ExportResult> {
+    let projects_dir = projects_dir.to_path_buf();
     let bundle_dir = library_character_dir(&projects_dir, &library_id);
     let bundle_file = bundle_dir.join(LIBRARY_BUNDLE_FILE);
     if !bundle_file.exists() {
@@ -907,7 +921,12 @@ pub fn import_library_character_from_file(
     app: AppHandle,
     file_path: String,
 ) -> Result<LibraryCharacterSummary> {
-    let projects_dir = app_projects_dir(&app)?;
+    import_library_file(&app_projects_dir(&app)?, file_path)
+}
+
+/// Core of `import_library_character_from_file` (also `pharaoh library import`).
+pub fn import_library_file(projects_dir: &Path, file_path: String) -> Result<LibraryCharacterSummary> {
+    let projects_dir = projects_dir.to_path_buf();
     let archive_file = std::fs::File::open(&file_path)?;
     let mut zip = zip::ZipArchive::new(archive_file)
         .map_err(|e| Error::Other(format!("zip open: {}", e)))?;

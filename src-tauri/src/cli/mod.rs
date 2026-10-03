@@ -109,6 +109,14 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speakers, emotion, rest @ ..] if group == "dissect" && action == "clips" => {
             dissect::clips(&config, import_id, speakers, emotion, rest)
         }
+        [group, action] if group == "library" && action == "list" => dissect::library_list(&config),
+        [group, action, library_id, rest @ ..] if group == "library" && action == "export" => {
+            dissect::library_export(&config, library_id, rest)
+        }
+        [group, action, file] if group == "library" && action == "import" => dissect::library_import(&config, file),
+        [group, action, project_id, library_id, rest @ ..] if group == "library" && action == "add-to-project" => {
+            dissect::library_add(&config, project_id, library_id, rest)
+        }
         [group, action, library_id, rest @ ..] if group == "dissect" && action == "corpus" => {
             dissect::corpus(&config, library_id, rest)
         }
@@ -314,6 +322,10 @@ fn usage() -> &'static str {
   pharaoh character voice-set <project_id> <character_id> [--model CustomVoice|VoiceDesign|VoiceClone] [--instruct <text>]
   pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
   pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
+  pharaoh library list
+  pharaoh library export <library_id> --output <file.zip> [--include-corpus true]
+  pharaoh library import <file.zip>
+  pharaoh library add-to-project <project_id> <library_id> [--name <character name>]
   pharaoh dissect run <audio> [--separate true|false] [--max-candidates <n>] [--chunk-minutes <n>] [--wait true|false]
   pharaoh dissect status <import_id>
   pharaoh dissect list

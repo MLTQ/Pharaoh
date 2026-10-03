@@ -160,7 +160,8 @@ async fn generate_dialogue(
     let character = project
         .characters
         .iter()
-        .find(|character| character.name.eq_ignore_ascii_case(&row.character));
+        // Compiled scripts carry the character id; hand-written CSVs often the name.
+        .find(|character| character.id == row.character || character.name.eq_ignore_ascii_case(&row.character));
 
     let stem = sanitized_stem(
         character
@@ -174,6 +175,16 @@ async fn generate_dialogue(
         scene_slug,
         &format!("{stem}_{}", Utc::now().timestamp_millis()),
     );
+
+    // A cloned voice (gold reference + Chatterbox pipeline) speaks through
+    // Chatterbox — the gold clip, or the palette reference the row's emotion /
+    // parenthetical names. Everyone else uses CustomVoice's preset speakers.
+    if let Some(ch) = character.filter(|c| {
+        c.voice_assignment.ref_audio_path.as_deref().is_some_and(|p| !p.trim().is_empty())
+            && c.voice_assignment.production_pipeline.starts_with("chatterbox")
+    }) {
+        return generate_cloned(config, projects_dir, project_id, scene_slug, row_index, &row, ch, &output_path, http).await;
+    }
 
     let speaker = character
         .and_then(|character| character.voice_assignment.speaker.clone())
@@ -248,6 +259,120 @@ async fn generate_dialogue(
         scene_slug: scene_slug.into(),
         row_index,
         model: "tts".into(),
+        output_path: finalized.output_path,
+        duration_ms: finalized.duration_ms,
+        bound_to_script: finalized.bound_to_script,
+    })
+}
+
+/// The palette entry a row asks for: its `emotion` column, or a word in its
+/// direction ("angrily", "furious") naming an approved emotion. Mirrors
+/// `paletteEntryFor` in useGenerateJob.ts.
+fn palette_for<'a>(c: &'a crate::models::Character, row: &ScriptRow) -> Option<&'a crate::models::PaletteEntry> {
+    let entries: Vec<&crate::models::PaletteEntry> = c
+        .voice_assignment
+        .emotional_palette
+        .iter()
+        .filter(|e| e.ref_audio_path.is_some() && e.qa_status == "approved")
+        .collect();
+    let exact = |n: &str| entries.iter().copied().find(|e| e.emotion.eq_ignore_ascii_case(n) || e.label.eq_ignore_ascii_case(n));
+    if let Some(e) = exact(row.emotion.trim()) {
+        return Some(e);
+    }
+    const SYN: &[(&str, &str)] = &[
+        ("furious", "angry"), ("irate", "angry"), ("annoyed", "angry"), ("terrified", "afraid"), ("scared", "afraid"),
+        ("frightened", "afraid"), ("fearful", "afraid"), ("joyful", "happy"), ("cheerful", "happy"), ("glad", "happy"),
+        ("tearful", "sad"), ("sorrowful", "sad"), ("hushed", "whisper"), ("quietly", "whisper"), ("softly", "tender"),
+        ("gently", "tender"), ("warmly", "tender"), ("sarcastic", "sardonic"), ("sarcastically", "sardonic"),
+        ("dryly", "sardonic"), ("thrilled", "excited"), ("eagerly", "excited"),
+    ];
+    let strip = |w: &str| {
+        let mut w = w.to_string();
+        for _ in 0..2 {
+            for suf in ["ily", "ly", "ness", "ed", "ing", "er", "y"] {
+                if w.len() > suf.len() + 2 && w.ends_with(suf) {
+                    w.truncate(w.len() - suf.len());
+                    break;
+                }
+            }
+        }
+        w.chars().take(5).collect::<String>()
+    };
+    let note = format!("{} {}", row.emotion, row.instruct).to_lowercase();
+    let words: Vec<String> = note
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .filter(|w| !w.is_empty())
+        .map(|w| SYN.iter().find(|(k, _)| *k == w).map(|(_, v)| v.to_string()).unwrap_or_else(|| w.to_string()))
+        .collect();
+    entries.into_iter().find(|e| {
+        let k = strip(&e.emotion.to_lowercase());
+        k.len() >= 3 && words.iter().any(|w| { let v = strip(w); v.len() >= 3 && (v.starts_with(&k) || k.starts_with(&v)) })
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn generate_cloned(
+    config: &crate::models::AppConfig,
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+    row_index: usize,
+    row: &ScriptRow,
+    c: &crate::models::Character,
+    output_path: &str,
+    http: reqwest::Client,
+) -> Result<GeneratedRowResult> {
+    use crate::commands::inference::{download_remote_file_to, is_remote_url, upload_input_file};
+    let palette = palette_for(c, row);
+    let raw_ref = palette.and_then(|e| e.ref_audio_path.clone()).or_else(|| c.voice_assignment.ref_audio_path.clone()).unwrap_or_default();
+    // Project bundles store paths relative to the character's folder.
+    let local_ref = if Path::new(&raw_ref).is_absolute() {
+        raw_ref
+    } else {
+        crate::app_support::character_dir(projects_dir, project_id, &c.id).join(&raw_ref).to_string_lossy().into_owned()
+    };
+    let transcript = palette.and_then(|e| e.ref_transcript.clone()).or_else(|| c.voice_assignment.ref_transcript.clone()).unwrap_or_default();
+    let base = config.chatterbox_url.trim_end_matches('/').to_string();
+    let remote = is_remote_url(&base);
+    let ref_for_server = if remote { upload_input_file(&http, &base, &local_ref).await? } else { local_ref.clone() };
+    let seed = random_seed();
+    let body = serde_json::json!({
+        "text": row.prompt, "ref_audio_path": ref_for_server, "ref_transcript": transcript,
+        "exaggeration": 0.5, "cfg_weight": 0.5, "seed": seed,
+        "output_path": if remote { String::new() } else { output_path.to_string() },
+    });
+    let job_id = submit_job(&http, format!("{}/generate/clone", base), &body, "Chatterbox").await?;
+    let status = poll_job(&http, format!("{}/jobs", base), &job_id, "Chatterbox").await?;
+    let local_out = if remote {
+        download_remote_file_to(&http, &base, &job_id, output_path).await?
+    } else {
+        status.output_path.unwrap_or_else(|| output_path.to_string())
+    };
+    let meta = SidecarMeta {
+        model: "chatterbox-turbo".into(),
+        model_variant: Some("0.5B".into()),
+        prompt: row.prompt.clone(),
+        instruct: palette.map(|e| format!("palette: {}", e.label)),
+        speaker: Some(c.name.clone()),
+        language: Some("en".into()),
+        seed,
+        temperature: None,
+        top_p: None,
+        duration_target_ms: None,
+        duration_actual_ms: None,
+        sample_rate: 24000,
+        generated_at: Utc::now(),
+        parent: Some(local_ref),
+        take_index: 1,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    let finalized = finalize_generation_output(projects_dir, project_id, scene_slug, row_index, &local_out, meta)?;
+    Ok(GeneratedRowResult {
+        project_id: project_id.into(),
+        scene_slug: scene_slug.into(),
+        row_index,
+        model: if palette.is_some() { "chatterbox (palette)".into() } else { "chatterbox".into() },
         output_path: finalized.output_path,
         duration_ms: finalized.duration_ms,
         bound_to_script: finalized.bound_to_script,
