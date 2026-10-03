@@ -217,3 +217,20 @@ pub(super) async fn emotions(config: &AppConfig, import_id: &str) -> Result<()> 
         tokio::time::sleep(std::time::Duration::from_secs(2)).await;
     }
 }
+
+/// `dissect clips <import_id> <S4,S38> <emotion> [--like <start_s>] [--limit N]`
+/// — a character's best clips for a palette emotion (its built-in recipe), or
+/// the clips most like the one starting at `--like`.
+pub(super) fn clips(config: &AppConfig, import_id: &str, speakers: &str, emotion: &str, rest: &[String]) -> Result<()> {
+    use crate::commands::emotions as em;
+    let flags = parse_flags(rest)?;
+    let speakers: Vec<String> = speakers.split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    let limit: usize = flag_parse(&flags, "limit", 8)?;
+    match flag_opt(&flags, "like") {
+        Some(start) => {
+            let start: f64 = start.parse().map_err(|_| Error::Other("--like takes a start time in seconds".into()))?;
+            print_json(&em::similar_for(&projects_dir(config), import_id, &speakers, start, limit)?)
+        }
+        None => print_json(&em::clips_for(&projects_dir(config), import_id, &speakers, emotion, None, limit)?),
+    }
+}

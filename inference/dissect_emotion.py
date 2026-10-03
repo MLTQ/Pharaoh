@@ -89,11 +89,17 @@ def utterances(turns: list[dict], max_s: float = MAX_UTT_S, gap_s: float = JOIN_
 
 
 def speaking_rate(words: list[dict]) -> Optional[float]:
-    """Words per second of speech, or None without word timings."""
+    """Articulation rate: words per second of actual speech — pauses between
+    words (beyond a normal 0.25 s gap) don't count, so a quick line broken by
+    a beat still reads as quick. None without word timings."""
     if len(words) < 3:
         return None
-    span = words[-1]["end"] - words[0]["start"]
-    return round(len(words) / span, 2) if span > 0.5 else None
+    talk = 0.0
+    for i, w in enumerate(words):
+        talk += max(0.0, w["end"] - w["start"])
+        if i + 1 < len(words):
+            talk += min(0.25, max(0.0, words[i + 1]["start"] - w["end"]))
+    return round(len(words) / talk, 2) if talk > 0.5 else None
 
 
 def prosody(x: np.ndarray) -> dict:

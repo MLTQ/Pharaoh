@@ -126,10 +126,17 @@ pub struct EmotionClips {
 }
 
 /// Mean and std of each delivery feature over these utterances.
+/// A feature on the scale it's compared on: spectral flatness is heavily
+/// skewed (a few breathy lines dwarf the rest), so it's compared in log.
+fn feature(u: &Value, k: usize) -> Option<f64> {
+    let x = u[FEATURES[k]].as_f64()?;
+    Some(if FEATURES[k] == "flat" { (x.max(1e-5)).ln() } else { x })
+}
+
 fn feature_stats(utts: &[&Value]) -> [(f64, f64); 5] {
     let mut out = [(0.0, 1.0); 5];
-    for (k, f) in FEATURES.iter().enumerate() {
-        let xs: Vec<f64> = utts.iter().filter_map(|u| u[*f].as_f64()).collect();
+    for k in 0..FEATURES.len() {
+        let xs: Vec<f64> = utts.iter().filter_map(|u| feature(u, k)).collect();
         if xs.len() >= 5 {
             let m = xs.iter().sum::<f64>() / xs.len() as f64;
             let sd = (xs.iter().map(|x| (x - m).powi(2)).sum::<f64>() / xs.len() as f64).sqrt();
@@ -141,8 +148,8 @@ fn feature_stats(utts: &[&Value]) -> [(f64, f64); 5] {
 
 fn zs(u: &Value, stats: &[(f64, f64); 5]) -> [Option<f64>; 5] {
     let mut z = [None; 5];
-    for (k, f) in FEATURES.iter().enumerate() {
-        z[k] = u[*f].as_f64().map(|x| (x - stats[k].0) / stats[k].1);
+    for (k, zk) in z.iter_mut().enumerate() {
+        *zk = feature(u, k).map(|x| (x - stats[k].0) / stats[k].1);
     }
     z
 }
@@ -161,7 +168,9 @@ fn traits(z: &[Option<f64>; 5]) -> Vec<String> {
 }
 
 fn recipe_score(u: &Value, z: &[Option<f64>; 5], recipe: &EmotionRecipe) -> f64 {
-    let norm: f64 = recipe.classes.values().map(|w| w.abs() as f64).sum::<f64>().max(1e-6);
+    // Weights summing past 1 are scaled down; smaller ones keep their size, so
+    // "neutral 0.3" in a whisper recipe stays a nudge next to the delivery targets.
+    let norm: f64 = recipe.classes.values().map(|w| w.abs() as f64).sum::<f64>().max(1.0);
     let blend: f64 = recipe
         .classes
         .iter()

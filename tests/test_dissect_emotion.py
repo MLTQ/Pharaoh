@@ -46,7 +46,10 @@ def test_tag_scores_every_utterance_with_the_argmax_emotion_and_embedding():
 
 def test_speaking_rate_from_word_timings():
     words = [{"word": w, "start": i * 0.5, "end": i * 0.5 + 0.4} for i, w in enumerate("one two three four five".split())]
+    # 5 words of 0.4 s with 0.1 s gaps: 2.0 s + 0.4 s of gaps.
     assert speaking_rate(words) == round(5 / 2.4, 2)
+    paused = [dict(w, start=w["start"] + (3 if i >= 3 else 0), end=w["end"] + (3 if i >= 3 else 0)) for i, w in enumerate(words)]
+    assert speaking_rate(paused) == round(5 / (2.0 + 0.1 * 3 + 0.25), 2), "a long pause counts as 0.25 s"
     assert speaking_rate(words[:2]) is None
     u = utterances([T("S1", 0, 2.4) | {"words": words}])
     assert u[0]["rate"] == round(5 / 2.4, 2)
