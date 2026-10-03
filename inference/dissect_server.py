@@ -194,6 +194,84 @@ async def _run(job_id: str, p: DissectParams) -> None:
                 Path(input_path).unlink(missing_ok=True)
 
 
+class EmotionParams(BaseModel):
+    job_id: Optional[str] = None
+    # 16 kHz mono rendering of an import's dialogue stem (uploaded by remote clients).
+    input_path: str
+    # Manifest turn rows: speaker, start, end, text, overlap.
+    turns: list[dict]
+
+
+async def _run_emotions(job_id: str, p: EmotionParams) -> None:
+    import dissect_emotion as de
+
+    input_path = remap_path(p.input_path) or p.input_path
+    out = Path(server_output_path(job_id)).parent / "emotions.json"
+
+    def progress(frac: float, message: str) -> None:
+        if job_id in _cancel:
+            raise dp.DissectCancelled()
+        jobs.update(job_id, status="running", progress=round(frac, 3), message=message)
+
+    jobs.update(job_id, message="Queued behind another job")
+    async with inference_lock():
+        try:
+            if job_id in _cancel:
+                raise dp.DissectCancelled()
+            if not Path(input_path).is_file():
+                raise FileNotFoundError(f"input audio not found: {input_path}")
+            jobs.update(job_id, status="running", progress=0.0, message="Loading the emotion model")
+
+            def work():
+                models.emotion = models.emotion or de.EmotionTagger(models.device)
+                return de.tag_file(models.emotion, input_path, p.turns, progress)
+
+            res = await asyncio.to_thread(work)
+            out.parent.mkdir(parents=True, exist_ok=True)
+            out.write_text(json.dumps(res))
+            jobs.update(job_id, status="complete", progress=1.0, message="Done", output_path=str(out))
+        except dp.DissectCancelled:
+            jobs.update(job_id, status="cancelled", message="Cancelled")
+        except Exception as exc:
+            log.exception("emotion tagging failed")
+            msg = f"{exc.__class__.__name__}: {exc}"
+            if _is_cuda_fault(exc):
+                msg = ("The GPU hit a fault (" + msg.splitlines()[0][:160] + "). The dissect server is "
+                       "restarting itself to recover — Retry in a few seconds.")
+                _restart_soon()
+            jobs.update(job_id, status="failed", error=msg)
+        finally:
+            _persist(job_id)
+            _cancel.discard(job_id)
+            if is_server_owned(input_path) and "uploads" in Path(input_path).parts:
+                Path(input_path).unlink(missing_ok=True)
+
+
+@app.post("/generate/emotions")
+async def generate_emotions(p: EmotionParams) -> dict:
+    """Tag an existing import's dialogue with emotions (imports dissected
+    before emotion tagging existed). Fetch the result from /emotions/{job_id}."""
+    job_id = p.job_id or new_job_id()
+    jobs.create(job_id, "dissect", "emotions", {"input_path": p.input_path, "turns": len(p.turns)})
+    spawn_job(_run_emotions(job_id, p))
+    return {"job_id": job_id, "status": "queued"}
+
+
+@app.get("/emotions/{job_id}")
+async def get_emotions(job_id: str):
+    """The finished tagging result; deleted from the server once read."""
+    job = jobs.get(job_id)
+    if job is None or job.get("status") != "complete" or not job.get("output_path"):
+        raise HTTPException(status_code=404, detail="no finished emotion result for this job")
+    path = Path(job["output_path"])
+    if not path.is_file():
+        raise HTTPException(status_code=410, detail="result already collected")
+    data = json.loads(path.read_text())
+    if is_server_owned(str(path)):
+        shutil.rmtree(path.parent, ignore_errors=True)
+    return data
+
+
 @app.get("/health")
 async def health() -> dict:
     ml_ok, ml_reason = models.ml_available()

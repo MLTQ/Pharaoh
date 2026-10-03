@@ -192,3 +192,28 @@ pub(super) fn rebuild(config: &AppConfig, import_id: &str, rest: &[String]) -> R
     let project_id = rb::rebuild(&dir, import_id, &opts, &cb)?;
     print_json(&serde_json::json!({ "project_id": project_id }))
 }
+
+/// `dissect emotions <import_id>` — tag an import's dialogue with emotions
+/// (writes emotions.json; new dissects do this themselves).
+pub(super) async fn emotions(config: &AppConfig, import_id: &str) -> Result<()> {
+    use crate::commands::emotions as em;
+    let (job, fut) = em::start(reqwest::Client::new(), config.dissect_url.clone(), projects_dir(config), import_id.to_string())?;
+    let work = tokio::spawn(fut);
+    let mut last = String::new();
+    loop {
+        let s = em::dissect_emotion_status(job.clone())?;
+        let line = format!("{:>3.0}% {}", s.progress * 100.0, s.message);
+        if line != last {
+            eprintln!("{}", line);
+            last = line;
+        }
+        if s.done {
+            let _ = work.await;
+            if let Some(e) = s.error {
+                return Err(Error::Other(e));
+            }
+            return print_json(&s);
+        }
+        tokio::time::sleep(std::time::Duration::from_secs(2)).await;
+    }
+}

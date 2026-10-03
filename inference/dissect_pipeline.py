@@ -423,6 +423,7 @@ class Models:
         self.embedder = None
         self.asr = None
         self.tagger = None  # dissect_sounds.Tagger, loaded on first use
+        self.emotion = None  # dissect_emotion.EmotionTagger, loaded on first use
 
     @staticmethod
     def ml_available() -> tuple[bool, str]:
@@ -522,6 +523,7 @@ class Models:
 
     def unload(self) -> None:
         self.separator = self.separator_cfg = self.diarizer = self.embedder = self.asr = self.tagger = None
+        self.emotion = None
         try:
             import gc
             import torch
@@ -1083,7 +1085,24 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
     sounds: dict = {"sfx": [], "vocal": [], "ambience": [], "music": []}
     if do_separate:
         from dissect_sounds import find_sounds
-        sounds = find_sounds(env, reader, chapters, models, stage(0.88, 0.99))
+        sounds = find_sounds(env, reader, chapters, models, stage(0.88, 0.96))
+
+    # Emotion per utterance, for real per-emotion palette references. Never
+    # fatal: an import without emotions.json can be tagged later.
+    emotions_file = None
+    if not stub:
+        try:
+            import dissect_emotion as de
+            models.emotion = models.emotion or de.EmotionTagger(models.device)
+            utts = de.tag(models.emotion, de.utterances(turn_rows),
+                          lambda a, b: mono16[int(a * ML_SR):int(b * ML_SR)], stage(0.96, 0.995))
+            (out_dir / "emotions.json").write_text(json.dumps(de.result(utts)))
+            emotions_file = "emotions.json"
+        except DissectCancelled:
+            raise
+        except Exception as exc:
+            log.warning("emotion tagging failed", exc_info=True)
+            warnings.append(f"Emotion tagging skipped ({exc.__class__.__name__}: {exc})")
 
     # Word timings are the bulk of a long transcript; keep them out of the
     # manifest the UI loads, next to it for later use (scene import).
@@ -1106,6 +1125,7 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
             "embedding": None if stub else EMBEDDER_ID,
             "asr": ASR_ID if (opts.transcribe and not stub) else None,
             "tagging": sounds.get("tagger"),
+            "emotion": "emotion2vec/emotion2vec_plus_large" if emotions_file else None,
         },
         "options": opts.__dict__,
         "warnings": warnings + sounds.get("warnings", []),
@@ -1116,6 +1136,7 @@ def run(models: Models, input_path: str, out_dir: Path, opts: DissectOptions,
         "speakers": speakers,
         "sounds": {k: sounds.get(k, []) for k in ("sfx", "vocal", "ambience", "music")},
         "transcript": "transcript.json",
+        "emotions": emotions_file,
         "turns": turn_rows,
     }
     (out_dir / "manifest.json").write_text(json.dumps(manifest, indent=2))

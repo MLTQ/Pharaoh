@@ -158,7 +158,7 @@ pub fn imports_root(projects_dir: &Path) -> PathBuf {
     projects_dir.join(LIBRARY_DIR_NAME).join("imports")
 }
 
-fn import_dir(projects_dir: &Path, import_id: &str) -> Result<PathBuf> {
+pub(crate) fn import_dir(projects_dir: &Path, import_id: &str) -> Result<PathBuf> {
     // import ids are uuids we minted; reject anything else so a crafted id
     // can't point the delete/read commands outside the imports root.
     if Uuid::parse_str(import_id).is_err() {
@@ -167,7 +167,7 @@ fn import_dir(projects_dir: &Path, import_id: &str) -> Result<PathBuf> {
     Ok(imports_root(projects_dir).join(import_id))
 }
 
-fn dissect_url(app: &AppHandle) -> Result<String> {
+pub(crate) fn dissect_url(app: &AppHandle) -> Result<String> {
     let state = app.state::<AppState>();
     let cfg = state
         .server_config
@@ -176,7 +176,7 @@ fn dissect_url(app: &AppHandle) -> Result<String> {
     Ok(cfg.dissect_url.clone())
 }
 
-fn http(app: &AppHandle) -> reqwest::Client {
+pub(crate) fn http(app: &AppHandle) -> reqwest::Client {
     app.state::<AppState>().http.clone()
 }
 
@@ -216,7 +216,7 @@ fn fmt_mb(b: u64) -> String {
 
 /// Stream the source to the server's /upload — never the whole file in
 /// memory — counting bytes into `progress` and stopping if it's cancelled.
-async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str, progress: Option<Arc<UploadProgress>>) -> Result<String> {
+pub(crate) async fn upload_source(http: &reqwest::Client, base_url: &str, local_path: &str, progress: Option<Arc<UploadProgress>>) -> Result<String> {
     use futures_util::StreamExt;
     use tokio::io::AsyncReadExt;
     let file = tokio::fs::File::open(local_path)
@@ -297,7 +297,7 @@ fn unpack_bundle(zip_path: &Path, dest: &Path) -> Result<()> {
     Ok(())
 }
 
-fn read_manifest(dir: &Path) -> Result<Option<Value>> {
+pub(crate) fn read_manifest(dir: &Path) -> Result<Option<Value>> {
     let p = dir.join(MANIFEST_FILE);
     if !p.is_file() {
         return Ok(None);
@@ -1055,7 +1055,7 @@ fn new_character(library_id: &str, name: &str, source_name: &str, speaker_id: &s
 
 const STEMS: &[&str] = &["dialogue", "music", "effects"];
 
-fn stem_file(dir: &Path, stem: &str) -> Result<PathBuf> {
+pub(crate) fn stem_file(dir: &Path, stem: &str) -> Result<PathBuf> {
     if !STEMS.contains(&stem) {
         return Err(Error::Other(format!("unknown stem '{}'", stem)));
     }

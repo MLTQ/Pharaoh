@@ -106,6 +106,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, speaker_id, rest @ ..] if group == "dissect" && action == "assign" => {
             dissect::assign(&config, import_id, speaker_id, rest).await
         }
+        [group, action, import_id] if group == "dissect" && action == "emotions" => {
+            dissect::emotions(&config, import_id).await
+        }
         [group, action, import_id, rest @ ..] if group == "dissect" && action == "rebuild" => {
             dissect::rebuild(&config, import_id, rest)
         }
