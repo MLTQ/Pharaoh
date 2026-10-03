@@ -125,40 +125,6 @@ def _resolve_device() -> str:
     return "cpu"
 
 
-_trusted_load_installed = False
-
-
-def _trust_woosh_checkpoints() -> None:
-    """Load Woosh's own checkpoints with `weights_only=False`.
-
-    PyTorch 2.6 made `torch.load(..., weights_only=True)` the default, and
-    Woosh's released checkpoints carry pickled objects it refuses ("Unsupported
-    operand 60"), so every Woosh generation failed. Woosh calls `torch.load`
-    deep inside its own code, so this wraps it: only files inside WOOSH_DIR
-    (the checkpoints shipped with the model) load the old way; everything else
-    keeps PyTorch's safe default.
-    """
-    global _trusted_load_installed
-    if _trusted_load_installed:
-        return
-    import torch
-
-    original = torch.load
-    root = WOOSH_DIR.resolve()
-
-    def load(f, *args, **kwargs):
-        if "weights_only" not in kwargs and isinstance(f, (str, os.PathLike)):
-            try:
-                if Path(f).resolve().is_relative_to(root):
-                    kwargs["weights_only"] = False
-            except OSError:
-                pass
-        return original(f, *args, **kwargs)
-
-    torch.load = load
-    _trusted_load_installed = True
-
-
 def _load_sfx_model() -> None:
     """Load Woosh model synchronously (run via executor so we don't block event loop).
 
@@ -174,7 +140,6 @@ def _load_sfx_model() -> None:
     if woosh_src not in sys.path:
         sys.path.insert(0, woosh_src)
 
-    _trust_woosh_checkpoints()
     from woosh.components.base import LoadConfig
     from woosh.model.flowmap_from_pretrained import FlowMapFromPretrained
 
@@ -652,6 +617,12 @@ async def _run_native_audioldm_sfx(job_id: str, params: dict) -> None:
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                # PyTorch 2.6 made torch.load(weights_only=True) the default and
+                # the audioldm package's checkpoint (its own released model, in
+                # PHARAOH_AUDIOLDM_CACHE_DIR) is refused ("Unsupported operand
+                # 60"), so every AudioLDM job failed. This subprocess loads
+                # nothing else.
+                env={**os.environ, "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1"},
             )
             output_tail: list[str] = []
             progress_state = {"value": 0.08}
