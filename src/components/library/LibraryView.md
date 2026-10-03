@@ -65,3 +65,4 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 - Save button is the "dirty" affordance — it lights up to the TTS accent color when there are unsaved edits.
 - "+ New" allocates a fresh library entry on the backend immediately rather than holding an in-memory draft; this keeps the create flow consistent with the round-trip update flow.
 - Selecting a different character with unsaved changes prompts to discard — same convention as Settings.
+- `ensureSaved()` (passed to the Voice and Palette tabs) saves pending edits — or creates the character — before generation, uploads and "Use", instead of refusing with "save your changes first".

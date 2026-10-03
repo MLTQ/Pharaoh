@@ -34,6 +34,8 @@ export const LibraryDetailHeader: React.FC<{
       borderBottom: "1px solid var(--line-1)",
       background: "var(--bg-1)", flexShrink: 0,
       display: "flex", alignItems: "center", gap: 12,
+      // Wrap rather than push Save / Export / Delete off a narrow window.
+      flexWrap: "wrap",
     }}>
       <span style={{
         width: 14, height: 14, borderRadius: "50%",

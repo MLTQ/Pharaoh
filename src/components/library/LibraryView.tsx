@@ -159,6 +159,28 @@ export const LibraryView: React.FC = () => {
     }
   };
 
+  // Generation and imports read the saved character, so they save pending
+  // edits first instead of refusing ("save your changes first" pointed at a
+  // button scrolled out of view).
+  const ensureSaved = async (): Promise<Character | null> => {
+    if (!character) return null;
+    if (!dirty && character.library_id) return character;
+    setSaving(true);
+    setError(null);
+    try {
+      const saved = await saveLibraryCharacter(character);
+      setCharacter(saved);
+      setDirty(false);
+      void refreshList(saved.library_id ?? null);
+      return saved;
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Save failed");
+      return null;
+    } finally {
+      setSaving(false);
+    }
+  };
+
   // Selecting another character replaces the edit buffer, so it needs the same
   // guard as creating one. Without it, typing a voice description and clicking
   // a different name in the sidebar discarded the edit with no warning.
@@ -404,6 +426,7 @@ export const LibraryView: React.FC = () => {
               <LibraryVoiceTab
                 character={character}
                 dirty={dirty}
+                ensureSaved={ensureSaved}
                 saving={saving}
                 patch={patch}
                 setCharacter={setCharacter}
@@ -424,6 +447,7 @@ export const LibraryView: React.FC = () => {
               <LibraryPaletteTab
                 character={character}
                 dirty={dirty}
+                ensureSaved={ensureSaved}
                 patch={patch}
                 setCharacter={setCharacter}
                 setDirty={setDirty}

@@ -39,6 +39,8 @@ import { SourceRow } from "./SourceRow";
 export const LibraryVoiceTab: React.FC<{
   character: Character;
   dirty: boolean;
+  /** Save pending edits (or create the character) and return the saved state; null if saving failed. */
+  ensureSaved: () => Promise<Character | null>;
   saving: boolean;
   patch: (mut: (c: Character) => Character) => void;
   setCharacter: (c: Character) => void;
@@ -53,7 +55,7 @@ export const LibraryVoiceTab: React.FC<{
   designGenError: string | null;
   setDesignGenError: (msg: string | null) => void;
 }> = ({
-  character, dirty, saving, patch, setCharacter, setDirty, setSaving, setError,
+  character, ensureSaved, saving, patch, setCharacter, setDirty, setSaving, setError,
   voiceDesignTestLine, setVoiceDesignTestLine,
   generatingDesign, setGeneratingDesign,
   designGenError, setDesignGenError,
@@ -70,8 +72,9 @@ export const LibraryVoiceTab: React.FC<{
   const [cloneError, setCloneError] = React.useState<string | null>(null);
 
   const handleClone = async () => {
+    const character = await ensureSaved();
+    if (!character?.library_id || !projectsDir) return;
     const gold = character.voice_assignment.ref_audio_path;
-    if (!character.library_id || !projectsDir) return;
     if (!gold) { setCloneError("Pick a gold reference clip first (the dot)."); return; }
     const text = (cloneLine || voiceDesignTestLine || DEFAULT_TEST_LINE).trim();
     setCloning(true);
@@ -106,11 +109,9 @@ export const LibraryVoiceTab: React.FC<{
   };
 
   const handleGenerateDesign = async () => {
-    if (!character.library_id || !projectsDir) return;
-    if (dirty) {
-      setDesignGenError("Save your changes first — generation uses the saved character state.");
-      return;
-    }
+    // Generation reads the saved character, so pending edits are saved first.
+    const character = await ensureSaved();
+    if (!character?.library_id || !projectsDir) return;
     const desc = character.voice_assignment.base_voice_description?.trim() ?? "";
     if (!desc) {
       setDesignGenError("Add a base voice description first.");
@@ -168,10 +169,8 @@ export const LibraryVoiceTab: React.FC<{
   // If no gold is currently set, the first new upload becomes the gold;
   // otherwise the existing gold is preserved and the user picks via the list.
   const handleUploadCharacterReference = async () => {
-    if (!character.library_id) {
-      setDesignGenError("Save the character first.");
-      return;
-    }
+    const character = await ensureSaved();
+    if (!character?.library_id) return;
     const sources = await pickAudioFiles(true);
     if (sources.length === 0) return;
     setDesignGenError(null);

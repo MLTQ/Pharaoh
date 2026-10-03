@@ -44,6 +44,8 @@ import type { TakeJob } from "./libraryShared";
 export const LibraryPaletteTab: React.FC<{
   character: Character;
   dirty: boolean;
+  /** Save pending edits (or create the character) and return the saved state; null if saving failed. */
+  ensureSaved: () => Promise<Character | null>;
   patch: (mut: (c: Character) => Character) => void;
   setCharacter: (c: Character) => void;
   setDirty: (v: boolean) => void;
@@ -67,7 +69,7 @@ export const LibraryPaletteTab: React.FC<{
   /** Disk-scanned takes per emotion (MCP-generated, bypass the job store). */
   paletteDiskTakes: Record<string, PaletteTakeFile[]>;
 }> = ({
-  character, dirty, patch, setCharacter, setDirty, setSaving, setError, refreshList,
+  character, ensureSaved, patch, setCharacter, setDirty, setSaving, setError, refreshList,
   paletteTestLine, setPaletteTestLine,
   addingEmotion, setAddingEmotion,
   newEmotionKey, setNewEmotionKey,
@@ -124,11 +126,9 @@ export const LibraryPaletteTab: React.FC<{
   };
 
   const handleGeneratePaletteTake = async (entry: PaletteEntry) => {
-    if (!character.library_id || !projectsDir) return;
-    if (dirty) {
-      setPaletteGenError("Save your changes first — generation uses the saved character state.");
-      return;
-    }
+    // Generation reads the saved character, so pending edits are saved first.
+    const character = await ensureSaved();
+    if (!character?.library_id || !projectsDir) return;
     // A cloned voice (gold reference + Chatterbox): clone the gold, with the
     // emotion carried by the line's words and the expressiveness setting.
     if (clonesVoice(character)) {
@@ -215,10 +215,8 @@ export const LibraryPaletteTab: React.FC<{
 
   // Palette tab: per-emotion equivalent of upload-as-source.
   const handleUploadPaletteReference = async (emotion: string) => {
-    if (!character.library_id) {
-      setPaletteGenError("Save the character first.");
-      return;
-    }
+    const character = await ensureSaved();
+    if (!character?.library_id) return;
     const sources = await pickAudioFiles(true);
     if (sources.length === 0) return;
     setPaletteGenError(null);
@@ -265,8 +263,8 @@ export const LibraryPaletteTab: React.FC<{
 
   // A real clip from the dissected recording becomes this emotion's reference.
   const handleUseRecordingClip = async (emotion: string, importId: string, clip: EmotionClip) => {
-    if (!character.library_id) { setPaletteGenError("Save the character first."); return; }
-    if (dirty) { setPaletteGenError("Save your changes first."); return; }
+    const character = await ensureSaved();
+    if (!character?.library_id) return;
     setPaletteGenError(null);
     setSaving(true);
     try {
@@ -478,7 +476,7 @@ export const LibraryPaletteTab: React.FC<{
                 entry={entry}
                 allTakes={allTakes}
                 running={!!runningEntry}
-                canGenerate={!!character.library_id && !!projectsDir}
+                canGenerate={!!projectsDir}
                 onChangeDirection={(direction) =>
                   patch((c) => ({
                     ...c,
@@ -494,7 +492,7 @@ export const LibraryPaletteTab: React.FC<{
                 onUploadTake={() => handleUploadPaletteReference(entry.emotion)}
                 onApprove={(audioPath) => handleApprovePaletteTake(entry.emotion, audioPath)}
                 recording={
-                  <RecordingClips character={character} emotion={entry.emotion} disabled={dirty}
+                  <RecordingClips character={character} emotion={entry.emotion}
                                   recipe={entry.recipe}
                                   onRecipeChange={(recipe) => patch((c) => ({
                                     ...c,
@@ -595,7 +593,7 @@ const PaletteRow: React.FC<{
                 background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)",
                 opacity: canGenerate ? 1 : 0.4,
               }}
-              title={canGenerate ? "Generate a Voice Design take for this emotion" : "Save the character first"}
+              title={canGenerate ? "Generate a take for this emotion (saves pending changes first)" : "Open a projects folder first"}
             >
               {running ? "Generating…" : "Generate take"}
             </button>

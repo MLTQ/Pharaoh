@@ -7,7 +7,7 @@ Stage-1 "Voice" tab of the library character editor: description + base voice de
 
 ### `LibraryVoiceTab`
 - **Does**: Owns the voice-tab action handlers:
-  - `handleGenerateDesign` — submits a Voice Design TTS job into `<projects_dir>/_library/characters/<id>/design/` via the synthetic `LIBRARY_PROJECT_ID` and slug `__library_design__<id>`; refuses while `dirty` (generation uses the saved character state).
+  - `handleGenerateDesign` — submits a Voice Design TTS job into `<projects_dir>/_library/characters/<id>/design/` via the synthetic `LIBRARY_PROJECT_ID` and slug `__library_design__<id>`; saves pending edits first via `ensureSaved` (generation uses the saved character state).
   - `handleUploadCharacterReference` — `+ Upload…` adds N candidate files (each copied to `design/` individually via `importAudioIntoLibraryBundle`); first upload becomes the gold if none is set.
   - `handleConcatCharacterSources` — `Concatenate all → gold` creates a derived combined WAV (`concatAudioIntoLibraryBundle`) and sets it as the gold; individual sources stay in the list.
   - `handlePickCharacterGold` / `handleRemoveCharacterSource` — radio-dot gold pick and source removal (removing the gold promotes the next source); both auto-save.
