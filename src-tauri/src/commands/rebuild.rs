@@ -781,6 +781,12 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
                     rights_statement: statement.clone(),
                     rights_confirmed_at: now.to_rfc3339(),
                 });
+                // An emotional palette from the performance, when its emotions were read.
+                if let Err(e) = crate::commands::emotions::fill_palette(
+                    root.parent().unwrap_or(&root), &mut c, &root.join("characters").join(&cid), &crate::commands::emotions::FillOptions::default(),
+                ) {
+                    eprintln!("palette fill skipped for {}: {}", c.name, e);
+                }
             }
         }
         for sid in &pc.speaker_ids {

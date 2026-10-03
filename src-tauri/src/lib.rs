@@ -132,6 +132,7 @@ pub fn run() {
             commands::emotions::dissect_emotion_status,
             commands::emotions::dissect_emotion_clips,
             commands::emotions::dissect_similar_clips,
+            commands::emotions::build_palette_from_recording,
             commands::dissect::dissect_submit,
             commands::dissect::dissect_status,
             commands::dissect::dissect_cancel,

@@ -1009,6 +1009,15 @@ pub fn assign_speaker(projects_dir: &Path, req: AssignSpeakerRequest) -> Result<
         rights_confirmed_at: Utc::now().to_rfc3339(),
     });
 
+    // Fill the emotional palette from the performance when its emotions have
+    // been read: the strongest lines per emotion become approved references.
+    // Never blocks the assignment.
+    if let Err(e) = crate::commands::emotions::fill_palette(
+        projects_dir, &mut character, &bundle, &crate::commands::emotions::FillOptions::default(),
+    ) {
+        eprintln!("palette fill skipped for {}: {}", character.name, e);
+    }
+
     // Persist exactly like save_library_character: relative on disk.
     let now = Utc::now().to_rfc3339();
     character.id = library_id.clone();

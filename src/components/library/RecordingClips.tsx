@@ -123,6 +123,7 @@ export const RecordingClips: React.FC<{
             {c.text || <em style={{ color: "var(--fg-4)" }}>(part of a longer line)</em>}
           </span>
           <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-4)" }}>
+            {c.strong && !similar && <span title="A clear example of this emotion" style={{ color: "var(--st-rendered)" }}>● </span>}
             {c.clarity < 0.3 ? <span title="The emotion reader couldn't place this line's tone">unclear tone</span> : <>{Math.round(c.top_score * 100)}% {c.top}</>}
             {c.traits.length > 0 && <> · <span style={{ color: "var(--fg-3)" }}>{c.traits.join(", ")}</span></>}
             {" · "}{fmt(c.start)} · {(c.end - c.start).toFixed(1)}s

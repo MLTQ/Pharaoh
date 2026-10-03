@@ -234,3 +234,13 @@ pub(super) fn clips(config: &AppConfig, import_id: &str, speakers: &str, emotion
         None => print_json(&em::clips_for(&projects_dir(config), import_id, &speakers, emotion, None, limit)?),
     }
 }
+
+/// `dissect palette <library_id> [--replace true] [--per 4]` — fill a Library
+/// character's emotional palette from its dissected performance.
+pub(super) fn palette(config: &AppConfig, library_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let replace = matches!(flag_opt(&flags, "replace").as_deref(), Some("true" | "yes" | "1"));
+    let per: usize = flag_parse(&flags, "per", 4)?;
+    let r = crate::commands::emotions::build_library_palette(&projects_dir(config), library_id, replace, per)?;
+    print_json(&r.report)
+}

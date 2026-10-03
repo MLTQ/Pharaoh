@@ -15,6 +15,13 @@
 //! reference's delivery as much as its voice. `dissect_similar_clips` finds
 //! the clips nearest one clip in emotion2vec's embedding space, for moods no
 //! recipe names.
+//!
+//! `fill_palette` turns that into a palette: per emotion (the palette's own,
+//! the baseline, and further moods with at least two clear examples) it
+//! imports the clearest lines (`is_strong`) into the character's bundle and
+//! approves the best as the reference, a different line per emotion. It runs
+//! when a dissected speaker is assigned to a character, in rebuilds, and from
+//! the palette's "Build from recording".
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -28,11 +35,12 @@ use serde_json::Value;
 use tauri::AppHandle;
 use uuid::Uuid;
 
-use crate::app_support::{app_projects_dir, read_json, write_json};
-use crate::commands::dissect::{dissect_url, http, import_dir, read_manifest, stem_file, upload_source, UploadProgress};
+use crate::app_support::{app_projects_dir, library_character_dir, read_json, write_json};
+use crate::commands::character::{load_library_character, store_library_character};
+use crate::commands::dissect::{clip_for, dissect_url, http, import_dir, read_manifest, stem_file, upload_source, UploadProgress};
 use crate::commands::inference::is_remote_url;
 use crate::error::{Error, Result};
-use crate::models::EmotionRecipe;
+use crate::models::{Character, EmotionRecipe, PaletteEntry};
 
 const EMOTIONS_FILE: &str = "emotions.json";
 
@@ -49,7 +57,14 @@ fn r(classes: &[(&str, f32)], loud: f32, pace: f32, pitch: f32, movement: f32, b
         pitch,
         movement,
         breathy,
+        require_all: false,
     }
+}
+
+/// A true blend: every named emotion must be present.
+fn all(mut r: EmotionRecipe) -> EmotionRecipe {
+    r.require_all = true;
+    r
 }
 
 /// The built-in recipe for a palette emotion's name. Classes: angry,
@@ -62,7 +77,7 @@ pub fn default_recipe(emotion: &str) -> Option<EmotionRecipe> {
         "happy" | "joyful" | "cheerful" | "glad" | "warm" => r(&[("happy", 1.0)], 0.1, 0.1, 0.2, 0.2, 0.0),
         "amused" => r(&[("happy", 0.8), ("surprised", 0.2)], 0.0, 0.0, 0.2, 0.4, 0.0),
         "excited" | "thrilled" | "eager" => r(&[("happy", 0.6), ("surprised", 0.6)], 0.5, 0.6, 0.4, 0.6, 0.0),
-        "tender" | "gentle" | "loving" | "soothing" => r(&[("happy", 0.5), ("neutral", 0.5), ("angry", -0.5)], -0.6, -0.4, -0.1, 0.0, 0.3),
+        "tender" | "gentle" | "loving" | "soothing" => r(&[("happy", 0.5), ("neutral", 0.5), ("angry", -0.5)], -0.6, -0.3, -0.3, -0.5, 0.3),
         "sad" | "sorrowful" | "melancholy" | "grieving" => r(&[("sad", 1.0)], -0.3, -0.3, -0.2, -0.1, 0.0),
         "angry" | "cross" => r(&[("angry", 1.0)], 0.3, 0.1, 0.1, 0.2, 0.0),
         "furious" | "rage" | "livid" => r(&[("angry", 1.0)], 0.9, 0.4, 0.4, 0.5, 0.0),
@@ -72,13 +87,13 @@ pub fn default_recipe(emotion: &str) -> Option<EmotionRecipe> {
         "surprised" | "shocked" | "astonished" => r(&[("surprised", 1.0)], 0.3, 0.2, 0.5, 0.6, 0.0),
         "disgusted" | "contemptuous" | "scornful" => r(&[("disgusted", 1.0)], 0.0, 0.0, -0.1, 0.0, 0.0),
         "sardonic" | "sarcastic" | "dry" | "wry" => r(&[("disgusted", 0.5), ("neutral", 0.4), ("happy", 0.2)], -0.1, -0.1, -0.2, -0.4, 0.0),
-        "smug" => r(&[("happy", 0.5), ("disgusted", 0.5)], 0.0, -0.2, -0.1, 0.0, 0.0),
-        "bittersweet" | "wistful" | "nostalgic" => r(&[("happy", 0.6), ("sad", 0.6)], -0.3, -0.3, 0.0, 0.0, 0.1),
-        "exasperated" => r(&[("angry", 0.6), ("disgusted", 0.6)], 0.2, 0.2, 0.2, 0.3, 0.1),
-        "indignant" | "outraged" => r(&[("angry", 0.7), ("surprised", 0.5)], 0.5, 0.2, 0.4, 0.5, 0.0),
-        "grim" | "bleak" => r(&[("sad", 0.6), ("angry", 0.5)], -0.2, -0.3, -0.4, -0.5, 0.0),
+        "smug" => all(r(&[("happy", 0.5), ("disgusted", 0.5)], 0.0, -0.2, -0.1, 0.0, 0.0)),
+        "bittersweet" | "wistful" | "nostalgic" => all(r(&[("happy", 0.6), ("sad", 0.6)], -0.3, -0.3, 0.0, 0.0, 0.1)),
+        "exasperated" => all(r(&[("angry", 0.6), ("disgusted", 0.6)], 0.2, 0.2, 0.2, 0.3, 0.1)),
+        "indignant" | "outraged" => all(r(&[("angry", 0.7), ("surprised", 0.5)], 0.5, 0.2, 0.4, 0.5, 0.0)),
+        "grim" | "bleak" => all(r(&[("sad", 0.6), ("angry", 0.5)], -0.2, -0.3, -0.4, -0.5, 0.0)),
         "weary" | "tired" | "exhausted" => r(&[("sad", 0.5), ("neutral", 0.5)], -0.4, -0.6, -0.3, -0.5, 0.3),
-        "pleading" | "begging" => r(&[("sad", 0.6), ("fearful", 0.4)], 0.1, 0.1, 0.4, 0.4, 0.2),
+        "pleading" | "begging" => all(r(&[("sad", 0.6), ("fearful", 0.4)], 0.1, 0.1, 0.4, 0.4, 0.2)),
         "determined" | "resolute" => r(&[("neutral", 0.5), ("angry", 0.4)], 0.3, 0.0, -0.1, -0.2, -0.2),
         "whisper" | "whispered" | "hushed" => r(&[("neutral", 0.3)], -1.0, 0.0, 0.0, -0.3, 1.0),
         _ => return None,
@@ -116,6 +131,9 @@ pub struct EmotionClip {
     pub clarity: f64,
     /// Plain words for its delivery against the character's average: "loud", "slow", "breathy"…
     pub traits: Vec<String>,
+    /// A clear example of the recipe, not merely its best available match.
+    #[serde(default)]
+    pub strong: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -189,6 +207,38 @@ fn recipe_score(u: &Value, z: &[Option<f64>; 5], recipe: &EmotionRecipe) -> f64 
     blend + DELIVERY_W * delivery
 }
 
+/// Whether a line is a clear example of the recipe: the wanted emotions hold
+/// at least half the reader's belief (each named one present, for blends),
+/// nothing it should avoid is prominent, and the delivery leans the right way.
+fn is_strong(u: &Value, z: &[Option<f64>; 5], recipe: &EmotionRecipe) -> bool {
+    let p = |c: &str| u["scores"][c].as_f64().unwrap_or(0.0);
+    let clarity: f64 = CLASSES.iter().map(|c| p(c)).sum();
+    let wanted: Vec<(&String, f64)> = recipe.classes.iter().filter(|(_, w)| **w > 0.0).map(|(c, w)| (c, *w as f64)).collect();
+    let wsum: f64 = wanted.iter().map(|(_, w)| w).sum();
+    let led_by_delivery = wsum < 0.5; // whisper: the evidence is how it's said
+    let share: f64 = wanted.iter().map(|(c, _)| p(c)).sum();
+    let class_ok = led_by_delivery || {
+        // At least half the belief on the wanted emotions, and the main one
+        // clearly there (sardonic needs some disgust, not just neutral)…
+        let top_w = wanted.iter().map(|(_, w)| *w).fold(0.0, f64::max);
+        let main_ok = wanted.iter().filter(|(_, w)| *w >= top_w - 1e-6).any(|(c, _)| p(c) >= 0.25);
+        // …every named emotion present for a true blend…
+        let blend_ok = !recipe.require_all || wanted.iter().filter(|(_, w)| *w >= 0.4).all(|(c, _)| p(c) >= 0.15);
+        // …and nothing it should avoid.
+        let avoid_ok = recipe.classes.iter().filter(|(_, w)| **w < 0.0).all(|(c, _)| p(c) < 0.3);
+        clarity >= 0.5 && share >= 0.5 && main_ok && blend_ok && avoid_ok
+    };
+    let t = targets(recipe);
+    let tsum: f64 = t.iter().map(|x| x.abs()).sum();
+    let m: f64 = if tsum > 0.0 { (0..5).filter_map(|k| z[k].map(|v| t[k] * (v / 1.5).tanh())).sum::<f64>() / tsum } else { 0.0 };
+    // Emotion-led recipes: delivery leans the right way. Delivery-led: it must clearly match.
+    // A single-emotion recipe with an unmistakable line (most of the belief on
+    // that emotion): delivery can't veto — a terrified line is afraid however it's said.
+    let single = wanted.len() == 1;
+    let delivery_ok = if led_by_delivery { m >= 0.45 } else { tsum < 0.8 || m >= 0.12 || (single && share >= 0.75) };
+    class_ok && delivery_ok
+}
+
 fn clip(u: &Value, z: &[Option<f64>; 5], fit: f64) -> Option<EmotionClip> {
     let scores: HashMap<String, f64> = CLASSES.iter().map(|c| (c.to_string(), u["scores"][*c].as_f64().unwrap_or(0.0))).collect();
     let top = u["emotion"].as_str().unwrap_or("").to_string();
@@ -203,6 +253,7 @@ fn clip(u: &Value, z: &[Option<f64>; 5], fit: f64) -> Option<EmotionClip> {
         top,
         scores,
         traits: traits(z),
+        strong: false,
     })
 }
 
@@ -232,10 +283,13 @@ fn rank(utts: &[Value], speakers: &[String], recipe: &EmotionRecipe, limit: usiz
         .iter()
         .filter_map(|&i| {
             let z = zs(&utts[i], &stats);
-            clip(&utts[i], &z, recipe_score(&utts[i], &z, recipe))
+            let mut c = clip(&utts[i], &z, recipe_score(&utts[i], &z, recipe))?;
+            c.strong = is_strong(&utts[i], &z, recipe);
+            Some(c)
         })
         .collect();
-    out.sort_by(|a, b| b.fit.partial_cmp(&a.fit).unwrap_or(std::cmp::Ordering::Equal));
+    // Clear examples first, then by fit.
+    out.sort_by(|a, b| b.strong.cmp(&a.strong).then(b.fit.partial_cmp(&a.fit).unwrap_or(std::cmp::Ordering::Equal)));
     out.truncate(limit);
     (out, mine.len())
 }
@@ -344,6 +398,212 @@ pub fn similar_for(projects_dir: &Path, import_id: &str, speaker_ids: &[String],
     let dim = data["embedding_dim"].as_u64().unwrap_or(1024) as usize;
     let utts = data["utterances"].as_array().cloned().unwrap_or_default();
     similar(&utts, &bytes, dim, speaker_ids, start, limit.clamp(1, 50))
+}
+
+// ── Palette from the recording ────────────────────────────────────────────
+
+/// The baseline palette (mirrors BASELINE_EMOTIONS in libraryShared.ts) …
+const BASELINE: [&str; 9] = ["neutral", "happy", "excited", "tender", "sad", "angry", "afraid", "sardonic", "whisper"];
+/// … and further moods added when a performance has clear examples of them.
+const EXTRA: [&str; 10] = ["furious", "weary", "bittersweet", "pleading", "exasperated", "smug", "anxious", "grim", "indignant", "surprised"];
+/// Clear examples an extra mood needs before it earns a palette slot.
+const EXTRA_MIN: usize = 2;
+
+fn direction_for(emotion: &str) -> &'static str {
+    match emotion {
+        "neutral" => "Even and conversational, natural pace.",
+        "happy" => "Bright and warm, smiling through the words.",
+        "excited" => "Fast and high-energy, words tumbling out.",
+        "tender" => "Soft, warm and close; gentle reassurance.",
+        "sad" => "Quiet and heavy, slower, falling at the ends of phrases.",
+        "angry" => "Hard, clipped consonants; rising force, barely held back.",
+        "afraid" => "Breathy and quick, voice tight with fear.",
+        "sardonic" => "Dry and unimpressed; flat delivery with a slight sneer.",
+        "whisper" => "Hushed and close, conspiratorial.",
+        "furious" => "Loud and fast, past the point of holding back.",
+        "weary" => "Tired and low, slow, little energy left.",
+        "bittersweet" => "Warm but sad; a smile with an ache under it.",
+        "pleading" => "Urgent and rising, asking for something that matters.",
+        "exasperated" => "At the end of their patience; sighing, pointed.",
+        "smug" => "Pleased with themselves, unhurried, a little superior.",
+        "anxious" => "Tight and hurried, worry just under the surface.",
+        "grim" => "Low, flat and heavy; bad news delivered plainly.",
+        "indignant" => "Offended and rising; how dare you.",
+        "surprised" => "Caught off guard, pitch jumping up.",
+        _ => "",
+    }
+}
+
+fn title(s: &str) -> String {
+    let mut c = s.chars();
+    c.next().map(|f| f.to_uppercase().collect::<String>() + c.as_str()).unwrap_or_default()
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaletteFill {
+    pub emotion: String,
+    /// Clips imported this time.
+    pub added: usize,
+    /// Clear examples available in the recording.
+    pub found: usize,
+    /// The best one became the emotion's approved reference.
+    pub gold_set: bool,
+    pub best_text: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaletteBuild {
+    pub filled: Vec<PaletteFill>,
+    /// Emotions in the palette (or the baseline) with no clear example.
+    pub missing: Vec<String>,
+    /// Approved palette entries after the build.
+    pub approved: usize,
+    /// Sources that haven't had their emotions read (nothing to build from yet).
+    pub untagged: Vec<String>,
+}
+
+pub struct FillOptions {
+    /// Clips to import per emotion (the best becomes the reference).
+    pub per_emotion: usize,
+    /// Replace an emotion's existing approved reference with the best clip.
+    pub replace_gold: bool,
+}
+
+impl Default for FillOptions {
+    fn default() -> Self {
+        FillOptions { per_emotion: 4, replace_gold: false }
+    }
+}
+
+/// Fill a character's emotional palette from its dissected performance: for
+/// each emotion (the palette's own, the baseline, and further moods with
+/// clear examples) import the strongest lines into `<bundle>/palette/`, make
+/// the best one the approved reference, and keep the rest as alternates.
+pub fn fill_palette(projects_dir: &Path, c: &mut Character, bundle: &Path, opts: &FillOptions) -> Result<PaletteBuild> {
+    let mut by_import: Vec<(String, String, Vec<String>)> = Vec::new(); // import, source name, speakers
+    for p in c.voice_provenance.iter().filter(|p| p.kind == "dissect" && !p.speaker_id.is_empty()) {
+        match by_import.iter_mut().find(|(i, _, _)| *i == p.import_id) {
+            Some((_, _, s)) if !s.contains(&p.speaker_id) => s.push(p.speaker_id.clone()),
+            Some(_) => {}
+            None => by_import.push((p.import_id.clone(), p.source_name.clone(), vec![p.speaker_id.clone()])),
+        }
+    }
+    if by_import.is_empty() {
+        return Err(Error::Other(format!("{} has no voice taken from a dissected recording", c.name)));
+    }
+    let mut report = PaletteBuild { filled: vec![], missing: vec![], approved: 0, untagged: vec![] };
+    let mut tagged: Vec<(String, Vec<String>, Vec<Value>)> = Vec::new();
+    for (import, name, speakers) in by_import {
+        match load(projects_dir, &import)? {
+            Some((_, data)) => tagged.push((import, speakers, data["utterances"].as_array().cloned().unwrap_or_default())),
+            None => report.untagged.push(name),
+        }
+    }
+
+    let palette_dir = bundle.join("palette");
+    std::fs::create_dir_all(&palette_dir)?;
+    let mut emotions: Vec<String> = c.voice_assignment.emotional_palette.iter().map(|e| e.emotion.clone()).collect();
+    for e in BASELINE.iter().chain(EXTRA.iter()) {
+        if !emotions.iter().any(|x| x == e) {
+            emotions.push(e.to_string());
+        }
+    }
+
+    // Lines already serving as an emotion's reference: each emotion gets its
+    // own line when there's an alternative (happy and excited shouldn't share one).
+    let mut golds: std::collections::HashSet<String> = std::collections::HashSet::new(); // import@start of lines in use
+    for emotion in emotions {
+        let existing = c.voice_assignment.emotional_palette.iter().position(|e| e.emotion == emotion);
+        let is_extra = existing.is_none() && EXTRA.contains(&emotion.as_str());
+        let recipe = existing
+            .and_then(|i| c.voice_assignment.emotional_palette[i].recipe.clone())
+            .or_else(|| default_recipe(&emotion));
+        let Some(recipe) = recipe else {
+            report.missing.push(emotion);
+            continue;
+        };
+        // Strong clips across every tagged source, best first.
+        let mut strong: Vec<(String, EmotionClip)> = Vec::new();
+        for (import, speakers, utts) in &tagged {
+            let (clips, _) = rank(utts, speakers, &recipe, 50);
+            strong.extend(clips.into_iter().filter(|c| c.strong).map(|c| (import.clone(), c)));
+        }
+        strong.sort_by(|a, b| b.1.fit.partial_cmp(&a.1.fit).unwrap_or(std::cmp::Ordering::Equal));
+        if strong.is_empty() || (is_extra && strong.len() < EXTRA_MIN) {
+            if !is_extra {
+                report.missing.push(emotion);
+            }
+            continue;
+        }
+        let found = strong.len();
+        let mut paths: Vec<(String, String, String)> = Vec::new(); // path, transcript, line key
+        for (import, clip) in strong.into_iter().take(opts.per_emotion.max(1)) {
+            let cut = clip_for(projects_dir, &import, "dialogue", clip.start, clip.end)?;
+            let dest = palette_dir.join(format!("{}_rec_{}_{}.wav", emotion, &import[..8.min(import.len())], (clip.start * 1000.0) as i64));
+            if !dest.is_file() {
+                std::fs::copy(&cut, &dest)?;
+            }
+            paths.push((dest.to_string_lossy().into_owned(), clip.text.clone(), format!("{}@{:.2}", import, clip.start)));
+        }
+
+        let idx = existing.unwrap_or_else(|| {
+            c.voice_assignment.emotional_palette.push(PaletteEntry {
+                emotion: emotion.clone(),
+                label: title(&emotion),
+                direction: direction_for(&emotion).to_string(),
+                ref_audio_path: None,
+                ref_audio_sources: vec![],
+                ref_transcript: None,
+                qa_status: "unreviewed".into(),
+                recipe: None,
+            });
+            c.voice_assignment.emotional_palette.len() - 1
+        });
+        let entry = &mut c.voice_assignment.emotional_palette[idx];
+        let mut added = 0;
+        for (p, _, _) in &paths {
+            if !entry.ref_audio_sources.contains(p) {
+                entry.ref_audio_sources.push(p.clone());
+                added += 1;
+            }
+        }
+        let gold_set = entry.ref_audio_path.is_none() || entry.qa_status != "approved" || opts.replace_gold;
+        let mut best_text = paths[0].1.clone();
+        if gold_set {
+            let (p, t, key) = paths.iter().find(|(_, _, k)| !golds.contains(k)).unwrap_or(&paths[0]).clone();
+            golds.insert(key);
+            entry.ref_audio_path = Some(p);
+            entry.ref_transcript = Some(t.clone()).filter(|t| !t.is_empty());
+            entry.qa_status = "approved".into();
+            best_text = t;
+        }
+        report.filled.push(PaletteFill { emotion, added, found, gold_set, best_text });
+    }
+    report.approved = c.voice_assignment.emotional_palette.iter().filter(|e| e.qa_status == "approved" && e.ref_audio_path.is_some()).count();
+    Ok(report)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaletteBuildResult {
+    pub report: PaletteBuild,
+    pub character: Character,
+}
+
+/// Library: fill a character's palette from its dissected recording(s) and save it.
+#[tauri::command]
+pub async fn build_palette_from_recording(app: AppHandle, library_id: String, replace_gold: Option<bool>, per_emotion: Option<usize>) -> Result<PaletteBuildResult> {
+    let projects_dir = app_projects_dir(&app)?;
+    tokio::task::spawn_blocking(move || build_library_palette(&projects_dir, &library_id, replace_gold.unwrap_or(false), per_emotion.unwrap_or(4)))
+        .await
+        .map_err(|e| Error::Other(format!("palette build: {}", e)))?
+}
+
+pub fn build_library_palette(projects_dir: &Path, library_id: &str, replace_gold: bool, per_emotion: usize) -> Result<PaletteBuildResult> {
+    let mut c = load_library_character(projects_dir, library_id)?;
+    let bundle = library_character_dir(projects_dir, library_id);
+    let report = fill_palette(projects_dir, &mut c, &bundle, &FillOptions { per_emotion, replace_gold })?;
+    let character = store_library_character(projects_dir, c)?;
+    Ok(PaletteBuildResult { report, character })
 }
 
 // ── Tagging an existing import ────────────────────────────────────────────
@@ -632,4 +892,68 @@ mod tests {
         assert_eq!(f16_to_f32(0xc000), -2.0);
         assert!((f16_to_f32(0x3555) - 0.3333).abs() < 1e-3);
     }
+
+    #[test]
+    fn fills_the_palette_from_clear_lines_and_keeps_existing_approvals() {
+        use crate::models::{VoiceAssignment, VoiceProvenance};
+        let root = std::env::temp_dir().join(format!("pharaoh-palette-{}", Uuid::new_v4()));
+        let import = Uuid::new_v4().to_string();
+        let idir = crate::commands::dissect::imports_root(&root).join(&import);
+        std::fs::create_dir_all(idir.join("stems")).unwrap();
+        // 60 s of a quiet tone as the dialogue stem.
+        let spec = hound::WavSpec { channels: 1, sample_rate: 16000, bits_per_sample: 16, sample_format: hound::SampleFormat::Int };
+        let mut w = hound::WavWriter::create(idir.join("stems/dialogue.wav"), spec).unwrap();
+        for i in 0..16000 * 60 {
+            w.write_sample(((i as f32 * 0.05).sin() * 3000.0) as i16).unwrap();
+        }
+        w.finalize().unwrap();
+        // Two clearly angry lines, two clearly happy, one neutral, one unclear.
+        let mut utts = vec![];
+        for (k, (cls, p)) in [("angry", 0.9), ("angry", 0.8), ("happy", 0.9), ("happy", 0.7), ("neutral", 0.9), ("sad", 0.05)].iter().enumerate() {
+            let a = 2.0 + k as f64 * 8.0;
+            let mut sc = serde_json::Map::new();
+            for c in CLASSES {
+                sc.insert(c.into(), serde_json::json!(if c == *cls { *p } else { 0.01 }));
+            }
+            utts.push(serde_json::json!({ "speaker": "S1", "start": a, "end": a + 4.0, "text": format!("line {}", k),
+                "overlap": false, "emotion": cls, "scores": sc }));
+        }
+        write_json(&idir.join(EMOTIONS_FILE), &serde_json::json!({ "version": 2, "utterances": utts })).unwrap();
+
+        let bundle = root.join("bundle");
+        let kept = bundle.join("palette/my_happy.wav").to_string_lossy().into_owned();
+        let mut c = Character {
+            id: "C".into(), name: "Fred".into(), description: String::new(),
+            voice_assignment: serde_json::from_value::<VoiceAssignment>(serde_json::json!({
+                "model": "Chatterbox", "speaker": null, "ref_audio_path": null, "ref_transcript": null,
+                "base_voice_description": "", "production_pipeline": "chatterbox",
+                "emotional_palette": [{ "emotion": "happy", "label": "Happy", "direction": "", "ref_audio_path": kept,
+                                        "ref_audio_sources": [kept], "ref_transcript": null, "qa_status": "approved" }]
+            })).unwrap(),
+            schema_version: 1, library_id: None, library_version: None,
+            voice_provenance: vec![VoiceProvenance {
+                kind: "dissect".into(), source_name: "show.m4b".into(), import_id: import.clone(), speaker_id: "S1".into(),
+                clips: vec![], performer: None, rights_statement: String::new(), rights_confirmed_at: String::new(),
+            }],
+        };
+        let r = fill_palette(&root, &mut c, &bundle, &FillOptions { per_emotion: 4, replace_gold: false }).unwrap();
+        let filled: Vec<&str> = r.filled.iter().map(|f| f.emotion.as_str()).collect();
+        assert!(filled.contains(&"angry") && filled.contains(&"happy") && filled.contains(&"neutral"), "{:?}", filled);
+        assert!(r.missing.contains(&"sad".to_string()), "no clear sad line: {:?}", r.missing);
+        let entry = |e: &str| c.voice_assignment.emotional_palette.iter().find(|x| x.emotion == e).unwrap().clone();
+        let angry = entry("angry");
+        assert_eq!(angry.qa_status, "approved");
+        assert_eq!(angry.ref_audio_sources.len(), 2, "both clear angry lines imported");
+        assert!(std::path::Path::new(angry.ref_audio_path.as_ref().unwrap()).is_file());
+        let happy = entry("happy");
+        assert_eq!(happy.ref_audio_path.as_deref(), Some(kept.as_str()), "an approved reference is kept without replace");
+        assert_eq!(happy.ref_audio_sources.len(), 3, "new lines are added as alternates");
+        // Furious (an extra) shares its evidence with angry but gets its own reference line.
+        if let Some(f) = c.voice_assignment.emotional_palette.iter().find(|x| x.emotion == "furious") {
+            assert_ne!(f.ref_transcript, angry.ref_transcript);
+        }
+        assert_eq!(r.approved, c.voice_assignment.emotional_palette.iter().filter(|e| e.qa_status == "approved").count());
+        std::fs::remove_dir_all(&root).ok();
+    }
+
 }

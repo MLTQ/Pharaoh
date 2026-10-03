@@ -22,8 +22,9 @@ import {
   submitChatterboxClone,
   importAudioIntoLibraryBundle,
   dissectClip,
+  buildPaletteFromRecording,
 } from "../../lib/tauriCommands";
-import type { EmotionClip, PaletteTakeFile } from "../../lib/tauriCommands";
+import type { EmotionClip, PaletteBuild, PaletteTakeFile } from "../../lib/tauriCommands";
 import { RecordingClips } from "./RecordingClips";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
@@ -109,6 +110,29 @@ export const LibraryPaletteTab: React.FC<{
     setNewEmotionDirection("");
     setAddingEmotion(false);
     setPaletteGenError(null);
+  };
+
+  // ── Build from the recording (characters lifted by Dissect) ──
+  const fromRecording = (character.voice_provenance ?? []).some((p) => p.kind === "dissect");
+  const [building, setBuilding] = useState(false);
+  const [buildReport, setBuildReport] = useState<PaletteBuild | null>(null);
+  const [replaceRefs, setReplaceRefs] = useState(false);
+  const handleBuildFromRecording = async () => {
+    const saved = await ensureSaved();
+    if (!saved?.library_id) return;
+    setBuilding(true);
+    setPaletteGenError(null);
+    try {
+      const { report, character: updated } = await buildPaletteFromRecording(saved.library_id, replaceRefs);
+      setCharacter(updated);
+      setDirty(false);
+      setBuildReport(report);
+      void refreshList();
+    } catch (e) {
+      setPaletteGenError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBuilding(false);
+    }
   };
 
   const handleAddBaseline = () => {
@@ -347,6 +371,50 @@ export const LibraryPaletteTab: React.FC<{
           style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", padding: "2px 8px" }}
         >+ Add emotion</button>
       </div>
+      {fromRecording && (
+        <div style={{
+          border: "1px solid var(--line-2)", borderRadius: "var(--r)", background: "var(--bg-1)",
+          padding: "10px 12px", marginBottom: 10,
+        }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <button className="btn btn-primary" onClick={handleBuildFromRecording} disabled={building}
+                    style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)" }}
+                    title="Fill the palette with this character's own strongest lines per emotion from the recording">
+              {building ? "Building…" : "⤓ Build from recording"}
+            </button>
+            <span style={{ flex: 1, fontSize: 11, color: "var(--fg-3)", minWidth: 200 }}>
+              Imports {character.name}'s clearest lines for each emotion from the performance and approves the best as
+              its reference — the rest stay as alternates.
+            </span>
+            <label style={{ fontSize: 10.5, color: "var(--fg-4)", display: "flex", alignItems: "center", gap: 4 }}
+                   title="Also replace references you've already approved">
+              <input type="checkbox" checked={replaceRefs} onChange={(e) => setReplaceRefs(e.target.checked)} />
+              replace approved
+            </label>
+          </div>
+          {buildReport && (
+            <div style={{ marginTop: 8, fontSize: 11, color: "var(--fg-2)", lineHeight: 1.6 }}>
+              {buildReport.untagged.length > 0 && (
+                <div style={{ color: "var(--sfx)" }}>
+                  {buildReport.untagged.join(", ")} hasn't had its emotions read — open an emotion below and click Read emotions, then build again.
+                </div>
+              )}
+              {buildReport.filled.length > 0 && (
+                <div>
+                  <span style={{ color: "var(--st-rendered)" }}>✓ {buildReport.filled.length} emotions</span> from{" "}
+                  {buildReport.filled.reduce((n, f) => n + f.added, 0)} new lines:{" "}
+                  {buildReport.filled.map((f) => `${f.emotion} (${f.found} clear)`).join(", ")}.
+                </div>
+              )}
+              {buildReport.missing.length > 0 && (
+                <div style={{ color: "var(--fg-4)" }}>
+                  No clear examples of {buildReport.missing.join(", ")} — generate or upload those, or adjust their recipe.
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
       <div style={{ display: "flex", justifyContent: "flex-end", marginTop: -2, marginBottom: 8 }}>
         <button
           className="btn btn-sm"

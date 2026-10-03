@@ -50,6 +50,10 @@ pub struct EmotionRecipe {
     pub movement: f32,
     #[serde(default)]
     pub breathy: f32,
+    /// A true blend (bittersweet = happy *and* sad): a clear example needs
+    /// every emotion weighted ≥ 0.4 present, not just one of them.
+    #[serde(default)]
+    pub require_all: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

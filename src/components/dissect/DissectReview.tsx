@@ -81,7 +81,9 @@ export const DissectReview: React.FC<{
         await importCharacterFromLibrary({ projectId, libraryId: character.library_id });
         addedToProject = true;
       }
-      setAssigned((prev) => ({ ...prev, [speakerId]: character.name }));
+      // Assigning also fills the palette from the performance (when its emotions were read).
+      const emotions = character.voice_assignment.emotional_palette.filter((e) => e.qa_status === "approved" && e.ref_audio_path).length;
+      setAssigned((prev) => ({ ...prev, [speakerId]: emotions > 0 ? `${character.name} · ${emotions} palette emotions from the performance` : character.name }));
       refreshLibrary();
       onAssigned?.(character, addedToProject);
     } catch (e) {

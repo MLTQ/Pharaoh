@@ -855,6 +855,8 @@ export interface EmotionClip {
   clarity: number;
   /** Delivery against the character's average: "loud", "slow", "breathy"… */
   traits: string[];
+  /** A clear example of the recipe, not merely its best available match. */
+  strong: boolean;
 }
 export interface EmotionClips {
   tagged: boolean;
@@ -877,6 +879,12 @@ export const dissectEmotionClips = (importId: string, speakerIds: string[], emot
 /** The character's clips whose delivery is most like the one starting at `start`. */
 export const dissectSimilarClips = (importId: string, speakerIds: string[], start: number, limit?: number): Promise<EmotionClip[]> =>
   invoke("dissect_similar_clips", { importId, speakerIds, start, limit });
+
+export interface PaletteFill { emotion: string; added: number; found: number; gold_set: boolean; best_text: string }
+export interface PaletteBuild { filled: PaletteFill[]; missing: string[]; approved: number; untagged: string[] }
+/** Fill a Library character's emotional palette from its dissected performance (saves it). */
+export const buildPaletteFromRecording = (libraryId: string, replaceGold?: boolean, perEmotion?: number): Promise<{ report: PaletteBuild; character: import("./types").Character }> =>
+  invoke("build_palette_from_recording", { libraryId, replaceGold: replaceGold ?? false, perEmotion });
 
 /** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
 export const dissectExtractSound = (request: {

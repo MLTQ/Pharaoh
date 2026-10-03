@@ -301,8 +301,13 @@ pub fn delete_library_character(app: AppHandle, library_id: String) -> Result<()
 /// on the caller side.
 #[tauri::command]
 pub fn get_library_character(app: AppHandle, library_id: String) -> Result<Character> {
-    let projects_dir = app_projects_dir(&app)?;
-    let bundle = library_character_dir(&projects_dir, &library_id);
+    load_library_character(&app_projects_dir(&app)?, &library_id)
+}
+
+/// A library character with absolute voice paths (core of `get_library_character`).
+pub fn load_library_character(projects_dir: &Path, library_id: &str) -> Result<Character> {
+    let library_id = library_id.to_string();
+    let bundle = library_character_dir(projects_dir, &library_id);
     let bundle_file = bundle.join(LIBRARY_BUNDLE_FILE);
     if !bundle_file.exists() {
         return Err(Error::Other(format!(
@@ -1007,7 +1012,13 @@ pub fn import_library_character_from_file(
 /// for creating empty library characters from scratch.
 #[tauri::command]
 pub fn save_library_character(app: AppHandle, character: Character) -> Result<Character> {
-    let projects_dir = app_projects_dir(&app)?;
+    store_library_character(&app_projects_dir(&app)?, character)
+}
+
+/// Core of `save_library_character`: writes the bundle's character.json and
+/// returns the character with absolute voice paths.
+pub fn store_library_character(projects_dir: &Path, character: Character) -> Result<Character> {
+    let projects_dir = projects_dir.to_path_buf();
     let now = Utc::now().to_rfc3339();
 
     let library_id = character
