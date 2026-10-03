@@ -54,3 +54,5 @@ Rust-side ffmpeg rendering utilities for scene composition. This file mixes plac
   it'll need a chosen reverb implementation (likely shipping a small/medium IR
   for `afir`).
 - A mono `mix:as-is` clip is upmixed with `pan=stereo|c0=c0|c1=c0` (full level). ffmpeg's implicit mono→stereo is 3 dB down per side, which would leave a rebuilt scene 3 dB under its source. Other mono rows keep the implicit upmix, so existing projects render unchanged.
+- Rows with `loop=true` repeat their input (`-stream_loop -1`) and are trimmed to `duration_ms` — beds shorter than their scene.
+- The dialogue key fed to each bed's `sidechaincompress` is `apad`-ed: the filter ends with its shorter input, which cut every ducked bed or music cue off at the scene's last line.

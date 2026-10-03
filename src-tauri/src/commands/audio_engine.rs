@@ -709,9 +709,13 @@ pub async fn render_scene_with_projects_dir(
     if !duck_target_idxs.is_empty() {
         let post_duck_labels: Vec<String> = if do_ducking {
             for (j, &idx) in duck_target_idxs.iter().enumerate() {
+                // sidechaincompress ends with the shorter input, so a bed or
+                // cue running past the last line was cut off there. Padding
+                // the dialogue key with silence lets it play out.
                 filter_parts.push(format!(
-                    "[a{}][vb{}]sidechaincompress=threshold=0.015:ratio=12:attack=8:release=600:makeup=1[d{}]",
-                    idx, j, idx
+                    "[vb{j}]apad[vbk{j}];[a{idx}][vbk{j}]sidechaincompress=threshold=0.015:ratio=12:attack=8:release=600:makeup=1[d{idx}]",
+                    j = j,
+                    idx = idx
                 ));
             }
             duck_target_idxs.iter().map(|i| format!("[d{}]", i)).collect()
