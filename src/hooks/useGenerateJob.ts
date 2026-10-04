@@ -189,6 +189,8 @@ export function useGenerateJob() {
       peaks: null,
       qa_status: "unreviewed",
       error: null,
+      audiosr: !!char?.voice_assignment.audiosr,
+      project_id: projectId,
     };
     addJob(job);
     triggerAgentActive();

@@ -570,6 +570,12 @@ export const LibraryVoiceTab: React.FC<{
           <span style={{ color: "var(--fg-4)" }}>0.5 = like the reference</span>
         </label>
         )}
+        <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}
+               title="Runs AudioSR (speech model) on every take this character generates and swaps the cleaned file into the scene — restores sibilants and breath the 24 kHz voice models leave out. Needs the post server; adds ~10–30 s per take.">
+          <input type="checkbox" checked={!!character.voice_assignment.audiosr}
+                 onChange={(e) => patch((c) => ({ ...c, voice_assignment: { ...c.voice_assignment, audiosr: e.target.checked } }))} />
+          Clean up every take with AudioSR
+        </label>
         {cloneError && <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{cloneError}</div>}
         {(() => {
           if (!character.library_id) return null;

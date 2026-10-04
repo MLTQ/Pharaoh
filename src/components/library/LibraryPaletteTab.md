@@ -28,3 +28,4 @@ Stage-2 "Palette" tab of the library character editor: add emotions, generate pe
 |-----------|---------|------------------|
 | `LibraryView` | `paletteDiskTakes` keyed by emotion slug; this tab never fetches it | Fetching here would only scan while the tab is open |
 | Job store | QA updates skipped for `disk::` ids (sidecar-backed, not in the store) | Forwarding them would throw on unknown job ids |
+- With Breeze, "Generate take" clones the gold clip performing the emotion's written direction on its sample line.

@@ -107,6 +107,10 @@ pub struct VoiceAssignment {
     pub rvc_protect: f32,
     #[serde(default, skip_serializing)]
     pub rvc_enabled: bool,
+    /// Clean up every generated take with AudioSR (speech model) — restores
+    /// the top end the 24 kHz TTS models leave out. Off by default (slow).
+    #[serde(default)]
+    pub audiosr: bool,
 }
 
 /// Nested RVC configuration for a character. Stage 4 of the voice pipeline.

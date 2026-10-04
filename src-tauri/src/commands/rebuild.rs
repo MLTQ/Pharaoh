@@ -707,6 +707,7 @@ fn new_project_character(id: &str, name: &str, description: &str) -> Character {
             rvc_index_rate: 0.5,
             rvc_protect: 0.33,
             rvc_enabled: false,
+            audiosr: false,
         },
         schema_version: CURRENT_CHARACTER_SCHEMA,
         library_id: None,

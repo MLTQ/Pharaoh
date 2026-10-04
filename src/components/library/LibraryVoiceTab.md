@@ -23,3 +23,4 @@ Stage-1 "Voice" tab of the library character editor: description + base voice de
 |-----------|---------|------------------|
 | `LibraryView` | Failures surface via `setDesignGenError` (inline) or `setError` (banner) — never thrown | Throwing would leave `saving` stuck |
 | Job store | Design jobs tagged `scene_slug = libraryDesignSlug(id)`, `row_index = LIBRARY_DESIGN_ROW` | Changing the slug orphans existing takes in the list |
+- "Speak with this voice" uses Breeze with a direction field when the TTS server runs Breeze (Chatterbox + expressiveness otherwise). "Clean up every take with AudioSR" sets `voice_assignment.audiosr`.

@@ -82,12 +82,25 @@ SPEAKERS = [
 LANGUAGES = ["en", "zh"]  # Breeze TTS 2 speaks English and Mandarin
 PRESET_LINE = "The tide came in slowly that evening, and the harbour lights flickered on one by one."
 
-# Pharaoh tags → Breeze vocal events. Documented: laugh, cough, clears throat,
-# sigh; the rest are passed as events too and checked by the take guard.
+# Pharaoh tags → Breeze vocal events. Documented upstream: laugh, cough,
+# clears throat, sigh. Probed (none read aloud; each performed something):
+# gasp, sob, crying, scream, whisper, breath, chuckle, groan, sniff, yawn, hum.
 VOCAL_EVENTS = {
-    "laugh": "laugh", "laughs": "laugh", "laughing": "laugh", "chuckle": "laugh", "chuckles": "laugh",
-    "giggle": "laugh", "sigh": "sigh", "sighs": "sigh", "cough": "cough", "coughs": "cough",
+    "laugh": "laugh", "laughs": "laugh", "laughing": "laugh", "giggle": "laugh", "giggles": "laugh",
+    "chuckle": "chuckle", "chuckles": "chuckle", "chuckling": "chuckle",
+    "sigh": "sigh", "sighs": "sigh", "sighing": "sigh",
+    "cough": "cough", "coughs": "cough", "coughing": "cough",
     "clears throat": "clears throat", "clear throat": "clears throat", "throat clear": "clears throat",
+    "gasp": "gasp", "gasps": "gasp", "gasping": "gasp",
+    "sob": "sob", "sobs": "sob", "sobbing": "sob",
+    "cry": "crying", "cries": "crying", "crying": "crying",
+    "scream": "scream", "screams": "scream", "screaming": "scream",
+    "whisper": "whisper", "whispers": "whisper", "whispering": "whisper",
+    "breath": "breath", "breathes": "breath", "inhale": "breath", "exhale": "breath", "breathing": "breath",
+    "groan": "groan", "groans": "groan", "groaning": "groan",
+    "sniff": "sniff", "sniffs": "sniff", "sniffle": "sniff", "sniffles": "sniff",
+    "yawn": "yawn", "yawns": "yawn", "yawning": "yawn",
+    "hum": "hum", "hums": "hum", "humming": "hum",
 }
 
 # ── Model state ──────────────────────────────────────────────────────────────

@@ -1052,6 +1052,7 @@ fn new_character(library_id: &str, name: &str, source_name: &str, speaker_id: &s
             rvc_index_rate: 0.5,
             rvc_protect: 0.33,
             rvc_enabled: false,
+            audiosr: false,
         },
         schema_version: CURRENT_CHARACTER_SCHEMA,
         library_id: Some(library_id.to_string()),

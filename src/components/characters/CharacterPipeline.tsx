@@ -344,7 +344,7 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
       ) : (
         <button
           onClick={() => onToggleRvcPipeline(true)}
-          title="Opt in to the Corpus + Model RVC pipeline for this character"
+          title="Experimental: train an RVC voice model (from the recording's real lines or generated takes) to lock this character's timbre. Breeze takes don't need it."
           style={{
             marginLeft: 8,
             padding: "6px 12px",
@@ -354,7 +354,7 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
             fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
           }}
         >
-          + RVC pipeline
+          + Voice lock (RVC, experimental)
         </button>
       )}
     </div>

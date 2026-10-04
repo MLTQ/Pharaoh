@@ -9,7 +9,9 @@ def test_pharaoh_tags_become_breeze_vocal_events():
     assert to_vocal_events("[laugh] You believed him?") == "(laugh) You believed him?"
     assert to_vocal_events("Well [sighs] fine.") == "Well (sigh) fine."
     assert to_vocal_events("[Clears Throat] Right.") == "(clears throat) Right."
-    assert to_vocal_events("[gasp] What?") == "(gasp) What?", "unknown cues still become events"
+    assert to_vocal_events("[gasps] What?") == "(gasp) What?"
+    assert to_vocal_events("[sobbing] Please.") == "(sob) Please."
+    assert to_vocal_events("[wheeze] Hah.") == "(wheeze) Hah.", "unknown cues still become events"
     assert to_vocal_events("No tags here.") == "No tags here."
 
 

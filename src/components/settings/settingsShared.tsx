@@ -33,8 +33,8 @@ export const TTS_VARIANTS = [
 export const MODELS = [
   {
     kind: "tts" as const,
-    label: "Qwen3-TTS",
-    description: "Voice synthesis — 24 kHz · 5 variants",
+    label: "TTS — Breeze TTS 2 (Qwen3-TTS fallback)",
+    description: "Voice synthesis — Breeze TTS 2 (design, clone, direction) when installed with ./inference/setup.sh breeze; otherwise Qwen3-TTS, 24 kHz · 5 variants",
     port: 18001,
     variants: TTS_VARIANTS,
     install: "pip install qwen-tts soundfile",

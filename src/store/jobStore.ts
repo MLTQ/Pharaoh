@@ -112,6 +112,36 @@ export const useJobStore = create<JobState>((set, get) => ({
           get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
         }
 
+        // AudioSR clean-up: the character asked for every take to be cleaned.
+        // Run the speech model on it, and when that job completes, bind the
+        // cleaned file to the same script row in place of the raw take.
+        const done = get().jobs.find((j) => j.id === payload.job_id);
+        if (done?.audiosr && payload.model !== "post" && payload.output_path) {
+          void (async () => {
+            try {
+              const { upscaleAudioAsset } = await import("../lib/tauriCommands");
+              const srId = `audiosr-${payload.job_id}`;
+              get().addJob({
+                id: srId, model: "post", description: `AudioSR · ${done.description}`, status: "running",
+                progress: 0, eta: "cleaning up", started_at: new Date().toISOString(), scene_id: null,
+                scene_slug: done.scene_slug, row_index: done.row_index, output_path: null, peaks: null,
+                qa_status: "unreviewed", error: null, project_id: done.project_id, cleans_row: true,
+              });
+              await upscaleAudioAsset({ inputPath: payload.output_path, jobId: srId, modelName: "speech", ddimSteps: 50, guidanceScale: 3.5, seed: 0 });
+            } catch (e) {
+              useToastStore.getState().push({ kind: "warn", title: "AudioSR clean-up didn't start", body: String(e) });
+            }
+          })();
+        }
+        if (done?.cleans_row && done.project_id && done.scene_slug && done.row_index != null && payload.output_path) {
+          try {
+            const { updateScriptRow } = await import("../lib/tauriCommands");
+            await updateScriptRow({ projectId: done.project_id, sceneSlug: done.scene_slug, rowIndex: done.row_index, fields: { file: payload.output_path } });
+          } catch (e) {
+            useToastStore.getState().push({ kind: "warn", title: "Cleaned take not placed", body: String(e) });
+          }
+        }
+
         // Fetch waveform peaks via the session cache so the panels that later
         // ask for the same file get an instant hit instead of recomputing.
         try {

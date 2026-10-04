@@ -127,6 +127,7 @@ async fn end_to_end_render_pipeline() {
                 rvc_index_rate: 0.5,
                 rvc_protect: 0.33,
                 rvc_enabled: false,
+                audiosr: false,
             },
             schema_version: crate::models::CURRENT_CHARACTER_SCHEMA,
             library_id: None,

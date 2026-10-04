@@ -34,3 +34,4 @@ Rows with `model: "dissect"` are added and updated by [dissectStore](./dissectSt
 
 ## Clearing
 `clearFinished()` drops every complete / failed / cancelled row (the queue's **Clear N** button); `removeJob` backs each finished row's ×. Only the list changes — nothing on disk is touched.
+- AudioSR clean-up: a completed take whose job has `audiosr` starts an AudioSR (speech) job with `cleans_row`; when that completes, `update_script_row` binds the cleaned file in place of the raw take.

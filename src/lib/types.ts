@@ -142,6 +142,8 @@ export interface VoiceAssignment {
    * per-line generation. Defaults to "chatterbox" for new characters.
    */
   production_pipeline: "chatterbox" | "chatterbox+rvc";
+  /** Clean up every generated take with AudioSR (speech model). */
+  audiosr?: boolean;
   /**
    * Stage 4 voice pipeline: RVC model trained on the Chatterbox corpus.
    * Undefined/null when RVC has not been configured for this character.
@@ -477,6 +479,12 @@ export interface Job {
   peaks: number[] | null; // waveform peaks fetched after completion
   qa_status: QaJobStatus; // defaults to "unreviewed" on job creation
   error: string | null;
+  /** Run AudioSR on the take when it completes (the character's setting). */
+  audiosr?: boolean;
+  /** Project the take belongs to — where the cleaned file is bound. */
+  project_id?: string;
+  /** An AudioSR job that should replace this scene row's take when done. */
+  cleans_row?: boolean;
 }
 
 // ── Asset browser items ─────────────────────────────────────────────────────
