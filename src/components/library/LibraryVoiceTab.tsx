@@ -18,12 +18,15 @@ import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
   submitChatterboxClone,
+  submitTtsVoiceClone,
   referenceTranscript,
   importAudioIntoLibraryBundle,
   concatAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
+import { useModelStore } from "../../store/modelStore";
+import { dialogueEngine, breezeDirection } from "../../hooks/useGenerateJob";
 import type { Character } from "../../lib/types";
 import {
   LIBRARY_PROJECT_ID,
@@ -69,6 +72,9 @@ export const LibraryVoiceTab: React.FC<{
   // ── Clone test: speak a line in the gold reference's voice (Chatterbox) ──
   const [cloneLine, setCloneLine] = React.useState("");
   const [exaggeration, setExaggeration] = React.useState(0.5);
+  const [cloneDirection, setCloneDirection] = React.useState("");
+  useModelStore((s) => s.health.tts?.engine); // re-render when the engine changes
+  const engine = dialogueEngine(character);
   const [cloning, setCloning] = React.useState(false);
   const [cloneError, setCloneError] = React.useState<string | null>(null);
 
@@ -83,20 +89,24 @@ export const LibraryVoiceTab: React.FC<{
     const slug = libraryDesignSlug(character.library_id);
     const outputPath = `${projectsDir}/_library/characters/${character.library_id}/design/clone_${Date.now()}.wav`;
     try {
-      const jobId = await submitChatterboxClone({
-        projectId: LIBRARY_PROJECT_ID,
-        sceneSlug: slug,
-        rowIndex: LIBRARY_CLONE_ROW,
-        params: {
-          text,
-          ref_audio_path: libraryBundlePath(projectsDir, character.library_id, gold),
-          ref_transcript: character.voice_assignment.ref_transcript ?? "",
-          exaggeration,
-          cfg_weight: 0.5,
-          seed: Math.floor(Math.random() * 9999),
-          output_path: outputPath,
-        },
-      });
+      const ref = libraryBundlePath(projectsDir, character.library_id, gold);
+      const jobId = engine === "breeze"
+        ? await submitTtsVoiceClone({
+            projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_CLONE_ROW,
+            params: {
+              text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
+              language: "en", icl_mode: false, seed: Math.floor(Math.random() * 9999),
+              temperature: 0.7, top_p: 0.9, max_new_tokens: 2048, output_path: outputPath,
+              instruct: breezeDirection(character, cloneDirection),
+            },
+          })
+        : await submitChatterboxClone({
+            projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_CLONE_ROW,
+            params: {
+              text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
+              exaggeration, cfg_weight: 0.5, seed: Math.floor(Math.random() * 9999), output_path: outputPath,
+            },
+          });
       addJob({
         id: jobId, model: "tts", description: `Clone · ${character.name}`, status: "pending", progress: 0, eta: "…",
         started_at: new Date().toISOString(), scene_id: null, scene_slug: slug, row_index: LIBRARY_CLONE_ROW,
@@ -516,15 +526,18 @@ export const LibraryVoiceTab: React.FC<{
         placeholder="What is spoken in the reference audio…"
       />
 
-      {/* Speak with this voice — Chatterbox clones the gold clip */}
+      {/* Speak with this voice — Breeze (or Chatterbox) clones the gold clip */}
       <div style={{
         margin: "4px 0 16px", padding: "12px 12px 10px",
         border: "1px solid var(--line-2)", borderRadius: "var(--r)", background: "var(--bg-1)",
       }}>
         <label style={{ ...labelStyle, marginBottom: 4 }}>Speak with this voice</label>
         <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 8, lineHeight: 1.6 }}>
-          Chatterbox clones the gold clip above — no description needed. Scene dialogue for this
-          character uses the same clone. Tags like [laugh] or [sigh] in the line are performed.
+          {engine === "breeze"
+            ? <>Breeze clones the gold clip above and performs the line the way the direction says. Scene
+              dialogue for this character works the same way. [laugh], [sigh], [cough] and [clears throat] are performed.</>
+            : <>Chatterbox clones the gold clip above — no description needed. Scene dialogue for this
+              character uses the same clone.</>}
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
@@ -543,6 +556,12 @@ export const LibraryVoiceTab: React.FC<{
             style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
           >{cloning ? "Sending…" : "Speak"}</button>
         </div>
+        {engine === "breeze" ? (
+          <input className="input" value={cloneDirection} onChange={(e) => setCloneDirection(e.target.value)}
+                 onKeyDown={(e) => { if (e.key === "Enter") void handleClone(); }}
+                 style={{ width: "100%", fontSize: 12, marginTop: 8, boxSizing: "border-box" }}
+                 placeholder="Direction: furious, voice rising… (or a palette emotion; blank = as the reference)" />
+        ) : (
         <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}>
           Expressiveness
           <input type="range" min={0} max={1} step={0.05} value={exaggeration}
@@ -550,6 +569,7 @@ export const LibraryVoiceTab: React.FC<{
           <span style={{ fontFamily: "var(--font-mono)", width: 32 }}>{exaggeration.toFixed(2)}</span>
           <span style={{ color: "var(--fg-4)" }}>0.5 = like the reference</span>
         </label>
+        )}
         {cloneError && <div style={{ marginTop: 6, fontSize: 11, color: "var(--sfx)" }}>{cloneError}</div>}
         {(() => {
           if (!character.library_id) return null;

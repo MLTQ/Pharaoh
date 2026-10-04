@@ -176,9 +176,10 @@ async fn generate_dialogue(
         &format!("{stem}_{}", Utc::now().timestamp_millis()),
     );
 
-    // A cloned voice (gold reference + Chatterbox pipeline) speaks through
-    // Chatterbox — the gold clip, or the palette reference the row's emotion /
-    // parenthetical names. Everyone else uses CustomVoice's preset speakers.
+    // A cloned voice (gold reference) speaks through Breeze (direction) when it
+    // serves the TTS port, else Chatterbox — the gold clip, or the palette
+    // reference the row's emotion / parenthetical names. Everyone else uses
+    // the TTS server's preset speakers.
     if let Some(ch) = character.filter(|c| {
         c.voice_assignment.ref_audio_path.as_deref().is_some_and(|p| !p.trim().is_empty())
             && c.voice_assignment.production_pipeline.starts_with("chatterbox")
@@ -332,25 +333,41 @@ async fn generate_cloned(
         crate::app_support::character_dir(projects_dir, project_id, &c.id).join(&raw_ref).to_string_lossy().into_owned()
     };
     let transcript = palette.and_then(|e| e.ref_transcript.clone()).or_else(|| c.voice_assignment.ref_transcript.clone()).unwrap_or_default();
-    let base = config.chatterbox_url.trim_end_matches('/').to_string();
+    // Breeze serves the TTS port when installed: clone + direction there.
+    // Characters on the Chatterbox + RVC pipeline keep Chatterbox.
+    let breeze = c.voice_assignment.production_pipeline != "chatterbox+rvc" && tts_engine(&http, &config.tts_url).await == "breeze";
+    let base = if breeze { config.tts_url.clone() } else { config.chatterbox_url.clone() }.trim_end_matches('/').to_string();
     let remote = is_remote_url(&base);
     let ref_for_server = if remote { upload_input_file(&http, &base, &local_ref).await? } else { local_ref.clone() };
     let seed = random_seed();
-    let body = serde_json::json!({
-        "text": row.prompt, "ref_audio_path": ref_for_server, "ref_transcript": transcript,
-        "exaggeration": 0.5, "cfg_weight": 0.5, "seed": seed,
-        "output_path": if remote { String::new() } else { output_path.to_string() },
-    });
-    let job_id = submit_job(&http, format!("{}/generate/clone", base), &body, "Chatterbox").await?;
-    let status = poll_job(&http, format!("{}/jobs", base), &job_id, "Chatterbox").await?;
+    let out_field = if remote { String::new() } else { output_path.to_string() };
+    let (endpoint, label, body) = if breeze {
+        // The direction: the palette emotion's written direction, plus the row's
+        // own note when it says more than the emotion's name.
+        let note = format!("{} {}", row.emotion, row.instruct).trim().to_string();
+        let just_name = palette.is_some_and(|e| note.eq_ignore_ascii_case(&e.emotion) || note.eq_ignore_ascii_case(&e.label));
+        let direction = [if just_name { "" } else { note.as_str() }, palette.map(|e| e.direction.as_str()).unwrap_or("")]
+            .iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ");
+        ("voice_clone", "Breeze", serde_json::json!({
+            "text": row.prompt, "ref_audio_path": ref_for_server, "ref_transcript": transcript,
+            "instruct": direction, "seed": seed, "output_path": out_field,
+        }))
+    } else {
+        ("clone", "Chatterbox", serde_json::json!({
+            "text": row.prompt, "ref_audio_path": ref_for_server, "ref_transcript": transcript,
+            "exaggeration": 0.5, "cfg_weight": 0.5, "seed": seed, "output_path": out_field,
+        }))
+    };
+    let job_id = submit_job(&http, format!("{}/generate/{}", base, endpoint), &body, label).await?;
+    let status = poll_job(&http, format!("{}/jobs", base), &job_id, label).await?;
     let local_out = if remote {
         download_remote_file_to(&http, &base, &job_id, output_path).await?
     } else {
         status.output_path.unwrap_or_else(|| output_path.to_string())
     };
     let meta = SidecarMeta {
-        model: "chatterbox-turbo".into(),
-        model_variant: Some("0.5B".into()),
+        model: if breeze { "breeze-tts-2-direction".into() } else { "chatterbox".into() },
+        model_variant: None,
         prompt: row.prompt.clone(),
         instruct: palette.map(|e| format!("palette: {}", e.label)),
         speaker: Some(c.name.clone()),
@@ -372,11 +389,25 @@ async fn generate_cloned(
         project_id: project_id.into(),
         scene_slug: scene_slug.into(),
         row_index,
-        model: if palette.is_some() { "chatterbox (palette)".into() } else { "chatterbox".into() },
+        model: format!("{}{}", if breeze { "breeze" } else { "chatterbox" }, if palette.is_some() { " (palette)" } else { "" }),
         output_path: finalized.output_path,
         duration_ms: finalized.duration_ms,
         bound_to_script: finalized.bound_to_script,
     })
+}
+
+/// The TTS server's engine ("breeze" or "" for Qwen), checked once per run.
+async fn tts_engine(http: &reqwest::Client, tts_url: &str) -> String {
+    static ENGINE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    ENGINE
+        .get_or_init(|| async {
+            match http.get(format!("{}/health", tts_url)).timeout(std::time::Duration::from_secs(10)).send().await {
+                Ok(r) => r.json::<serde_json::Value>().await.ok().and_then(|h| h["engine"].as_str().map(str::to_string)).unwrap_or_default(),
+                Err(_) => String::new(),
+            }
+        })
+        .await
+        .clone()
 }
 
 /// Whether the SFX server reports AudioLDM usable (checked once per run).

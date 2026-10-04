@@ -279,6 +279,10 @@ async def _run(job_id: str, p: dict) -> None:
                 meta["ref_transcript_corrected"] = corrected
                 meta["parent"] = p.get("ref_audio_path")
             want = spoken_words(p["text"])
+            # Speech recognition mishears whispered and breathy delivery, so the
+            # bar is lower there — otherwise good whispers burn every retake.
+            hushed = bool(instruction) and re.search(r"whisper|hush|breath|murmur|under (his|her|their) breath", instruction, re.I)
+            max_wer = max(MAX_WER, 0.5) if hushed else MAX_WER
             best = None
             for k in range(TRIES):
                 s = seed + k * 1009
@@ -291,7 +295,7 @@ async def _run(job_id: str, p: dict) -> None:
                 score = wer(want, heard) if heard is not None else 0.0
                 if best is None or score < best[2]:
                     best = (audio, sr, score, s, heard)
-                if heard is None or score <= MAX_WER:
+                if heard is None or score <= max_wer:
                     break
             audio, sr, score, s, heard = best
         jobs.update(job_id, progress=0.92, message="Saving")
@@ -301,7 +305,7 @@ async def _run(job_id: str, p: dict) -> None:
                                   "duration_actual_ms": int(len(audio) / sr * 1000),
                                   "heard": heard, "wer": None if heard is None else round(score, 3)})
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path,
-                    message="Done" if heard is None or score <= MAX_WER else f"Done (best of {TRIES}; still {score:.0%} off the script)")
+                    message="Done" if heard is None or score <= max_wer else f"Done (best of {TRIES}; still {score:.0%} off the script)")
     except Exception as exc:
         log.exception("Breeze generation failed")
         jobs.update(job_id, status="failed", error=f"{type(exc).__name__}: {exc}")
@@ -347,12 +351,23 @@ class VoiceCloneParams(_Common):
 
 # ── Endpoints ────────────────────────────────────────────────────────────────
 
+def _vram_mb() -> int:
+    """GPU memory this process holds (Breeze + the take checker: ~11–12 GB)."""
+    if _rt is None:
+        return 0
+    try:
+        import torch
+        return int(torch.cuda.memory_reserved() / 2**20)
+    except Exception:
+        return 0
+
+
 @app.get("/health")
 async def health() -> dict:
     return {"status": "ok", "model_loaded": _rt is not None, "model_variant": MODEL_VARIANT,
             "engine": "breeze", "loaded_types": ["breeze"] if _rt else [],
             "take_checker": ASR_MODEL if _asr is not None else (None if _rt is None else "off"),
-            "vram_mb": 8000 if _rt else 0, "stub": False,
+            "vram_mb": _vram_mb(), "stub": False,
             "weights_found": (MODEL_DIR / "config.json").is_file(), "code_found": (REPO / "breeze_infer").is_dir(),
             "capabilities": ["voice_design", "voice_clone", "direction", "custom_voice", "vocal_events"]}
 
