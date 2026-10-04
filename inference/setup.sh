@@ -2,7 +2,9 @@
 # One-shot setup for Pharaoh's inference servers.
 #
 # Creates isolated uv venvs alongside this script:
-#   inference/.venv-tts        → qwen-tts (transformers 4.57.3)
+#   inference/.venv-breeze     → Breeze TTS 2: dialogue, voice design, cloning
+#                                with direction (Python 3.11; Linux + NVIDIA)
+#   inference/.venv-tts        → qwen-tts (transformers 4.57.3) — fallback TTS
 #   inference/.venv-music      → ace-step (transformers 4.50.0)
 #   inference/.venv-audioldm   → optional upstream AudioLDM runner
 #   inference/.venv-audiosr    → optional AudioSR upscaler
@@ -15,8 +17,11 @@
 # Usage:
 #   ./inference/setup.sh                 core envs + any optional ones enabled below
 #   ./inference/setup.sh dissect         ONLY the named sections (forces them on);
-#   ./inference/setup.sh core dissect    sections: core chatterbox rvc audioldm
-#                                        audiosr dissect applio
+#   ./inference/setup.sh core dissect    sections: core breeze chatterbox rvc
+#                                        audioldm audiosr dissect applio
+#
+# Breeze defaults to "auto" like dissect (PHARAOH_INSTALL_BREEZE=0/1); its
+# weights (~7 GB) go to PHARAOH_BREEZE_HOME (~/pharaoh-models/breeze).
 #
 # Optional sections are switched on with PHARAOH_INSTALL_<NAME>=1. Dissect
 # defaults to "auto": installed when an NVIDIA GPU is found on Linux, skipped
@@ -44,6 +49,12 @@ RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 DISSECT_VENV="${SCRIPT_DIR}/.venv-dissect"
+BREEZE_VENV="${SCRIPT_DIR}/.venv-breeze"
+INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}"
+BREEZE_HOME="${PHARAOH_BREEZE_HOME:-$HOME/pharaoh-models/breeze}"
+BREEZE_REPO="${PHARAOH_BREEZE_REPO:-${BREEZE_HOME}/breeze-tts}"
+BREEZE_MODEL_DIR="${PHARAOH_BREEZE_MODEL_DIR:-${BREEZE_HOME}/breeze-tts-2}"
+BREEZE_COMMIT="58ec70c"
 INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-auto}"
 DISSECT_PREFETCH="${PHARAOH_DISSECT_PREFETCH:-1}"
 DISSECT_MODEL_DIR="${PHARAOH_DISSECT_MODEL_DIR:-$HOME/pharaoh-models/dissect}"
@@ -57,7 +68,7 @@ INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
 # ── Sections ─────────────────────────────────────────────────────────────────
 # With no arguments every section runs (optional ones per their flags). Naming
 # sections runs only those and switches the named optional ones on.
-KNOWN_SECTIONS="core chatterbox rvc audioldm audiosr dissect applio"
+KNOWN_SECTIONS="core breeze chatterbox rvc audioldm audiosr dissect applio"
 SECTIONS=" "
 for arg in "$@"; do
     case "${arg}" in
@@ -65,6 +76,7 @@ for arg in "$@"; do
             sed -n '2,/^set -euo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'
             exit 0 ;;
         core) ;;
+        breeze) INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}" ;;
         chatterbox) INSTALL_CHATTERBOX=1 ;;
         rvc) INSTALL_RVC=1 ;;
         audioldm) INSTALL_AUDIOLDM=1 ;;
@@ -173,6 +185,49 @@ else
 fi
 
 fi  # core
+
+# ── Breeze TTS 2 (dialogue engine) ───────────────────────────────────────────
+if only breeze; then
+step "Breeze TTS 2 (.venv-breeze)"
+if [ "${INSTALL_BREEZE}" = "auto" ]; then
+    if [ "$(uname -s)" = "Linux" ] && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        INSTALL_BREEZE=1; ok "NVIDIA GPU found — installing Breeze (PHARAOH_INSTALL_BREEZE=0 to skip)"
+    else
+        INSTALL_BREEZE=0; hint "Breeze needs an NVIDIA GPU (~8 GB); Qwen3-TTS stays the TTS engine here."
+    fi
+fi
+if [ "${INSTALL_BREEZE}" = "1" ]; then
+    mkdir -p "${BREEZE_HOME}"
+    if [ ! -d "${BREEZE_REPO}/breeze_infer" ]; then
+        git clone -q https://github.com/breezeblue-ai/breeze-tts.git "${BREEZE_REPO}"
+        git -C "${BREEZE_REPO}" checkout -q "${BREEZE_COMMIT}" || warn "couldn't pin breeze-tts to ${BREEZE_COMMIT}; using its default branch"
+        ok "breeze-tts code in ${BREEZE_REPO}"
+    else
+        ok "Reusing breeze-tts code in ${BREEZE_REPO}"
+    fi
+    [ -d "${BREEZE_VENV}" ] || uv venv -q --python 3.11 "${BREEZE_VENV}"
+    uv pip install --python "${BREEZE_VENV}/bin/python" -r "${BREEZE_REPO}/requirements.txt" \
+        fastapi uvicorn pydantic soundfile
+    ok "Breeze deps synced"
+    if [ ! -f "${BREEZE_MODEL_DIR}/config.json" ]; then
+        # The weights' licence (BreezeBlue Research and Non-Commercial) comes
+        # with the download: https://huggingface.co/BreezeBlue/Breeze-TTS-2
+        if [ -x "${BREEZE_VENV}/bin/hf" ]; then
+            "${BREEZE_VENV}/bin/hf" download BreezeBlue/Breeze-TTS-2 --local-dir "${BREEZE_MODEL_DIR}"
+        else
+            "${BREEZE_VENV}/bin/huggingface-cli" download BreezeBlue/Breeze-TTS-2 --local-dir "${BREEZE_MODEL_DIR}"
+        fi
+        ok "Breeze TTS 2 weights in ${BREEZE_MODEL_DIR} (research / non-commercial licence)"
+    else
+        ok "Reusing Breeze weights in ${BREEZE_MODEL_DIR}"
+    fi
+    # Take checker (Whisper) — fetched now so the first generation doesn't stall.
+    "${BREEZE_VENV}/bin/python" -c "from transformers import pipeline; pipeline('automatic-speech-recognition', model='${PHARAOH_BREEZE_ASR:-openai/whisper-small.en}')" >/dev/null 2>&1 \
+        && ok "Take checker ready" || warn "Take checker download failed; Breeze runs without retake checks"
+else
+    [ "${INSTALL_BREEZE}" = "0" ] && hint "Breeze skipped (PHARAOH_INSTALL_BREEZE=1 ./inference/setup.sh breeze to force)"
+fi
+fi  # breeze
 
 # ── Optional Chatterbox Turbo ────────────────────────────────────────────────
 if only chatterbox; then

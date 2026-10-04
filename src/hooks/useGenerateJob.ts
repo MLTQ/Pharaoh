@@ -1,8 +1,10 @@
 import { useProjectStore, deriveSlug } from "../store/projectStore";
 import { useJobStore } from "../store/jobStore";
 import { useUiStore } from "../store/uiStore";
+import { useModelStore } from "../store/modelStore";
 import {
   submitTtsCustomVoice,
+  submitTtsVoiceClone,
   submitChatterboxClone,
   submitSfxT2a,
   submitMusicText2Music,
@@ -15,6 +17,34 @@ function now() {
 
 function makeOutputPath(projectsDir: string, projectId: string, sceneSlug: string, filename: string) {
   return `${projectsDir}/${projectId}/scenes/${sceneSlug}/assets/${filename}`;
+}
+
+/**
+ * How a character's lines are voiced:
+ *  - "breeze"     — Breeze TTS 2 serves the TTS port: clone the gold clip (or the
+ *                   line's palette reference) and perform the line's direction.
+ *  - "chatterbox" — Chatterbox clone (characters on the Chatterbox + RVC pipeline,
+ *                   or any cloned voice when Breeze isn't installed).
+ *  - "preset"     — no reference clip: the TTS server's named speaker.
+ */
+export type DialogueEngine = "breeze" | "chatterbox" | "preset";
+
+export function dialogueEngine(char: Character | undefined): DialogueEngine {
+  const va = char?.voice_assignment;
+  if (!va?.ref_audio_path) return "preset";
+  if (va.production_pipeline === "chatterbox+rvc") return "chatterbox";
+  if (useModelStore.getState().health.tts?.engine === "breeze") return "breeze";
+  return (va.production_pipeline ?? "chatterbox").startsWith("chatterbox") ? "chatterbox" : "preset";
+}
+
+/** The direction Breeze performs for a line: the palette emotion's written
+ *  direction, plus the line's own note when it says more than the emotion's name. */
+export function breezeDirection(char: Character | undefined, note: string | undefined): string {
+  const n = (note ?? "").trim();
+  const entry = paletteEntryFor(char, n);
+  const justTheName = !!entry && (n.toLowerCase() === entry.emotion.toLowerCase() || n.toLowerCase() === entry.label.toLowerCase());
+  return [justTheName ? "" : n, entry?.direction ?? ""].filter(Boolean).join(" ").trim()
+    || (char?.voice_assignment.instruct_default ?? "").trim();
 }
 
 /** A character speaks in its cloned voice when it has a gold reference clip
@@ -97,9 +127,25 @@ export function useGenerateJob() {
     const speaker = params.speaker || char?.voice_assignment.speaker || "Vivian";
     const instruct = params.instruct ?? char?.voice_assignment.instruct_default ?? "";
 
-    const palette = clonesVoice(char) ? paletteEntryFor(char, params.emotion) : undefined;
+    const engine = dialogueEngine(char);
+    const palette = engine !== "preset" ? paletteEntryFor(char, params.emotion) : undefined;
     const refPath = palette?.ref_audio_path ?? char?.voice_assignment.ref_audio_path ?? "";
-    const jobId = char && clonesVoice(char)
+    const absRef = (p: string) => (p.startsWith("/") ? p : `${pDir}/${projectId}/characters/${char!.id}/${p}`);
+    const jobId = char && engine === "breeze"
+      ? await submitTtsVoiceClone({
+          projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
+          params: {
+            text: params.text,  // [laugh]-style tags are translated server-side
+            ref_audio_path: absRef(refPath),
+            ref_transcript: (palette ? palette.ref_transcript : char.voice_assignment.ref_transcript) ?? "",
+            language: "en", icl_mode: false,
+            seed: params.seed ?? Math.floor(Math.random() * 99999),
+            temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
+            output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
+            instruct: breezeDirection(char, params.emotion ?? params.instruct),
+          },
+        })
+      : char && engine === "chatterbox"
       ? await submitChatterboxClone({
           projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
           params: {

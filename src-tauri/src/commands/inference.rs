@@ -852,11 +852,12 @@ pub async fn submit_tts_voice_clone(
         .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
         .to_string();
 
+    // Breeze serves this endpoint when installed; a directed clone is Breeze-only.
     let meta = SidecarMeta {
-        model: "qwen3-tts-clone".into(),
-        model_variant: Some("1.7B".into()),
+        model: if params.instruct.is_empty() { "tts-voice-clone".into() } else { "breeze-tts-2-direction".into() },
+        model_variant: None,
         prompt: params.text.clone(),
-        instruct: None,
+        instruct: (!params.instruct.is_empty()).then(|| params.instruct.clone()),
         speaker: None,
         language: Some(params.language.clone()),
         seed: params.seed,

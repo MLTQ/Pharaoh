@@ -10,6 +10,8 @@ export interface ServerHealth {
   model_variant: string;
   vram_mb: number;
   stub: boolean;
+  /** TTS server engine: "breeze" (Breeze TTS 2) when it serves port 18001; absent for Qwen. */
+  engine?: string;
   audioldm_ready?: boolean;
   audioldm_error?: string;
   audioldm_model?: string;

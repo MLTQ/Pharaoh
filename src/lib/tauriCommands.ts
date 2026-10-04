@@ -166,6 +166,10 @@ export const submitTtsVoiceClone = (args: {
     top_p: number;
     max_new_tokens: number;
     output_path: string;
+    /** Breeze: natural-language direction for the delivery; makes a clone a directed take. */
+    instruct?: string;
+    /** Breeze: how strongly to follow the direction (default 4 with a direction). */
+    cfg_scale?: number;
   };
 }): Promise<string> => invoke("submit_tts_voice_clone", args);
 

@@ -598,6 +598,13 @@ pub struct TtsVoiceCloneRequest {
     pub top_p: f32,
     pub max_new_tokens: u32,
     pub output_path: String,
+    /// Breeze TTS 2: natural-language direction ("Furious, voice rising…") —
+    /// turns a clone into a directed performance. Ignored by Qwen.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub instruct: String,
+    /// Breeze: how strongly to follow the direction (docs recommend 4).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cfg_scale: Option<f32>,
 }
 
 /// Chatterbox Turbo zero-shot clone: the voice comes from `ref_audio_path`

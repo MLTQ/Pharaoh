@@ -352,7 +352,7 @@ fn usage() -> &'static str {
   pharaoh asset use <project_id> <scene_slug> <row_index> <audio_path>
   pharaoh generate tts-custom --text <text> --output-path <wav> [--speaker <name>] [--instruct <text>]
   pharaoh generate tts-design --text <text> --voice-description <text> --output-path <wav>
-  pharaoh generate tts-clone --text <text> --ref-audio-path <wav> --output-path <wav>
+  pharaoh generate tts-clone --text <text> --ref-audio-path <wav> --output-path <wav> [--ref-transcript <text>] [--instruct <direction>] [--cfg-scale 4]
   pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>

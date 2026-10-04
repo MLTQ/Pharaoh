@@ -221,6 +221,9 @@ pub(super) async fn character_voice_clone_test(
         top_p: flag_parse(&flags, "top_p", 0.9)?,
         max_new_tokens: flag_parse(&flags, "max_new_tokens", 1024)?,
         output_path,
+        // Breeze: direction for the delivery ("Furious, voice rising…").
+        instruct: flag_string(&flags, "instruct", ""),
+        cfg_scale: flag_opt(&flags, "cfg_scale").and_then(|v| v.parse().ok()),
     };
     submit_tts_clone_and_finalize(config, params).await
 }

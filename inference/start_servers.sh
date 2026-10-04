@@ -5,7 +5,9 @@
 # First time? Run:  ./inference/setup.sh
 #
 # Python interpreters (override via env vars):
-#   TTS        : inference/.venv-tts/bin/python3           (PHARAOH_TTS_PYTHON)
+#   TTS        : Breeze TTS 2 when installed — inference/.venv-breeze (PHARAOH_BREEZE_PYTHON),
+#                else Qwen3-TTS — inference/.venv-tts (PHARAOH_TTS_PYTHON).
+#                PHARAOH_TTS_ENGINE=qwen|breeze forces one. Both serve port 18001.
 #   Music      : inference/.venv-music/bin/python3         (PHARAOH_MUSIC_PYTHON)
 #   SFX        : ~/Code/Woosh/.venv/bin/python3            (PHARAOH_WOOSH_DIR)
 #                optional AudioLDM runner: inference/.venv-audioldm/bin/python3
@@ -35,6 +37,14 @@ POST_PYTHON="${PHARAOH_POST_PYTHON:-${SCRIPT_DIR}/.venv-audiosr/bin/python3}"
 CHATTERBOX_PYTHON="${PHARAOH_CHATTERBOX_PYTHON:-${SCRIPT_DIR}/.venv-chatterbox/bin/python3}"
 RVC_PYTHON="${PHARAOH_RVC_PYTHON:-${SCRIPT_DIR}/.venv-rvc/bin/python3}"
 DISSECT_PYTHON="${PHARAOH_DISSECT_PYTHON:-${SCRIPT_DIR}/.venv-dissect/bin/python3}"
+BREEZE_PYTHON="${PHARAOH_BREEZE_PYTHON:-${SCRIPT_DIR}/.venv-breeze/bin/python3}"
+export PHARAOH_BREEZE_HOME="${PHARAOH_BREEZE_HOME:-$HOME/pharaoh-models/breeze}"
+BREEZE_WEIGHTS="${PHARAOH_BREEZE_MODEL_DIR:-${PHARAOH_BREEZE_HOME}/breeze-tts-2}/config.json"
+# Breeze replaces Qwen as the TTS engine when it's installed.
+TTS_ENGINE="${PHARAOH_TTS_ENGINE:-}"
+if [ -z "${TTS_ENGINE}" ]; then
+    if [ -x "${BREEZE_PYTHON}" ] && [ -f "${BREEZE_WEIGHTS}" ]; then TTS_ENGINE=breeze; else TTS_ENGINE=qwen; fi
+fi
 WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
 
 missing=0
@@ -46,13 +56,21 @@ check_python() {
         missing=1
     fi
 }
-check_python "TTS"   "${TTS_PYTHON}"   "Run: ./inference/setup.sh"
+if [ "${TTS_ENGINE}" = "breeze" ]; then
+    check_python "TTS (Breeze)" "${BREEZE_PYTHON}" "Run: ./inference/setup.sh breeze"
+else
+    check_python "TTS"   "${TTS_PYTHON}"   "Run: ./inference/setup.sh"
+fi
 check_python "Music" "${MUSIC_PYTHON}" "Run: ./inference/setup.sh"
 check_python "SFX"   "${WOOSH_PYTHON}" "Run: cd ${PHARAOH_WOOSH_DIR} && uv sync (or set PHARAOH_WOOSH_DIR)"
 [ "$missing" -eq 0 ] || exit 1
 
 echo "Starting Pharaoh inference servers..."
-echo "  TTS   : ${TTS_PYTHON}"
+if [ "${TTS_ENGINE}" = "breeze" ]; then
+    echo "  TTS   : ${BREEZE_PYTHON} (Breeze TTS 2)"
+else
+    echo "  TTS   : ${TTS_PYTHON} (Qwen3-TTS)"
+fi
 echo "  SFX   : ${WOOSH_PYTHON} (Woosh)"
 echo "  SFX+  : ${PHARAOH_AUDIOLDM_PYTHON} (optional AudioLDM runner)"
 echo "  SFX+ models: ${AUDIOLDM_CACHE_DIR}"
@@ -81,7 +99,11 @@ echo ""
 
 cd "$SCRIPT_DIR"
 
-"${TTS_PYTHON}"   tts_server.py   &
+if [ "${TTS_ENGINE}" = "breeze" ]; then
+    "${BREEZE_PYTHON}" breeze_server.py &
+else
+    "${TTS_PYTHON}"   tts_server.py   &
+fi
 "${WOOSH_PYTHON}" sfx_server.py   &
 "${MUSIC_PYTHON}" music_server.py &
 if [ -x "${POST_PYTHON}" ]; then
