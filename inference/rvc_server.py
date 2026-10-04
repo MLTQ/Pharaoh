@@ -30,6 +30,7 @@ Training:
   independently of Applio — training is a one-time pre-production step.
 """
 import asyncio
+import re
 import datetime
 import json
 import logging
@@ -45,6 +46,11 @@ from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
 from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
+
+# Trained models live here when the client leaves the output paths empty
+# (a remote client can't name a path on this machine). Outside server-output/
+# so fetching a model over /files never reaps it.
+MODELS_DIR = Path(os.environ.get("PHARAOH_RVC_MODELS", Path(__file__).resolve().parent / ".rvc-models"))
 
 log = logging.getLogger(__name__)
 
@@ -149,10 +155,10 @@ class TrainParams(BaseModel):
     job_id: Optional[str] = None
     corpus_paths: list[str]
     """Absolute paths to WAV files (Chatterbox output) that form the training corpus."""
-    output_model_path: str
-    """Absolute path where the trained .pth model file should be saved."""
-    output_index_path: str
-    """Absolute path where the trained .index FAISS file should be saved."""
+    output_model_path: str = ""
+    """Absolute path where the trained .pth model file should be saved (empty: under MODELS_DIR)."""
+    output_index_path: str = ""
+    """Absolute path where the trained .index FAISS file should be saved (empty: beside the model)."""
     character_name: str = "voice"
     """Short name used for RVC internals (no spaces recommended)."""
     sample_rate: int = 48000
@@ -165,8 +171,8 @@ class ConvertParams(BaseModel):
     job_id: Optional[str] = None
     input_path: str
     """Absolute path to the source WAV (e.g. a Chatterbox TTS take)."""
-    output_path: str
-    """Absolute path where the RVC-converted WAV should be saved."""
+    output_path: str = ""
+    """Absolute path where the RVC-converted WAV should be saved (empty: server-owned, fetch via /files)."""
     model_path: str
     """Absolute path to the .pth model file."""
     index_path: str = ""
@@ -458,10 +464,12 @@ async def _run_train(job_id: str, params: TrainParams) -> None:
     """Background task: run RVC training and update job store."""
     jobs.update(job_id, status="running", progress=0.05)
     # Remap client-side absolute paths to the server's local projects dir.
+    name = re.sub(r"[^A-Za-z0-9_-]+", "_", params.character_name) or "voice"
+    model_out = remap_path(params.output_model_path) or str(MODELS_DIR / f"{name}-{job_id[:8]}" / f"{name}.pth")
     params = params.model_copy(update={
         "corpus_paths":      [remap_path(p) for p in params.corpus_paths],
-        "output_model_path": remap_path(params.output_model_path),
-        "output_index_path": remap_path(params.output_index_path),
+        "output_model_path": model_out,
+        "output_index_path": remap_path(params.output_index_path) or str(Path(model_out).with_suffix(".index")),
     })
 
     loop = asyncio.get_running_loop()
@@ -479,11 +487,15 @@ async def _run_train(job_id: str, params: TrainParams) -> None:
                         error=f"Training completed but .pth not found at {params.output_model_path}")
             return
 
+        index = params.output_index_path if Path(params.output_index_path).is_file() else ""
         jobs.update(
             job_id,
             status="complete",
             progress=1.0,
             output_path=params.output_model_path,
+            # Where the model lives on this machine: a remote client converts
+            # with these paths and downloads copies for the character bundle.
+            result={"model_path": params.output_model_path, "index_path": index},
         )
     except NotImplementedError as exc:
         jobs.update(job_id, status="failed", error=str(exc))
@@ -598,8 +610,6 @@ async def convert(p: ConvertParams) -> dict:
     """
     if not p.input_path:
         raise HTTPException(status_code=400, detail="input_path is required")
-    if not p.output_path:
-        raise HTTPException(status_code=400, detail="output_path is required")
     if not p.model_path:
         raise HTTPException(status_code=400, detail="model_path is required")
     return _submit_convert(p)
@@ -665,10 +675,20 @@ async def download_file(job_id: str) -> FileResponse:
 
     return FileResponse(
         output_path,
-        media_type="audio/wav",
+        media_type="audio/wav" if output_path.endswith(".wav") else "application/octet-stream",
         filename=Path(output_path).name,
         background=BackgroundTask(_cleanup),
     )
+
+
+@app.get("/files/{job_id}/index")
+async def download_index(job_id: str) -> FileResponse:
+    """The FAISS index a training job wrote (the model itself is GET /files/{job_id})."""
+    job = jobs.get(job_id)
+    index = ((job or {}).get("result") or {}).get("index_path")
+    if not index or not Path(index).is_file():
+        raise HTTPException(status_code=404, detail="index not available")
+    return FileResponse(index, media_type="application/octet-stream", filename=Path(index).name)
 
 
 

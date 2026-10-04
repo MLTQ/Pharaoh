@@ -108,7 +108,7 @@ export const useJobStore = create<JobState>((set, get) => ({
 
         // Auto-select as active take if this row has no active take yet
         const key = takeKey(payload.scene_slug, payload.row_index);
-        if (payload.model !== "post" && !get().activeTakes[key]) {
+        if (payload.model !== "post" && payload.model !== "rvc" && !get().activeTakes[key]) {
           get().setActiveTake(payload.scene_slug, payload.row_index, payload.job_id);
         }
 
@@ -116,7 +116,30 @@ export const useJobStore = create<JobState>((set, get) => ({
         // Run the speech model on it, and when that job completes, bind the
         // cleaned file to the same script row in place of the raw take.
         const done = get().jobs.find((j) => j.id === payload.job_id);
-        if (done?.audiosr && payload.model !== "post" && payload.output_path) {
+        // Voice lock: calm lines go through the character's RVC model first;
+        // the locked take replaces the raw one and carries the AudioSR setting.
+        let locking = false;
+        if (done?.voice_lock && done.project_id && payload.model !== "post" && payload.model !== "rvc" && payload.output_path) {
+          try {
+            const { submitVoiceLock } = await import("../lib/tauriCommands");
+            const lockId = await submitVoiceLock({
+              projectId: done.project_id, characterId: done.voice_lock.character_id, rvc: done.voice_lock.rvc,
+              inputPath: payload.output_path, text: done.voice_lock.text, direction: done.voice_lock.direction,
+            });
+            if (lockId) {
+              locking = true;
+              get().addJob({
+                id: lockId, model: "post", description: `Voice lock · ${done.description}`, status: "running",
+                progress: 0, eta: "locking", started_at: new Date().toISOString(), scene_id: null,
+                scene_slug: done.scene_slug, row_index: done.row_index, output_path: null, peaks: null,
+                qa_status: "unreviewed", error: null, project_id: done.project_id, cleans_row: true, audiosr: done.audiosr,
+              });
+            }
+          } catch (e) {
+            useToastStore.getState().push({ kind: "warn", title: "Voice lock skipped", body: String(e) });
+          }
+        }
+        if (done?.audiosr && !locking && payload.model !== "post" && payload.output_path) {
           void (async () => {
             try {
               const { upscaleAudioAsset } = await import("../lib/tauriCommands");

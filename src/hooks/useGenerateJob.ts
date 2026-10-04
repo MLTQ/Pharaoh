@@ -23,8 +23,10 @@ function makeOutputPath(projectsDir: string, projectId: string, sceneSlug: strin
  * How a character's lines are voiced:
  *  - "breeze"     — Breeze TTS 2 serves the TTS port: clone the gold clip (or the
  *                   line's palette reference) and perform the line's direction.
- *  - "chatterbox" — Chatterbox clone (characters on the Chatterbox + RVC pipeline,
- *                   or any cloned voice when Breeze isn't installed).
+ *  - "chatterbox" — Chatterbox clone, for cloned voices when Breeze isn't installed.
+ *
+ * Voice lock (RVC) is separate: it runs after either engine on calm lines
+ * when the character has it on (see jobStore).
  *  - "preset"     — no reference clip: the TTS server's named speaker.
  */
 export type DialogueEngine = "breeze" | "chatterbox" | "preset";
@@ -32,7 +34,6 @@ export type DialogueEngine = "breeze" | "chatterbox" | "preset";
 export function dialogueEngine(char: Character | undefined): DialogueEngine {
   const va = char?.voice_assignment;
   if (!va?.ref_audio_path) return "preset";
-  if (va.production_pipeline === "chatterbox+rvc") return "chatterbox";
   if (useModelStore.getState().health.tts?.engine === "breeze") return "breeze";
   return (va.production_pipeline ?? "chatterbox").startsWith("chatterbox") ? "chatterbox" : "preset";
 }
@@ -131,6 +132,7 @@ export function useGenerateJob() {
     const palette = engine !== "preset" ? paletteEntryFor(char, params.emotion) : undefined;
     const refPath = palette?.ref_audio_path ?? char?.voice_assignment.ref_audio_path ?? "";
     const absRef = (p: string) => (p.startsWith("/") ? p : `${pDir}/${projectId}/characters/${char!.id}/${p}`);
+    const direction = engine === "breeze" ? breezeDirection(char, params.emotion ?? params.instruct) : (params.emotion ?? params.instruct ?? "");
     const jobId = char && engine === "breeze"
       ? await submitTtsVoiceClone({
           projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
@@ -142,7 +144,7 @@ export function useGenerateJob() {
             seed: params.seed ?? Math.floor(Math.random() * 99999),
             temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
             output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
-            instruct: breezeDirection(char, params.emotion ?? params.instruct),
+            instruct: direction,
           },
         })
       : char && engine === "chatterbox"
@@ -191,6 +193,9 @@ export function useGenerateJob() {
       error: null,
       audiosr: !!char?.voice_assignment.audiosr,
       project_id: projectId,
+      voice_lock: char && engine !== "preset" && char.voice_assignment.rvc?.enabled
+        ? { character_id: char.id, rvc: char.voice_assignment.rvc, text: params.text, direction }
+        : undefined,
     };
     addJob(job);
     triggerAgentActive();

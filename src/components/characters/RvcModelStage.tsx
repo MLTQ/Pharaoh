@@ -1,26 +1,21 @@
 /**
  * RvcModelStage.tsx
  *
- * Stage 4 of the character voice pipeline. Manages RVC (Retrieval-based Voice
- * Conversion) model training and the production toggle that controls whether
- * all lines for this character run through the Chatterbox → RVC chain.
+ * Stage 4 of the optional voice lock. Trains an RVC (Retrieval-based Voice
+ * Conversion) model on the character's real lines and sets how production
+ * takes use it: on/off, which lines (calm only by default — RVC flattens
+ * whispers, sighs, laughs and anger), and the conversion parameters.
  *
- * Training takes 10–20 minutes on GPU. The component polls for job completion
- * every 3 seconds and shows a progress bar while the job is running.
- *
- * Key parameters exposed to the operator:
- *   - Pitch shift: transpose the character's voice up/down in semitones
- *   - Index rate: blend strength of the trained voice vs. the source clone;
- *     lower values better preserve paralinguistic tags like [sigh]/[chuckle]
- *   - Protect: fraction of voiced phonemes left unprocessed (preserves breath)
- *
- * The "Enable RVC" toggle writes back to character.voice_assignment.rvc_enabled
- * via the updateCharacter store call (caller's responsibility via onModelTrained).
+ * Training runs on the RVC server (~20–30 min on the GPU box). The component
+ * polls the job, then `finishRvcTrain` copies the model into the character's
+ * rvc/ folder. Settings are written to `voice_assignment.rvc` through
+ * `onRvcChange` (the caller patches the character; Save persists it).
  */
 
 import React, { useState, useEffect, useCallback, useRef } from "react";
-import type { Character } from "../../lib/types";
+import type { Character, RvcConfig } from "../../lib/types";
 import {
+  finishRvcTrain,
   getRvcModelInfo,
   getRvcJob,
   submitRvcTrain,
@@ -34,16 +29,14 @@ export interface RvcModelStageProps {
   character: Character;
   projectsDir: string;
   corpusReady: boolean;    // true when corpus has ≥5min of audio
-  onModelTrained: () => void;
+  /** The character's voice-lock settings changed (training, toggles, sliders). */
+  onRvcChange: (rvc: RvcConfig) => void;
 }
 
-/** Shape returned by GET /jobs/{id} on the RVC server (via get_rvc_job Tauri cmd). */
-interface RvcParams {
-  pitchShift: number;    // -12 to +12 semitones
-  indexRate: number;     // 0 to 1
-  protect: number;       // 0 to 0.5
-  rvcEnabled: boolean;
-}
+const DEFAULT_RVC: RvcConfig = {
+  model_path: null, index_path: null, pitch_shift: 0, index_rate: 0.5, protect: 0.33,
+  enabled: false, lock_lines: "calm", corpus_count: 0, corpus_duration_ms: 0,
+};
 
 // ── Constants ─────────────────────────────────────────────────────────────────
 
@@ -220,7 +213,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
   character,
   projectsDir: _projectsDir,
   corpusReady,
-  onModelTrained,
+  onRvcChange,
 }) => {
   const [modelInfo, setModelInfo]           = useState<RvcModelDetail | null>(null);
   const [isTraining, setIsTraining]         = useState(false);
@@ -229,12 +222,13 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
   const [error, setError]                   = useState<string | null>(null);
   const [confirmRetrain, setConfirmRetrain] = useState(false);
   const [activeJobId, setActiveJobId]       = useState<string | null>(null);
-  const [params, setParams]                 = useState<RvcParams>({
-    pitchShift: 0,
-    indexRate: 0.5,
-    protect: 0.33,
-    rvcEnabled: false,
-  });
+  const rvc: RvcConfig = { ...DEFAULT_RVC, ...(character.voice_assignment.rvc ?? {}) };
+  // The poll loop outlives renders; read the latest settings through a ref.
+  const rvcRef = useRef(rvc);
+  rvcRef.current = rvc;
+  const onRvcChangeRef = useRef(onRvcChange);
+  onRvcChangeRef.current = onRvcChange;
+  const characterName = character.name.toLowerCase().replace(/\s+/g, "_");
 
   const pollCancelRef = useRef(false);
 
@@ -274,9 +268,15 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
             if (resp.error || resp.status === "failed") {
               setError(resp.error ?? "Training failed.");
             } else {
-              // Refresh model info from disk
+              try {
+                // Copy the model into the bundle, then switch the lock on —
+                // training one is the clearest sign it's wanted.
+                const pth = await finishRvcTrain({ projectId, characterId: character.id, characterName, jobId: activeJobId });
+                onRvcChangeRef.current({ ...rvcRef.current, model_path: pth, index_path: pth.replace(/\.pth$/, ".index"), enabled: true });
+              } catch (e) {
+                setError(`Trained, but the model couldn't be fetched: ${String(e)}`);
+              }
               fetchModelInfo();
-              onModelTrained();
             }
             break;
           }
@@ -296,7 +296,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
 
     poll();
     return () => { pollCancelRef.current = true; };
-  }, [activeJobId, onModelTrained]);
+  }, [activeJobId, projectId, character.id, characterName, fetchModelInfo]);
 
   // ── Actions ───────────────────────────────────────────────────────────────
 
@@ -311,7 +311,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
       const jobId = await submitRvcTrain({
         projectId,
         characterId: character.id,
-        characterName: character.name.toLowerCase().replace(/\s+/g, "_"),
+        characterName,
         epochs: 100,
       });
       setActiveJobId(jobId);
@@ -319,7 +319,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
       setError(e instanceof Error ? e.message : "Failed to start RVC training.");
       setIsTraining(false);
     }
-  }, [isTraining, corpusReady, projectId, character.id]);
+  }, [isTraining, corpusReady, projectId, character.id, characterName]);
 
   const handleRetrain = useCallback(async () => {
     setConfirmRetrain(false);
@@ -327,9 +327,8 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
     await startTraining();
   }, [startTraining]);
 
-  const setParam = useCallback(<K extends keyof RvcParams>(key: K, value: RvcParams[K]) => {
-    setParams((prev) => ({ ...prev, [key]: value }));
-  }, []);
+  const setParam = <K extends keyof RvcConfig>(key: K, value: RvcConfig[K]) =>
+    onRvcChange({ ...rvc, [key]: value });
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -340,10 +339,11 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
       {!modelInfo && !isTraining && (
         <div style={{ marginBottom: 24 }}>
           <p style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.7, marginBottom: 16 }}>
-            RVC (Retrieval-based Voice Conversion) trains a lightweight neural adapter
-            on the character's corpus, producing a .pth model file that acts as a
-            permanent vocal fingerprint. Once trained, every Chatterbox take for this
-            character is passed through RVC for consistent identity across episodes.
+            Optional. RVC trains a small model on the character's real lines; with voice
+            lock on, Breeze's takes of calm lines pass through it so they sound more
+            like the recording. Breeze alone is fine for most characters — in the
+            blind test the lock helped calm lines and hurt whispers, sighs, laughs
+            and anger, so those keep Breeze's take.
           </p>
 
           {!corpusReady && (
@@ -357,7 +357,7 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
               fontFamily: "var(--font-mono)",
               marginBottom: 14,
             }}>
-              Corpus not ready — generate at least 5 minutes of training audio in Stage 3 first.
+              Corpus not ready — fill it with at least 5 minutes of the character's real lines first.
             </div>
           )}
 
@@ -425,8 +425,8 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
               </div>
             )}
             <p style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 8, lineHeight: 1.5 }}>
-              Training takes 20–40 min on Apple Silicon. You can close this panel —
-              training continues in the background.
+              Training takes about 20–30 min on a GPU. Keep this panel open until
+              it finishes so the model is copied into the character.
             </p>
           </div>
         </div>
@@ -468,29 +468,6 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
               </span>
             </div>
           </div>
-
-          {/* A/B preview */}
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            <button
-              className="btn btn-sm"
-              onClick={() => {
-                // TODO: implement A/B preview — play a reference line through
-                // Chatterbox only vs. Chatterbox → RVC so operator can hear the delta
-              }}
-              style={{
-                borderColor: STAGE_COLOR,
-                color: STAGE_COLOR,
-                background: `color-mix(in oklch, ${STAGE_COLOR} 8%, transparent)`,
-                fontFamily: "var(--font-mono)",
-                fontSize: 10,
-              }}
-            >
-              A/B Preview
-            </button>
-            <span style={{ fontSize: 10, color: "var(--fg-4)" }}>
-              Compare Chatterbox vs. Chatterbox → RVC on a test line
-            </span>
-          </div>
         </div>
       )}
 
@@ -500,30 +477,30 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
 
         <SliderRow
           label="Pitch shift"
-          value={params.pitchShift}
+          value={rvc.pitch_shift}
           min={-12}
           max={12}
           step={1}
           format={(v) => `${v > 0 ? "+" : ""}${v} st`}
-          onChange={(v) => setParam("pitchShift", v)}
+          onChange={(v) => setParam("pitch_shift", v)}
           disabled={!modelInfo}
         />
 
         <SliderRow
           label="Index rate"
-          hint={'Lower values preserve [sigh] [chuckle] tags and natural inflection; higher values enforce stronger voice identity but may flatten paralinguistic cues.'}
-          value={params.indexRate}
+          hint={'How hard takes are pulled toward the trained voice. 0.5 is the tested default: in the blind test it sounded as much like the character as 0.35 and kept delivery better.'}
+          value={rvc.index_rate}
           min={0}
           max={1}
           step={0.01}
           format={(v) => v.toFixed(2)}
-          onChange={(v) => setParam("indexRate", v)}
+          onChange={(v) => setParam("index_rate", v)}
           disabled={!modelInfo}
         />
 
         <SliderRow
           label="Protect"
-          value={params.protect}
+          value={rvc.protect}
           min={0}
           max={0.5}
           step={0.01}
@@ -544,11 +521,29 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}>
           <div>
             <div style={{ fontSize: 12, color: "var(--fg-1)", fontWeight: 500, marginBottom: 3 }}>
-              Enable RVC on production lines
+              Voice lock on production lines
             </div>
             <div style={{ fontSize: 10.5, color: "var(--fg-4)", lineHeight: 1.55 }}>
-              When on, all Chatterbox takes for {character.name} are passed through RVC.
-              When off, lines use Chatterbox only — faster, but no voice fingerprint.
+              When on, {character.name}'s takes pass through this model after Breeze
+              (the locked take replaces the raw one). Off: Breeze's takes as they are.
+            </div>
+            <div style={{ display: "flex", gap: 14, marginTop: 8, fontSize: 11, color: modelInfo && rvc.enabled ? "var(--fg-2)" : "var(--fg-4)" }}>
+              {([["calm", "Calm lines only (recommended)"], ["all", "Every line"]] as const).map(([v, label]) => (
+                <label key={v} style={{ display: "flex", alignItems: "center", gap: 5, cursor: modelInfo && rvc.enabled ? "pointer" : "not-allowed" }}>
+                  <input
+                    type="radio"
+                    name={`lock-lines-${character.id}`}
+                    checked={(rvc.lock_lines ?? "calm") === v}
+                    disabled={!modelInfo || !rvc.enabled}
+                    onChange={() => setParam("lock_lines", v)}
+                    style={{ accentColor: STAGE_COLOR }}
+                  />
+                  {label}
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 4, lineHeight: 1.5 }}>
+              Calm skips lines whose text or direction whispers, sighs, laughs, cries, shouts or is afraid.
             </div>
           </div>
           <label style={{
@@ -560,9 +555,9 @@ export const RvcModelStage: React.FC<RvcModelStageProps> = ({
           }}>
             <input
               type="checkbox"
-              checked={params.rvcEnabled}
+              checked={rvc.enabled}
               disabled={!modelInfo}
-              onChange={(e) => setParam("rvcEnabled", e.target.checked)}
+              onChange={(e) => setParam("enabled", e.target.checked)}
               style={{ accentColor: STAGE_COLOR, width: 16, height: 16 }}
             />
           </label>

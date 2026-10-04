@@ -720,7 +720,7 @@ export default function App() {
             cast={characters.map((c) => ({
               id: c.id,
               name: c.name,
-              voice: c.voice_assignment.production_pipeline === "chatterbox+rvc" ? "Chatterbox + RVC" : c.voice_assignment.model,
+              voice: `${c.voice_assignment.model}${c.voice_assignment.rvc?.enabled && c.voice_assignment.rvc.model_path ? " + voice lock" : ""}`,
               scenes: realScenes.filter((s) => s.characters.includes(c.name) || s.characters.includes(c.id)).length,
             }))}
             activeSceneNo={activeSceneNo}

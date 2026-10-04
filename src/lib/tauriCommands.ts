@@ -501,6 +501,30 @@ export const submitRvcTrain = (args: {
     epochs: args.epochs ?? null,
   });
 
+/** After a training job completes, fetch the model into the character's
+ *  rvc/ folder (remote server). Returns the local .pth path. */
+export const finishRvcTrain = (args: {
+  projectId: string;
+  characterId: string;
+  characterName: string;
+  jobId: string;
+}): Promise<string> => invoke("finish_rvc_train", args);
+
+/**
+ * Voice-lock a finished take through the character's RVC model. Returns the
+ * RVC job id (completion arrives as a job-complete event, model "rvc"), or
+ * null when the line doesn't qualify (lock off, or an expressive line on
+ * "calm" lines only).
+ */
+export const submitVoiceLock = (args: {
+  projectId: string;
+  characterId: string;
+  rvc: import("./types").RvcConfig;
+  inputPath: string;
+  text: string;
+  direction: string;
+}): Promise<string | null> => invoke("submit_voice_lock", args);
+
 /** Status of a job on the RVC server. */
 export interface RvcJobResponse {
   status: "pending" | "running" | "complete" | "failed";

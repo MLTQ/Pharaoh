@@ -16,11 +16,12 @@
 //! `inference.rs`: read the base URL from `AppState → server_config`, POST
 //! a JSON body, and return the `job_id` immediately so the caller can poll.
 
-use crate::app_support::{app_projects_dir, scan_rvc_corpus_dir};
+use crate::app_support::{app_projects_dir, character_dir, scan_rvc_corpus_dir};
 use crate::commands;
 use crate::error::{Error, Result};
-use crate::models::{AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus};
+use crate::models::{AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus, RvcConfig};
 use serde::{Deserialize, Serialize};
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 use tauri::{AppHandle, Emitter, State};
 
@@ -215,6 +216,7 @@ pub async fn submit_rvc_convert(
             format!("{}/jobs", base_url),
             job_id.clone(),
             params.output_path.clone(),
+            true,
         ));
     }
 
@@ -233,6 +235,7 @@ async fn poll_rvc_convert_until_done(
     jobs_url: String,
     job_id: String,
     local_output_path: String,
+    remote: bool,
 ) {
     loop {
         tokio::time::sleep(Duration::from_millis(500)).await;
@@ -284,7 +287,7 @@ async fn poll_rvc_convert_until_done(
         match status.status.as_str() {
             "complete" => {
                 let server_out = status.output_path.unwrap_or_default();
-                let final_path = if !server_out.is_empty() {
+                let final_path = if remote && !server_out.is_empty() {
                     match commands::inference::download_remote_file_to(
                         &http,
                         &server_base_url,
@@ -359,32 +362,292 @@ pub async fn submit_rvc_train(
     epochs: Option<u32>,
 ) -> Result<String> {
     let projects_dir = app_projects_dir(&app)?;
-    let corpus_dir = projects_dir
-        .join(&project_id)
-        .join("characters")
-        .join(&character_id)
-        .join("rvc_corpus");
-    let output_dir = projects_dir
-        .join(&project_id)
-        .join("characters")
-        .join(&character_id)
-        .join("rvc");
+    let char_dir = character_dir(&projects_dir, &project_id, &character_id);
+    let (base_url, http) = (rvc_url(&state)?, state.http.clone());
+    let remote = commands::inference::is_remote_url(&base_url);
 
-    let (base_url, http) = {
-        let url = rvc_url(&state)?;
-        (url, state.http.clone())
+    let mut corpus: Vec<_> = std::fs::read_dir(char_dir.join("rvc_corpus"))
+        .map(|d| d.flatten().map(|e| e.path()).filter(|p| p.extension().is_some_and(|x| x.eq_ignore_ascii_case("wav"))).collect())
+        .unwrap_or_default();
+    corpus.sort();
+    if corpus.is_empty() {
+        return Err(Error::Other("the corpus is empty — fill it from the recording first".into()));
+    }
+    // A remote server can't read this machine's files: send the corpus over.
+    // Named per character so two characters' clips never overwrite each other.
+    let mut corpus_paths = Vec::with_capacity(corpus.len());
+    for p in &corpus {
+        let local = p.to_string_lossy();
+        corpus_paths.push(if remote {
+            let name = format!("{}-corpus-{}", character_id, p.file_name().and_then(|n| n.to_str()).unwrap_or("clip.wav"));
+            commands::inference::upload_file_as(&http, &base_url, &local, &name).await?
+        } else {
+            local.into_owned()
+        });
+    }
+    // Locally the model lands straight in the bundle; a remote server keeps it
+    // in its own models folder and `finish_rvc_train` fetches copies.
+    let (model_out, index_out) = if remote {
+        (String::new(), String::new())
+    } else {
+        let dir = char_dir.join("rvc");
+        let name = sanitize_name(&character_name);
+        (dir.join(format!("{name}.pth")).to_string_lossy().into_owned(), dir.join(format!("{name}.index")).to_string_lossy().into_owned())
     };
 
     let body = serde_json::json!({
-        "character_id": character_id,
-        "character_name": character_name,
-        "corpus_dir": corpus_dir.to_string_lossy(),
-        "output_dir": output_dir.to_string_lossy(),
+        "corpus_paths": corpus_paths,
+        "output_model_path": model_out,
+        "output_index_path": index_out,
+        "character_name": sanitize_name(&character_name),
+        "sample_rate": 48000,
         "epochs": epochs.unwrap_or(100),
+        "batch_size": 8,
     });
-
     let resp: serde_json::Value = http
         .post(format!("{}/train", base_url))
+        .json(&body)
+        .timeout(Duration::from_secs(30))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("RVC server error: {}", e)))?
+        .json()
+        .await
+        .map_err(|e| Error::Other(format!("RVC response error: {}", e)))?;
+    resp["job_id"]
+        .as_str()
+        .map(str::to_string)
+        .ok_or_else(|| Error::Other(format!("RVC train refused: {}", resp)))
+}
+
+fn sanitize_name(name: &str) -> String {
+    let s: String = name.chars().map(|c| if c.is_ascii_alphanumeric() || c == '-' { c.to_ascii_lowercase() } else { '_' }).collect();
+    if s.trim_matches('_').is_empty() { "voice".into() } else { s }
+}
+
+/// Where a character's model lives on the RVC server (`rvc/<stem>.server.json`).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ServerModel {
+    server: String,
+    model_path: String,
+    index_path: String,
+}
+
+fn server_model_file(pth: &Path) -> PathBuf {
+    pth.with_extension("server.json")
+}
+
+/// After a remote training job completes: copy the model and its index into
+/// the character's `rvc/` folder (so it travels with the bundle) and remember
+/// where the server keeps them. A local server already wrote the bundle copy.
+/// Returns the local `.pth` path.
+#[tauri::command]
+pub async fn finish_rvc_train(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    character_id: String,
+    character_name: String,
+    job_id: String,
+) -> Result<String> {
+    let projects_dir = app_projects_dir(&app)?;
+    let dir = character_dir(&projects_dir, &project_id, &character_id).join("rvc");
+    let (base_url, http) = (rvc_url(&state)?, state.http.clone());
+    let name = sanitize_name(&character_name);
+    let pth = dir.join(format!("{name}.pth"));
+    if !commands::inference::is_remote_url(&base_url) {
+        return Ok(pth.to_string_lossy().into_owned());
+    }
+    let job: serde_json::Value = http
+        .get(format!("{}/jobs/{}", base_url, job_id))
+        .timeout(Duration::from_secs(10))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("RVC poll error: {}", e)))?
+        .json()
+        .await
+        .map_err(|e| Error::Other(format!("RVC poll parse error: {}", e)))?;
+    let model_path = job["result"]["model_path"].as_str().unwrap_or_default().to_string();
+    if job["status"] != "complete" || model_path.is_empty() {
+        return Err(Error::Other(format!("training job {} hasn't produced a model ({})", job_id, job["status"])));
+    }
+    let index_path = job["result"]["index_path"].as_str().unwrap_or_default().to_string();
+    std::fs::create_dir_all(&dir)?;
+    download(&http, &format!("{}/files/{}", base_url, job_id), &pth).await?;
+    let index = pth.with_extension("index");
+    if !index_path.is_empty() {
+        download(&http, &format!("{}/files/{}/index", base_url, job_id), &index).await?;
+    } else {
+        let _ = std::fs::remove_file(&index);
+    }
+    let rec = ServerModel { server: base_url, model_path, index_path };
+    std::fs::write(server_model_file(&pth), serde_json::to_vec_pretty(&rec)?)?;
+    Ok(pth.to_string_lossy().into_owned())
+}
+
+/// Stream a large file (an RVC index runs to hundreds of MB) to disk.
+async fn download(http: &reqwest::Client, url: &str, to: &Path) -> Result<()> {
+    use futures_util::StreamExt;
+    let resp = http
+        .get(url)
+        .timeout(Duration::from_secs(1800))
+        .send()
+        .await
+        .map_err(|e| Error::Other(format!("download {}: {}", url, e)))?;
+    if !resp.status().is_success() {
+        return Err(Error::Other(format!("download {}: HTTP {}", url, resp.status())));
+    }
+    let part = to.with_extension("part");
+    let mut f = std::fs::File::create(&part)?;
+    let mut stream = resp.bytes_stream();
+    while let Some(chunk) = stream.next().await {
+        let chunk = chunk.map_err(|e| Error::Other(format!("download {}: {}", url, e)))?;
+        std::io::Write::write_all(&mut f, &chunk)?;
+    }
+    drop(f);
+    std::fs::rename(&part, to)?;
+    Ok(())
+}
+
+// ── Voice lock ────────────────────────────────────────────────────────────
+
+/// Words in a line or its direction that mark a delivery RVC flattens. In the
+/// blind test (Breeze vs Breeze → RVC on five lines) the lock made calm lines
+/// sound more like the character but took the edge off anger, the air out of
+/// sighs and whispers, and some life out of laughs.
+const EXPRESSIVE: &[&str] = &[
+    "whisper", "hush", "murmur", "breath", "sigh", "laugh", "chuckl", "giggl", "snicker", "sob", "cry", "crying",
+    "weep", "tear", "gasp", "scream", "shout", "yell", "bellow", "roar", "furious", "angry", "anger", "rage",
+    "livid", "terrif", "panic", "afraid", "fear", "frighten", "hysteric",
+];
+
+/// Whether voice lock applies to a line: the character has it on and, unless
+/// set to lock every line, the line is a calm one (no expressive direction,
+/// no vocal events like `(laughs)` / `[sigh]` in the text).
+pub fn locks_line(rvc: &RvcConfig, text: &str, direction: &str) -> bool {
+    if !rvc.enabled {
+        return false;
+    }
+    if rvc.lock_lines == "all" {
+        return true;
+    }
+    let events = text.contains('(') || text.contains('[');
+    let words = format!("{} {}", text, direction).to_lowercase();
+    let expressive = words
+        .split(|c: char| !c.is_ascii_alphabetic())
+        .any(|w| !w.is_empty() && EXPRESSIVE.iter().any(|e| w.starts_with(e)));
+    !(events || expressive)
+}
+
+/// The character's model: the configured `.pth` if it exists, else the first
+/// in `rvc/`.
+pub(crate) fn local_model(char_dir: &Path, rvc: &RvcConfig) -> Option<PathBuf> {
+    if let Some(p) = rvc.model_path.as_deref().map(PathBuf::from).filter(|p| p.is_file()) {
+        return Some(p);
+    }
+    let mut pths: Vec<_> = std::fs::read_dir(char_dir.join("rvc"))
+        .ok()?
+        .flatten()
+        .map(|e| e.path())
+        .filter(|p| p.extension().is_some_and(|x| x == "pth"))
+        .collect();
+    pths.sort();
+    pths.into_iter().next()
+}
+
+/// Model and index paths the RVC server can open. A remote server is sent
+/// the bundle's copies once (an imported character, a wiped server) and the
+/// paths are remembered beside the model.
+pub(crate) async fn server_model_paths(
+    http: &reqwest::Client,
+    base_url: &str,
+    character_id: &str,
+    pth: &Path,
+) -> Result<(String, String)> {
+    let index = pth.with_extension("index");
+    if !commands::inference::is_remote_url(base_url) {
+        let idx = if index.is_file() { index.to_string_lossy().into_owned() } else { String::new() };
+        return Ok((pth.to_string_lossy().into_owned(), idx));
+    }
+    let record = server_model_file(pth);
+    if let Some(rec) = std::fs::read(&record).ok().and_then(|b| serde_json::from_slice::<ServerModel>(&b).ok()) {
+        if rec.server == base_url && server_has(http, base_url, &rec.model_path).await {
+            return Ok((rec.model_path, rec.index_path));
+        }
+    }
+    let stem = pth.file_stem().and_then(|s| s.to_str()).unwrap_or("voice");
+    let model_path = commands::inference::upload_file_as(http, base_url, &pth.to_string_lossy(), &format!("{character_id}-{stem}.pth")).await?;
+    let index_path = if index.is_file() {
+        commands::inference::upload_file_as(http, base_url, &index.to_string_lossy(), &format!("{character_id}-{stem}.index")).await?
+    } else {
+        String::new()
+    };
+    let rec = ServerModel { server: base_url.to_string(), model_path: model_path.clone(), index_path: index_path.clone() };
+    std::fs::write(&record, serde_json::to_vec_pretty(&rec)?)?;
+    Ok((model_path, index_path))
+}
+
+async fn server_has(http: &reqwest::Client, base_url: &str, model_path: &str) -> bool {
+    let Some(dir) = Path::new(model_path).parent().map(|d| d.to_string_lossy().into_owned()) else { return false };
+    let Ok(resp) = http.get(format!("{}/models", base_url)).query(&[("models_dir", dir)]).timeout(Duration::from_secs(10)).send().await else {
+        return false;
+    };
+    resp.json::<serde_json::Value>()
+        .await
+        .ok()
+        .and_then(|v| v["models"].as_array().cloned())
+        .is_some_and(|ms| ms.iter().any(|m| m["model_path"] == model_path))
+}
+
+/// The `/convert` body for a voice-lock pass. The input must already be a
+/// path the server can read.
+pub(crate) fn voice_lock_body(rvc: &RvcConfig, input: &str, output: &str, model: &str, index: &str) -> serde_json::Value {
+    serde_json::json!({
+        "input_path": input,
+        "output_path": output,
+        "model_path": model,
+        "index_path": index,
+        "pitch_shift": rvc.pitch_shift,
+        "f0_method": "rmvpe",
+        "index_rate": rvc.index_rate,
+        "filter_radius": 3,
+        "rms_mix_rate": 0.25,
+        "protect": rvc.protect,
+    })
+}
+
+/// Voice-lock a finished take: when the character has the lock on and the
+/// line qualifies (see [`locks_line`]), convert `input_path` through the
+/// character's RVC model into `<input>.lock.wav`. Returns the RVC job id, or
+/// `None` when the line keeps the engine's take as-is. Completion arrives as
+/// a `job-complete` event (model `"rvc"`).
+#[tauri::command]
+pub async fn submit_voice_lock(
+    app: AppHandle,
+    state: State<'_, AppState>,
+    project_id: String,
+    character_id: String,
+    rvc: RvcConfig,
+    input_path: String,
+    text: String,
+    direction: String,
+) -> Result<Option<String>> {
+    if !locks_line(&rvc, &text, &direction) {
+        return Ok(None);
+    }
+    let projects_dir = app_projects_dir(&app)?;
+    let char_dir = character_dir(&projects_dir, &project_id, &character_id);
+    let Some(pth) = local_model(&char_dir, &rvc) else {
+        return Err(Error::Other("voice lock is on but no model is trained — train one or turn it off".into()));
+    };
+    let (base_url, http) = (rvc_url(&state)?, state.http.clone());
+    let remote = commands::inference::is_remote_url(&base_url);
+    let (model, index) = server_model_paths(&http, &base_url, &character_id, &pth).await?;
+    let output_path = lock_output_path(&input_path);
+    let input = if remote { commands::inference::upload_input_file(&http, &base_url, &input_path).await? } else { input_path.clone() };
+    let body = voice_lock_body(&rvc, &input, if remote { "" } else { &output_path }, &model, &index);
+    let resp: serde_json::Value = http
+        .post(format!("{}/convert", base_url))
         .json(&body)
         .timeout(Duration::from_secs(10))
         .send()
@@ -393,13 +656,16 @@ pub async fn submit_rvc_train(
         .json()
         .await
         .map_err(|e| Error::Other(format!("RVC response error: {}", e)))?;
+    let job_id = resp["job_id"].as_str().map(str::to_string).ok_or_else(|| Error::Other(format!("RVC convert refused: {}", resp)))?;
+    tokio::spawn(poll_rvc_convert_until_done(app, http, base_url.clone(), format!("{}/jobs", base_url), job_id.clone(), output_path, remote));
+    Ok(Some(job_id))
+}
 
-    let job_id = resp["job_id"]
-        .as_str()
-        .ok_or_else(|| Error::Other("missing job_id in RVC train response".into()))?
-        .to_string();
-
-    Ok(job_id)
+/// `take.wav` → `take.lock.wav`, beside the engine's take.
+pub(crate) fn lock_output_path(input: &str) -> String {
+    let p = Path::new(input);
+    let stem = p.file_stem().and_then(|s| s.to_str()).unwrap_or("take");
+    p.with_file_name(format!("{stem}.lock.wav")).to_string_lossy().into_owned()
 }
 
 /// Poll the status of an RVC job.
@@ -521,4 +787,39 @@ pub async fn get_rvc_model_info(
         corpus_count: corpus_count as usize,
         corpus_duration_ms,
     }))
+}
+
+#[cfg(test)]
+mod voice_lock_tests {
+    use super::*;
+
+    fn on(lines: &str) -> RvcConfig {
+        RvcConfig { enabled: true, lock_lines: lines.into(), ..RvcConfig::default() }
+    }
+
+    #[test]
+    fn calm_lines_get_the_lock_expressive_ones_keep_the_take() {
+        let rvc = on("calm");
+        assert!(locks_line(&rvc, "The ledger was exactly where she said it would be.", "Calm, even and conversational."));
+        assert!(!locks_line(&rvc, "Don't move.", "Terrified whisper, breathless and close."));
+        assert!(!locks_line(&rvc, "I kept the lamp lit.", "Quiet and heartbroken, with a tired sigh first."));
+        assert!(!locks_line(&rvc, "No. Not after everything!", "Furious and hurt, voice rising."));
+        assert!(!locks_line(&rvc, "You believed him?", "Delighted, laughing through the first words."));
+        assert!(!locks_line(&rvc, "(laughs) Oh, wonderful.", ""), "vocal events in the text count");
+        assert!(locks_line(&on("all"), "Don't move.", "Terrified whisper."));
+        assert!(!locks_line(&RvcConfig::default(), "Calm line.", ""), "off unless turned on");
+    }
+
+    #[test]
+    fn defaults_keep_the_blind_test_settings() {
+        let d = RvcConfig::default();
+        assert_eq!((d.index_rate, d.lock_lines.as_str(), d.enabled), (0.5, "calm", false));
+        let old: RvcConfig = serde_json::from_str(r#"{"enabled":true}"#).unwrap();
+        assert_eq!((old.index_rate, old.lock_lines.as_str()), (0.5, "calm"));
+    }
+
+    #[test]
+    fn lock_output_sits_beside_the_take() {
+        assert_eq!(lock_output_path("/p/scenes/s/assets/dumbledore_1.wav"), "/p/scenes/s/assets/dumbledore_1.lock.wav");
+    }
 }

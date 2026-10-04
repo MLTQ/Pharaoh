@@ -38,7 +38,6 @@ import {
 } from "../../lib/tauriCommands";
 import type { PaletteTakeFile } from "../../lib/tauriCommands";
 import { useProjectStore } from "../../store/projectStore";
-import { reportError } from "../../lib/errors";
 import type { Character, LibraryCharacterSummary } from "../../lib/types";
 import {
   LIBRARY_PROJECT_ID,
@@ -69,6 +68,8 @@ export const LibraryView: React.FC = () => {
 
   // Tab state — full 4-stage pipeline (Pharaoh-37l)
   const [tab, setTab] = useState<LibraryTab>("voice");
+  // Voice lock (RVC) is optional: its stages stay folded away until asked for.
+  const [voiceLockOpen, setVoiceLockOpen] = useState(false);
 
   // Voice Design generation state — lives here (not in LibraryVoiceTab) so
   // it survives tab switches; the tab components unmount when inactive.
@@ -385,32 +386,21 @@ export const LibraryView: React.FC = () => {
               const stage2Done = approvedPalette.length >= 2;
               const corpusCount = character.voice_assignment.rvc?.corpus_count ?? 0;
               const corpusDurationMs = character.voice_assignment.rvc?.corpus_duration_ms ?? 0;
-              const corpusTarget = 50;
               const modelTrained = (character.voice_assignment.rvc?.model_path ?? null) !== null;
               const rvcEnabled = character.voice_assignment.rvc?.enabled ?? false;
-              const rvcPipelineActive = character.voice_assignment.production_pipeline === "chatterbox+rvc";
+              const lockShown = voiceLockOpen || tab === "corpus" || tab === "model";
               return (
                 <CharacterPipeline
                   stage1Done={stage1Done}
                   stage2Done={stage2Done}
                   corpusCount={corpusCount}
-                  corpusTarget={corpusTarget}
                   corpusDurationMs={corpusDurationMs}
                   modelTrained={modelTrained}
                   rvcEnabled={rvcEnabled}
-                  rvcPipelineActive={rvcPipelineActive}
-                  onToggleRvcPipeline={(active) => {
-                    const next = active ? "chatterbox+rvc" : "chatterbox";
-                    const rvc = character.voice_assignment.rvc
-                      ? { ...character.voice_assignment.rvc, enabled: active }
-                      : (active ? { model_path: null, index_path: null, pitch_shift: 0, index_rate: 0.5, protect: 0.33, enabled: true, corpus_count: 0, corpus_duration_ms: 0 } : null);
-                    patch((c) => ({
-                      ...c,
-                      voice_assignment: { ...c.voice_assignment, production_pipeline: next, rvc },
-                    }));
-                    if (!active && (tab === "corpus" || tab === "model")) {
-                      setTab("palette");
-                    }
+                  voiceLockOpen={lockShown}
+                  onToggleVoiceLock={(open) => {
+                    setVoiceLockOpen(open);
+                    if (!open && (tab === "corpus" || tab === "model")) setTab("palette");
                   }}
                   activeStage={tabToStage(tab)}
                   onSelectStage={(s) => setTab(stageToTab(s))}
@@ -493,16 +483,7 @@ export const LibraryView: React.FC = () => {
                 character={character}
                 projectsDir={projectsDir}
                 corpusReady={(character.voice_assignment.rvc?.corpus_duration_ms ?? 0) >= 5 * 60 * 1000}
-                onModelTrained={() => {
-                  // Re-fetch the library character so the trained model path
-                  // appears immediately (RvcModelStage finishes training but
-                  // doesn't mutate our local state).
-                  if (selectedId) {
-                    getLibraryCharacter(selectedId)
-                      .then(setCharacter)
-                      .catch((e) => reportError("Reload character after training", e));
-                  }
-                }}
+                onRvcChange={(rvc) => patch((c) => ({ ...c, voice_assignment: { ...c.voice_assignment, rvc } }))}
               />
             )}
 

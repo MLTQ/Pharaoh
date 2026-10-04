@@ -118,6 +118,8 @@ pub fn run() {
             commands::rvc::list_rvc_models,
             commands::rvc::submit_rvc_convert,
             commands::rvc::submit_rvc_train,
+            commands::rvc::finish_rvc_train,
+            commands::rvc::submit_voice_lock,
             commands::rvc::get_rvc_job,
             commands::rvc::get_corpus_status,
             commands::rvc::get_rvc_model_info,

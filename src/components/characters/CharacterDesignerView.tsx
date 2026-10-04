@@ -42,14 +42,13 @@ function newCharId() {
 
 function deriveVoiceBadge(c: Character): { label: string; tone: "tts" | "fg" } {
   const va = c.voice_assignment;
-  const hasRvc = va.rvc?.model_path != null && va.production_pipeline === "chatterbox+rvc";
+  const lock = va.rvc?.model_path != null && va.rvc.enabled ? " + lock" : "";
   const hasPalette = (va.emotional_palette ?? []).some((e) => e.qa_status === "approved");
   const hasRef = !!va.ref_audio_path;
   const hasDesign = (va.base_voice_description ?? "").trim().length > 0;
 
-  if (hasRvc) return { label: "Chatterbox + RVC", tone: "tts" };
-  if (hasPalette) return { label: "Chatterbox", tone: "tts" };
-  if (hasRef) return { label: "Reference", tone: "tts" };
+  if (hasPalette) return { label: `Palette${lock}`, tone: "tts" };
+  if (hasRef) return { label: `Reference${lock}`, tone: "tts" };
   if (hasDesign) return { label: "Voice Design", tone: "tts" };
   return { label: "Empty", tone: "fg" };
 }

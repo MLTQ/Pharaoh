@@ -8,10 +8,12 @@
  * visually dimmed and cursor: not-allowed.
  *
  * Stage dependency chain:
- *   Voice (1) → Palette (2) → Corpus (3) → Model (4)
+ *   Voice (1) → Palette (2)   ·   optional voice lock: Corpus (3) → Model (4)
  *
- * Stage 2 requires stage 1 done; stage 3 requires stage 2 done;
- * stage 4 requires corpus to be "ready" (corpusCount >= corpusTarget).
+ * Stage 2 requires stage 1 done. Voice lock (an RVC model trained on the
+ * character's real lines) is optional and collapsed behind a quiet toggle:
+ * Breeze alone is the normal path. Its corpus can be filled from the
+ * recording at any time; the model needs five minutes of it.
  */
 
 import React from "react";
@@ -22,19 +24,12 @@ export interface CharacterPipelineProps {
   stage1Done: boolean;      // has base voice description + at least 1 design take
   stage2Done: boolean;      // has ≥2 approved palette entries
   corpusCount: number;      // WAV files in rvc_corpus/
-  corpusTarget: number;     // target (default 50)
   corpusDurationMs: number; // total corpus audio duration
   modelTrained: boolean;    // rvc .pth file exists
   rvcEnabled: boolean;      // whether RVC is toggled on for production
-  /**
-   * Whether the RVC half of the pipeline (Corpus + Model stages) is opted in
-   * for this character — true when `voice_assignment.production_pipeline ===
-   * "chatterbox+rvc"`. When false, stages 3 and 4 are hidden entirely and an
-   * "+ RVC pipeline" toggle is shown in their place. (Pharaoh-9sx)
-   */
-  rvcPipelineActive: boolean;
-  /** Called when the user toggles RVC opt-in. */
-  onToggleRvcPipeline: (active: boolean) => void;
+  /** Whether the optional voice-lock stages (Corpus, Model) are shown. */
+  voiceLockOpen: boolean;
+  onToggleVoiceLock: (open: boolean) => void;
   activeStage: 1 | 2 | 3 | 4;
   onSelectStage: (stage: 1 | 2 | 3 | 4) => void;
 }
@@ -237,19 +232,19 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
   stage1Done,
   stage2Done,
   corpusCount,
-  corpusTarget,
   corpusDurationMs,
   modelTrained,
   rvcEnabled,
-  rvcPipelineActive,
-  onToggleRvcPipeline,
+  voiceLockOpen,
+  onToggleVoiceLock,
   activeStage,
   onSelectStage,
 }) => {
   // Locking logic — a stage is locked if its upstream dependency isn't done
   const stage2Locked = !stage1Done;
-  const stage3Locked = !stage2Done;
-  const stage4Locked = corpusCount < corpusTarget;
+  const READY_MS = 5 * 60 * 1000;
+  const stage3Locked = false; // the corpus fills from the recording; no palette needed
+  const stage4Locked = corpusDurationMs < READY_MS;
 
   // Per-stage status lines
   const s1StatusLine = stage1Done ? "voice locked in" : "write description";
@@ -258,13 +253,11 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
     : stage2Locked
     ? "finish voice first"
     : "add emotions";
-  const s3StatusLine = stage3Locked
-    ? "finish palette first"
-    : corpusDurationMs >= 5 * 60 * 1000
-    ? `${corpusCount}/${corpusTarget} · ready`
+  const s3StatusLine = corpusDurationMs >= READY_MS
+    ? `${corpusCount} lines · ready`
     : corpusCount > 0
-    ? `${corpusCount}/${corpusTarget} · ${formatDurationShort(corpusDurationMs)}`
-    : "generate training data";
+    ? `${corpusCount} lines · ${formatDurationShort(corpusDurationMs)}`
+    : "real lines needed";
   const s4StatusLine = stage4Locked
     ? "corpus needed"
     : modelTrained
@@ -276,10 +269,10 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
   const s2Status = stageStatus(2, stage2Locked, stage2Done, activeStage === 2, false);
   const s3Status: StageStatus = stage3Locked
     ? "locked"
-    : corpusCount > 0 && corpusCount < corpusTarget
-    ? "progress"
-    : corpusCount >= corpusTarget
+    : corpusDurationMs >= READY_MS
     ? "done"
+    : corpusCount > 0
+    ? "progress"
     : activeStage === 3
     ? "active"
     : "progress";
@@ -313,9 +306,9 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
         status={s2Status} isActive={activeStage === 2}
         onClick={() => onSelectStage(2)}
       />
-      {rvcPipelineActive ? (
+      {voiceLockOpen && (
         <>
-          <Connector dim={stage3Locked} />
+          <Connector dim={false} />
           <StageChip
             stageNum={3} label="Corpus" statusLine={s3StatusLine}
             status={s3Status} isActive={activeStage === 3}
@@ -327,36 +320,23 @@ export const CharacterPipeline: React.FC<CharacterPipelineProps> = ({
             status={s4Status} isActive={activeStage === 4}
             onClick={() => onSelectStage(4)}
           />
-          <button
-            onClick={() => onToggleRvcPipeline(false)}
-            title="Remove RVC pipeline (keeps any trained model on disk, just hides the stages)"
-            style={{
-              marginLeft: 8,
-              padding: "4px 8px",
-              fontSize: 10, color: "var(--fg-4)",
-              background: "transparent", border: "1px dashed var(--line-2)",
-              borderRadius: "var(--r)", cursor: "pointer",
-            }}
-          >
-            − RVC
-          </button>
         </>
-      ) : (
-        <button
-          onClick={() => onToggleRvcPipeline(true)}
-          title="Experimental: train an RVC voice model (from the recording's real lines or generated takes) to lock this character's timbre. Breeze takes don't need it."
-          style={{
-            marginLeft: 8,
-            padding: "6px 12px",
-            fontSize: 10, color: "var(--fg-3)",
-            background: "var(--bg-2)", border: "1px dashed var(--line-2)",
-            borderRadius: "var(--r)", cursor: "pointer",
-            fontFamily: "var(--font-mono)", letterSpacing: "0.06em", textTransform: "uppercase",
-          }}
-        >
-          + Voice lock (RVC, experimental)
-        </button>
       )}
+      <button
+        onClick={() => onToggleVoiceLock(!voiceLockOpen)}
+        aria-expanded={voiceLockOpen}
+        title="Optional: an RVC model trained on the character's real lines, applied to calm lines after Breeze. Most characters don't need it."
+        style={{
+          marginLeft: voiceLockOpen ? 8 : "auto",
+          padding: "4px 6px",
+          fontSize: 10, color: "var(--fg-4)",
+          background: "transparent", border: "none",
+          cursor: "pointer", whiteSpace: "nowrap",
+          fontFamily: "var(--font-mono)", letterSpacing: "0.04em",
+        }}
+      >
+        {voiceLockOpen ? "hide voice lock ‹" : `voice lock${modelTrained && rvcEnabled ? " · on" : ""} (optional) ›`}
+      </button>
     </div>
   );
 };

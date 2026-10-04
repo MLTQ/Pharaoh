@@ -18,6 +18,7 @@ inference/.venv-rvc
 
 
 inference/.applio
+inference/.rvc-models/
 
 target/release/
 

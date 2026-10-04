@@ -52,11 +52,12 @@ export interface PaletteEntry {
 /**
  * RVC (Retrieval-based Voice Conversion) model configuration for a character.
  *
- * Stage 4 of the character voice pipeline. After the emotional palette corpus
- * is generated (Stage 3), an RVC model is trained on that Chatterbox output
- * to lock voice consistency across all production lines.
+ * Optional "voice lock": an RVC model trained on the character's real lines
+ * (from its dissected recording) that finished takes pass through. In the
+ * blind test it made calm lines sound more like the character but flattened
+ * whispers, sighs, laughs and anger — so by default only calm lines get it.
  *
- * Pipeline: Chatterbox (clone + tags) → AudioSR → RVC → final WAV
+ * Pipeline: Breeze (or Chatterbox) → RVC (calm lines) → AudioSR (if on) → final WAV
  */
 export interface RvcConfig {
   /**
@@ -76,10 +77,9 @@ export interface RvcConfig {
    */
   pitch_shift: number;
   /**
-   * Retrieval index strength (0–1).
-   * Lower values preserve paralinguistic events ([sigh], [chuckle]) better;
-   * higher values enforce stronger voice identity from training data.
-   * Default: 0.5 — balanced for Chatterbox-sourced corpora.
+   * Retrieval index strength (0–1): how hard the output is pulled toward the
+   * training voice. Default 0.5 — in the blind test it kept delivery better
+   * than 0.35 and sounded as much like the character.
    */
   index_rate: number;
   /**
@@ -88,12 +88,13 @@ export interface RvcConfig {
    * cause lisping artefacts. Default: 0.33.
    */
   protect: number;
-  /**
-   * Whether to run the RVC pass on every production line.
-   * When false, lines use Chatterbox output directly (no consistency pass).
-   * Flip to false when debugging or when the model needs retraining.
-   */
+  /** Voice lock on: production takes pass through RVC (see `lock_lines`). */
   enabled: boolean;
+  /**
+   * Which lines get the lock: "calm" (default) skips whispered, sighed,
+   * laughed, shouted and frightened deliveries; "all" locks every line.
+   */
+  lock_lines?: "calm" | "all";
   /**
    * Number of WAV files in the rvc_corpus/ directory at last count.
    * Used by the UI to show corpus build progress without a filesystem scan.
@@ -134,12 +135,9 @@ export interface VoiceAssignment {
   /** Named emotional states for the Chatterbox Turbo palette workflow. */
   emotional_palette: PaletteEntry[];
   /**
-   * Which production pipeline runs per dialogue line.
-   * - "chatterbox": Chatterbox only, no RVC pass.
-   * - "chatterbox+rvc": Chatterbox followed by RVC voice conversion.
-   *
-   * Replaces the overloaded legacy `model` enum as the only thing that affects
-   * per-line generation. Defaults to "chatterbox" for new characters.
+   * Legacy: which engine voiced cloned lines before Breeze. Breeze is used
+   * whenever it serves the TTS port; voice lock (RVC) is `rvc.enabled`, not
+   * "chatterbox+rvc" (kept readable for old projects, no longer routes).
    */
   production_pipeline: "chatterbox" | "chatterbox+rvc";
   /** Clean up every generated take with AudioSR (speech model). */
@@ -485,6 +483,9 @@ export interface Job {
   project_id?: string;
   /** An AudioSR job that should replace this scene row's take when done. */
   cleans_row?: boolean;
+  /** Voice lock to try when the take completes (the character's RVC settings
+   *  and the line, which decides whether it qualifies). */
+  voice_lock?: { character_id: string; rvc: RvcConfig; text: string; direction: string };
 }
 
 // ── Asset browser items ─────────────────────────────────────────────────────
