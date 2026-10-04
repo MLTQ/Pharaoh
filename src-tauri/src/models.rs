@@ -347,6 +347,10 @@ pub struct JobStatus {
     pub progress: f32,
     pub output_path: Option<String>,
     pub error: Option<String>,
+    /// Server-specific details about the finished output (Breeze: take check,
+    /// direction performed, corrected reference transcript).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

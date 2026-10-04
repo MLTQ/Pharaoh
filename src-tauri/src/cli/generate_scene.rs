@@ -360,16 +360,24 @@ async fn generate_cloned(
     };
     let job_id = submit_job(&http, format!("{}/generate/{}", base, endpoint), &body, label).await?;
     let status = poll_job(&http, format!("{}/jobs", base), &job_id, label).await?;
+    let result = status.result.clone().unwrap_or_default();
     let local_out = if remote {
         download_remote_file_to(&http, &base, &job_id, output_path).await?
     } else {
         status.output_path.unwrap_or_else(|| output_path.to_string())
     };
+    // What the take check found (Breeze), kept with the take.
+    let check = match (result["wer"].as_f64(), result["heard"].as_str()) {
+        (Some(w), Some(h)) => format!("take check: {:.0}% off the script; heard \"{}\"", w * 100.0, h),
+        _ => String::new(),
+    };
+    let fixed_ref = if result["ref_transcript_corrected"].as_bool() == Some(true) { " · reference transcript corrected" } else { "" };
     let meta = SidecarMeta {
         model: if breeze { "breeze-tts-2-direction".into() } else { "chatterbox".into() },
         model_variant: None,
         prompt: row.prompt.clone(),
-        instruct: palette.map(|e| format!("palette: {}", e.label)),
+        instruct: result["instruct"].as_str().map(str::to_string).filter(|s| !s.is_empty())
+            .or_else(|| palette.map(|e| format!("palette: {}", e.label))),
         speaker: Some(c.name.clone()),
         language: Some("en".into()),
         seed,
@@ -382,7 +390,7 @@ async fn generate_cloned(
         parent: Some(local_ref),
         take_index: 1,
         qa_status: "unreviewed".into(),
-        qa_notes: String::new(),
+        qa_notes: format!("{}{}", check, fixed_ref),
     };
     let finalized = finalize_generation_output(projects_dir, project_id, scene_slug, row_index, &local_out, meta)?;
     Ok(GeneratedRowResult {

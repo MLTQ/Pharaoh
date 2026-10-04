@@ -304,6 +304,11 @@ async def _run(job_id: str, p: dict) -> None:
         _write_sidecar(out_path, {**meta, "seed": s, "sample_rate": sr,
                                   "duration_actual_ms": int(len(audio) / sr * 1000),
                                   "heard": heard, "wer": None if heard is None else round(score, 3)})
+        jobs.update(job_id, result={
+            "engine": "breeze", "seed": s, "instruct": instruction, "cfg_scale": cfg,
+            "heard": heard, "wer": None if heard is None else round(score, 3),
+            "ref_transcript": meta.get("ref_transcript"), "ref_transcript_corrected": meta.get("ref_transcript_corrected"),
+        })
         jobs.update(job_id, status="complete", progress=1.0, output_path=out_path,
                     message="Done" if heard is None or score <= max_wer else f"Done (best of {TRIES}; still {score:.0%} off the script)")
     except Exception as exc:

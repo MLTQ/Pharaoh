@@ -205,4 +205,7 @@ class JobStore:
             "output_path": j["output_path"],
             "error": j["error"],
             "message": j.get("message"),
+            # Server-specific details about the finished output (Breeze: the
+            # take check, the direction performed, a corrected reference transcript).
+            **({"result": j["result"]} if j.get("result") else {}),
         }
