@@ -16,7 +16,7 @@ All tools return a job record — poll with `job_status` / `wait_for_job`.
 | `generate_tts` | DIALOGUE | tts (or chatterbox) | auto-routes to Chatterbox clone when the character's voice_assignment.model is "Chatterbox" (palette ref resolved per row emotion); else voice_description → /generate/voice_design, else speaker+instruct → /generate/custom_voice |
 | `generate_chatterbox` | DIALOGUE | chatterbox | explicit 0-shot clone; ref_audio_path auto-resolves from the emotional palette when omitted |
 | `generate_sfx` | SFX/BED | sfx | Woosh-DFlow, 4-step |
-| `generate_music` | MUSIC | music | batch_size > 1 fans out seeds into `_takeN` output paths (gacha workflow) |
+| `generate_music` | MUSIC | music | batch_size > 1 fans out seeds into `_takeN` output paths (gacha workflow); `instrumental` (default true) and `bpm` apply to YuE2 |
 
 ## Invariants
 

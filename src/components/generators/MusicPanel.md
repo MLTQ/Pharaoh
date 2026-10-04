@@ -1,20 +1,20 @@
 # MusicPanel.tsx
 
 ## Purpose
-Scene-level score composition panel for ACE-Step music generation. It starts with empty direction fields, exposes the request parameters the backend accepts, and lists real generated cues for the selected scene.
+Scene-level score composition panel. The controls follow the engine on port 18003 (`health.music.engine`): YuE2 on NVIDIA hosts, ACE-Step otherwise. It starts with empty direction fields, exposes the request parameters that engine accepts, and lists real generated cues for the selected scene.
 
 ## Components
 
 ### Caption and lyrics editors
-- **Does**: Collect the ACE-Step caption and optional lyrics/textless vocal instruction.
+- **Does**: Collect the caption and optional lyrics. With YuE2, **Suppress vocals** (on by default) hides lyrics and sends `instrumental: true`. Max rarely wants singing in score.
 - **Interacts with**: `submitMusic` in `useGenerateJob.ts`.
 
 ### Parameter controls
-- **Does**: Exposes duration, BPM, key, LM model size, diffusion steps, thinking mode, reference audio path, seed, and batch size.
+- **Does**: Exposes duration, BPM, key and seed. LM model size, diffusion steps, thinking mode, reference audio path and batch size are shown only for ACE-Step.
 - **Interacts with**: `MusicText2MusicRequest`, `music_server.py`.
 
 ### Generated list
-- **Does**: Shows running/failed/current-session music jobs plus persisted ACE-Step sidecars for the selected scene, and lets completed cues be selected for routing.
+- **Does**: Shows running/failed/current-session music jobs plus persisted YuE2/ACE-Step sidecars for the selected scene, and lets completed cues be selected for routing.
 - **Interacts with**: `jobStore.ts`, `listGeneratedAudioAssets`, `getWaveformPeaks`, `PlayButton`.
 
 ### Scene routing

@@ -40,7 +40,7 @@ const DISSECT_MODELS = [
 const START_CMD: Record<CardKind, string> = {
   tts: "./inference/start_servers.sh   # Breeze TTS 2 when installed (./inference/setup.sh breeze), else Qwen3-TTS",
   sfx: "python inference/sfx_server.py",
-  music: "python inference/music_server.py",
+  music: "./inference/start_servers.sh   # YuE2 when installed (./inference/setup.sh yue2, NVIDIA), else ACE-Step",
   dissect: "inference/.venv-dissect/bin/python inference/dissect_server.py",
 };
 
@@ -176,7 +176,10 @@ export const ModelsView: React.FC = () => {
                   flexShrink: 0,
                 }} />
                 <span style={{ fontWeight: 600, fontSize: 13 }}>
-                  {s.kind === "tts" && (h as { engine?: string } | null)?.engine === "breeze" ? "Breeze TTS 2" : s.kind === "tts" ? "Qwen3-TTS (fallback)" : s.label}
+                  {s.kind === "tts" && (h as { engine?: string } | null)?.engine === "breeze" ? "Breeze TTS 2"
+                    : s.kind === "tts" ? "Qwen3-TTS (fallback)"
+                    : s.kind === "music" && (h as { engine?: string } | null)?.engine === "yue2" ? "YuE2 (3B)"
+                    : s.label}
                 </span>
                 <span style={{
                   fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2,

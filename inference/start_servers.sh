@@ -8,7 +8,10 @@
 #   TTS        : Breeze TTS 2 when installed — inference/.venv-breeze (PHARAOH_BREEZE_PYTHON),
 #                else Qwen3-TTS — inference/.venv-tts (PHARAOH_TTS_PYTHON).
 #                PHARAOH_TTS_ENGINE=qwen|breeze forces one. Both serve port 18001.
-#   Music      : inference/.venv-music/bin/python3         (PHARAOH_MUSIC_PYTHON)
+#   Music      : YuE2 when installed — inference/.venv-yue2 (PHARAOH_YUE2_PYTHON),
+#                else ACE-Step — inference/.venv-music (PHARAOH_MUSIC_PYTHON).
+#                PHARAOH_MUSIC_ENGINE=yue2|ace-step forces one. Both serve port 18003;
+#                the YuE2 server still runs ACE-Step from .venv-music for repaint/cover.
 #   SFX        : ~/Code/Woosh/.venv/bin/python3            (PHARAOH_WOOSH_DIR)
 #                optional AudioLDM runner: inference/.venv-audioldm/bin/python3
 #   Post       : inference/.venv-audiosr/bin/python3       (optional AudioSR)
@@ -45,6 +48,13 @@ TTS_ENGINE="${PHARAOH_TTS_ENGINE:-}"
 if [ -z "${TTS_ENGINE}" ]; then
     if [ -x "${BREEZE_PYTHON}" ] && [ -f "${BREEZE_WEIGHTS}" ]; then TTS_ENGINE=breeze; else TTS_ENGINE=qwen; fi
 fi
+YUE2_PYTHON="${PHARAOH_YUE2_PYTHON:-${SCRIPT_DIR}/.venv-yue2/bin/python3}"
+# YuE2 replaces ACE-Step as the music engine when it's installed.
+MUSIC_ENGINE="${PHARAOH_MUSIC_ENGINE:-}"
+if [ -z "${MUSIC_ENGINE}" ]; then
+    if [ -x "${YUE2_PYTHON}" ]; then MUSIC_ENGINE=yue2; else MUSIC_ENGINE=ace-step; fi
+fi
+export PHARAOH_MUSIC_PYTHON="${MUSIC_PYTHON}"
 WOOSH_PYTHON="${PHARAOH_WOOSH_DIR}/.venv/bin/python3"
 
 missing=0
@@ -61,7 +71,11 @@ if [ "${TTS_ENGINE}" = "breeze" ]; then
 else
     check_python "TTS"   "${TTS_PYTHON}"   "Run: ./inference/setup.sh"
 fi
-check_python "Music" "${MUSIC_PYTHON}" "Run: ./inference/setup.sh"
+if [ "${MUSIC_ENGINE}" = "yue2" ]; then
+    check_python "Music (YuE2)" "${YUE2_PYTHON}" "Run: ./inference/setup.sh yue2"
+else
+    check_python "Music" "${MUSIC_PYTHON}" "Run: ./inference/setup.sh"
+fi
 check_python "SFX"   "${WOOSH_PYTHON}" "Run: cd ${PHARAOH_WOOSH_DIR} && uv sync (or set PHARAOH_WOOSH_DIR)"
 [ "$missing" -eq 0 ] || exit 1
 
@@ -74,7 +88,11 @@ fi
 echo "  SFX   : ${WOOSH_PYTHON} (Woosh)"
 echo "  SFX+  : ${PHARAOH_AUDIOLDM_PYTHON} (optional AudioLDM runner)"
 echo "  SFX+ models: ${AUDIOLDM_CACHE_DIR}"
-echo "  Music : ${MUSIC_PYTHON}"
+if [ "${MUSIC_ENGINE}" = "yue2" ]; then
+    echo "  Music : ${YUE2_PYTHON} (YuE2; repaint/cover via ${MUSIC_PYTHON})"
+else
+    echo "  Music : ${MUSIC_PYTHON} (ACE-Step)"
+fi
 if [ -x "${POST_PYTHON}" ]; then
     echo "  Post       : ${POST_PYTHON} (AudioSR)"
 else
@@ -105,7 +123,11 @@ else
     "${TTS_PYTHON}"   tts_server.py   &
 fi
 "${WOOSH_PYTHON}" sfx_server.py   &
-"${MUSIC_PYTHON}" music_server.py &
+if [ "${MUSIC_ENGINE}" = "yue2" ]; then
+    "${YUE2_PYTHON}" yue2_music_server.py &
+else
+    "${MUSIC_PYTHON}" music_server.py &
+fi
 if [ -x "${POST_PYTHON}" ]; then
     "${POST_PYTHON}" post_server.py &
 fi

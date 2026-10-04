@@ -316,13 +316,25 @@ pub async fn upload_input_file(
     if local_path.is_empty() {
         return Ok(String::new());
     }
-    let bytes = std::fs::read(local_path)
-        .map_err(|e| Error::Other(format!("read input file '{}': {}", local_path, e)))?;
     let filename = std::path::Path::new(local_path)
         .file_name()
         .and_then(|n| n.to_str())
         .unwrap_or("upload.wav")
         .to_string();
+    upload_file_as(http, base_url, local_path, &filename).await
+}
+
+/// Upload a local file under a chosen name (the server keeps only the last
+/// path component). For files whose basename isn't unique across characters,
+/// like RVC models and corpus clips.
+pub async fn upload_file_as(
+    http: &reqwest::Client,
+    base_url: &str,
+    local_path: &str,
+    filename: &str,
+) -> Result<String> {
+    let bytes = std::fs::read(local_path)
+        .map_err(|e| Error::Other(format!("read input file '{}': {}", local_path, e)))?;
     let resp: serde_json::Value = http
         .post(format!("{}/upload", base_url))
         .query(&[("filename", &filename)])
@@ -521,6 +533,8 @@ async fn poll_until_done(
 
         match status.status.as_str() {
             "complete" => {
+                let mut sidecar_meta = sidecar_meta.clone();
+                sidecar_meta.apply_server_model(&status);
                 let server_output_path = status.output_path.unwrap_or_default();
 
                 // For remote servers, download the file to the local projects dir

@@ -9,6 +9,7 @@ import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { routeAudioToScene } from "../../lib/assetRouting";
 import { usePeaksStore } from "../../store/peaksStore";
 import { useRegenerateStore } from "../../store/regenerateStore";
+import { useModelStore } from "../../store/modelStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 interface MusicPanelProps {
@@ -188,6 +189,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
   const [duration, setDuration] = useState(30);
   const [bpm, setBpm] = useState(90);
   const [keySig, setKeySig] = useState("");
+  const [suppressVocals, setSuppressVocals] = useState(true);
   const [lmModelSize, setLmModelSize] = useState("1.7B");
   const [diffusionSteps, setDiffusionSteps] = useState(60);
   const [thinkingMode, setThinkingMode] = useState(false);
@@ -204,6 +206,8 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
   const { submitMusic } = useGenerateJob();
   const { jobs } = useJobStore();
   const { realProjectId, setActiveScene } = useProjectStore();
+  // YuE2 serves the music port on NVIDIA hosts; ACE-Step elsewhere (and on older servers).
+  const yue2 = useModelStore((s) => s.health.music?.engine) === "yue2";
 
   const sceneSlug = selectedSlug(scene, scenes);
   const sceneJobs = useMemo(
@@ -261,7 +265,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
         setGeneratedAssets(assets.filter((asset) =>
           asset.kind === "music"
           && asset.scene_slug === sceneSlug
-          && asset.model.toLowerCase().startsWith("ace-step")
+          && /^(ace-step|yue2)/.test(asset.model.toLowerCase())
         ));
       })
       .catch(() => {});
@@ -293,7 +297,8 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
     try {
       await submitMusic({
         caption: caption.trim(),
-        lyrics,
+        lyrics: yue2 && suppressVocals ? "" : lyrics,
+        instrumental: suppressVocals,
         durationSeconds: duration,
         bpm,
         key: keySig,
@@ -346,10 +351,12 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
       <div className="panel-main">
         <div className="panel-header">
           <div className="panel-header-left">
-            <span className="eyebrow music">score-v2 · ace-step</span>
+            <span className="eyebrow music">score-v2 · {yue2 ? "yue2" : "ace-step"}</span>
             <span className="ttl">Score Composition</span>
             <span className="desc">
-              Compose cues against the selected scene. Caption, lyrics, timing, and diffusion controls map directly to ACE-Step.
+              {yue2
+                ? "Compose cues against the selected scene. YuE2 writes a score, then performs it; duration and BPM are set on the score."
+                : "Compose cues against the selected scene. Caption, lyrics, timing, and diffusion controls map directly to ACE-Step."}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -377,13 +384,25 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Direction · caption</div>
         <RichDirector value={caption} setValue={setCaption} accent="var(--music)" />
 
-        <div style={{ marginTop: 12 }}>
-          <div className="field-label" style={{ marginBottom: 6 }}>
-            <span>Lyrics</span>
-            <span className="hint">optional; leave empty for instrumental/textless score</span>
+        {yue2 && (
+          <div className="field" style={{ marginTop: 12 }}>
+            <div className="field-label"><span>Suppress vocals</span><span className="hint">the melody moves to an instrument; no singing</span></div>
+            <div className="toggle-group">
+              <button className={suppressVocals ? "active" : ""} onClick={() => setSuppressVocals(true)}>on</button>
+              <button className={!suppressVocals ? "active" : ""} onClick={() => setSuppressVocals(false)}>off</button>
+            </div>
           </div>
-          <textarea className="textarea" value={lyrics} onChange={(e) => setLyrics(e.target.value)} style={{ minHeight: 76, fontSize: 12, lineHeight: 1.5 }} />
-        </div>
+        )}
+
+        {!(yue2 && suppressVocals) && (
+          <div style={{ marginTop: 12 }}>
+            <div className="field-label" style={{ marginBottom: 6 }}>
+              <span>Lyrics</span>
+              <span className="hint">{yue2 ? "sung words, with [Verse] / [Chorus] tags" : "optional; leave empty for instrumental/textless score"}</span>
+            </div>
+            <textarea className="textarea" value={lyrics} onChange={(e) => setLyrics(e.target.value)} style={{ minHeight: 76, fontSize: 12, lineHeight: 1.5 }} />
+          </div>
+        )}
 
         <div className="field-row" style={{ marginTop: 18 }}>
           <NumberControl label="Duration" hint="seconds" min={5} max={300} step={1} value={duration} onChange={(next) => setDuration(next || 30)} />
@@ -394,6 +413,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
           </div>
         </div>
 
+        {!yue2 && (<>
         <div className="field-row" style={{ marginTop: 12 }}>
           <div className="field">
             <div className="field-label"><span>LM model</span><span className="hint">ACE-Step</span></div>
@@ -413,6 +433,7 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
           </div>
           <input className="input" value={referenceAudioPath} onChange={(e) => setReferenceAudioPath(e.target.value)} placeholder="/path/to/reference.wav" />
         </div>
+        </>)}
 
         <div className="field-row" style={{ marginTop: 12 }}>
           <div className="field">
@@ -422,13 +443,15 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
               <button className="btn btn-sm" onClick={() => setSeed(Math.floor(Math.random() * 99999))}>roll</button>
             </div>
           </div>
-          <div className="field">
-            <div className="field-label"><span>Thinking mode</span><span className="hint">ACE-Step flag</span></div>
-            <div className="toggle-group">
-              <button className={!thinkingMode ? "active" : ""} onClick={() => setThinkingMode(false)}>off</button>
-              <button className={thinkingMode ? "active" : ""} onClick={() => setThinkingMode(true)}>on</button>
+          {!yue2 && (
+            <div className="field">
+              <div className="field-label"><span>Thinking mode</span><span className="hint">ACE-Step flag</span></div>
+              <div className="toggle-group">
+                <button className={!thinkingMode ? "active" : ""} onClick={() => setThinkingMode(false)}>off</button>
+                <button className={thinkingMode ? "active" : ""} onClick={() => setThinkingMode(true)}>on</button>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="kicker" style={{ margin: "20px 0 8px" }}>Generated for {sceneSlug ?? "scene"} · {sceneJobs.length + persistedOnly.length}</div>
@@ -473,7 +496,9 @@ export const MusicPanel: React.FC<MusicPanelProps> = ({ scenes, defaultScene }) 
         <div className="panel-side-section">
           <h3>Parameter map</h3>
           <div style={{ fontSize: 11, color: "var(--fg-3)", lineHeight: 1.65 }}>
-            Caption, lyrics, duration, BPM, key, LM model size, diffusion steps, thinking mode, seed, and batch size are sent to ACE-Step.
+            {yue2
+              ? "YuE2 plans a score from the caption, then plays it. Duration trims the score to whole bars, BPM is written into it, and key joins the caption. With vocals suppressed, the sung line becomes the lead instrument. Each take keeps its score as <take>.wav.score.abc."
+              : "Caption, lyrics, duration, BPM, key, LM model size, diffusion steps, thinking mode, seed, and batch size are sent to ACE-Step."}
           </div>
         </div>
       </div>

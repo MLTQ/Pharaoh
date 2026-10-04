@@ -49,8 +49,8 @@ export const MODELS = [
   },
   {
     kind: "music" as const,
-    label: "ACE-Step v1 (3.5B)",
-    description: "Music generation — lyrics + caption · 48 kHz",
+    label: "YuE2 (3B) / ACE-Step v1",
+    description: "Music generation — YuE2 on NVIDIA (instrumental by default), ACE-Step elsewhere and for repaint/cover",
     port: 18003,
     variants: null as null,
     install: "./inference/setup.sh",

@@ -213,9 +213,14 @@ def generate_music(
     batch_size: int = 1,
     diffusion_steps: int = 60,
     lm_model_size: str = "1.7B",
+    instrumental: bool = True,
+    bpm: int = 0,
 ) -> str:
     """
     Submit a music generation job for a MUSIC script row.
+    The music port runs YuE2 on NVIDIA hosts (ACE-Step elsewhere). With YuE2,
+    instrumental=True (default) means no singing; bpm > 0 sets the tempo exactly.
+    diffusion_steps and lm_model_size only apply to ACE-Step.
     batch_size > 1 generates multiple takes with different seeds for comparison (gacha workflow).
     Returns job_id (or list of job_ids if batch_size > 1). Poll job_status for each.
     The caption/prompt is read from the row's 'prompt' field.
@@ -243,6 +248,8 @@ def generate_music(
             "lm_model_size": lm_model_size,
             "batch_size": 1,
             "output_path": output_path,
+            "instrumental": instrumental,
+            **({"bpm": bpm} if bpm > 0 else {}),
         })
         return json.dumps(result)
     else:
@@ -261,6 +268,8 @@ def generate_music(
                 "lm_model_size": lm_model_size,
                 "batch_size": 1,
                 "output_path": take_path,
+                "instrumental": instrumental,
+                **({"bpm": bpm} if bpm > 0 else {}),
             })
             jobs.append({"take": i + 1, "seed": seed + i, "output_path": take_path, **result})
         return json.dumps({"batch": True, "jobs": jobs})

@@ -17,7 +17,8 @@ The app integrates four open-source generative models:
 - **Chatterbox Turbo** (Resemble AI 0.5B) — primary dialogue model; 0-shot voice cloning from a reference WAV, inline paralinguistic tags (`[sigh]`, `[chuckle]`, etc.)
 - **Qwen3-TTS** — palette reference synthesis (VoiceDesign) and legacy voice modes (CustomVoice, Clone)
 - **Woosh (Sony AI)** — sound effects (text-to-audio, video-to-audio)
-- **ACE-Step 1.5** — music (text2music, cover, repaint, lego, extract)
+- **YuE2** (m-a-p, 3B) — music on NVIDIA hosts: plans an editable ABC score, then performs it; instrumental by default
+- **ACE-Step v1** (3.5B) — music on Macs, and repaint/cover everywhere
 
 **Character voice workflow (current):**
 1. Author 1–5 named *emotional states* per character (e.g. `neutral`, `sardonic`, `dread`) in the Character Designer.
@@ -70,7 +71,9 @@ Pharaoh/
 │   ├── _common.py              # shared job store, path remap, /upload, /files
 │   ├── tts_server.py           # 18001 — Qwen3-TTS
 │   ├── sfx_server.py           # 18002 — Woosh + AudioLDM
-│   ├── music_server.py         # 18003 — ACE-Step
+│   ├── yue2_music_server.py    # 18003 — YuE2 (NVIDIA); repaint/cover via ace_step_worker.py
+│   ├── music_server.py         # 18003 — ACE-Step (when YuE2 isn't installed)
+│   ├── yue2_score.py  yue2_abc/  ace_step_tasks.py  ace_step_worker.py
 │   ├── post_server.py          # 18004 — AudioSR
 │   ├── chatterbox_server.py    # 18005 — Chatterbox clone
 │   ├── rvc_server.py           # 18006 — RVC convert/train (Applio workers)
@@ -259,7 +262,7 @@ with identical parameters, and provides full take lineage.
 
 ```json
 {
-  "model": "qwen3-tts-customvoice | woosh-dflow | ace-step-1.5",
+  "model": "qwen3-tts-customvoice | woosh-dflow | yue2-3b | ace-step-v1",
   "model_variant": "1.7B",
   "prompt": "string",
   "instruct": "string | null",
@@ -295,7 +298,7 @@ Model weights load once; subsequent generations pay only inference cost.
 | MCP         | 18000        | none — agent control plane, proxies to the rest |
 | TTS         | 18001        | Qwen3-TTS CustomVoice / VoiceDesign / VoiceClone |
 | SFX         | 18002        | Woosh (short foley), AudioLDM (long ambience) |
-| Music       | 18003        | ACE-Step |
+| Music       | 18003        | YuE2 when installed (NVIDIA), else ACE-Step v1 |
 | Post        | 18004        | AudioSR upscale |
 | Chatterbox  | 18005        | Chatterbox clone |
 | RVC         | 18006        | Applio convert + train |
@@ -543,58 +546,53 @@ POST /generate/v2a
 
 ### Music server — port 18003
 
-Wraps ACE-Step 1.5. Six generation modes; three are base-model-only.
+Two implementations behind one API; `start_servers.sh` picks YuE2 when
+`inference/.venv-yue2` exists (`PHARAOH_MUSIC_ENGINE=yue2|ace-step` forces one).
+`/health.engine` says which is running, and the app shows engine-specific controls.
 
 ```
 POST /generate/text2music
-     body: { caption, lyrics, duration_seconds, bpm, key,
-             language, lm_model_size, diffusion_steps,
-             thinking_mode, reference_audio_path, seed,
-             batch_size, output_path }
-
-POST /generate/cover
-     body: { source_audio_path, caption, cover_strength,
-             diffusion_steps, seed, output_path }
+     body: { caption, lyrics, duration_seconds, bpm, key, seed, output_path,
+             instrumental,                                   # YuE2 (default true)
+             language, lm_model_size, diffusion_steps,       # ACE-Step only
+             thinking_mode, reference_audio_path, batch_size }
 
 POST /generate/repaint
      body: { source_audio_path, caption, start_ms, end_ms,
              diffusion_steps, seed, output_path }
 
-POST /generate/lego
-     body: { source_audio_path, caption, track_name,
+POST /generate/cover
+     body: { source_audio_path, caption, cover_strength,
              diffusion_steps, seed, output_path }
-
-POST /generate/extract
-     body: { source_audio_path, track_class, output_path }
-
-POST /generate/complete
-     body: { source_audio_path, caption, diffusion_steps,
-             seed, output_path }
 ```
 
-**ACE-Step generation modes:**
+Finished jobs report `result.model` (`yue2-3b` or `ace-step-v1`); the app writes
+that into the sidecar, since the submitter can't know which engine ran.
 
-| Mode | Description | Model requirement |
-|------|-------------|-------------------|
-| text2music | Generate from text + lyrics | All variants |
-| cover | Restyle existing audio, keep structure | All variants |
-| repaint | Regenerate a time segment in place | All variants |
-| lego | Add a new instrument layer to existing audio | Base/SFT only |
-| extract | Isolate a stem from mixed audio | Base/SFT only |
-| complete | Generate backing for a vocal recording | Base/SFT only |
+**YuE2** (`yue2_music_server.py`, `.venv-yue2`, Linux + BF16 NVIDIA GPU)
+- text2music: YuE2 plans an ABC score (Vocal + Ins voices, chords), Pharaoh
+  shapes it (`yue2_score.py`), and YuE2 performs it at 48 kHz stereo.
+- YuE2 has **no duration or tempo input**. Left alone it plans 4–9 minutes.
+  Pharaoh caps the planner (~30 ABC tokens per target second), writes the BPM
+  into the score's `Q:` header, and trims instrumental scores to the whole bars
+  that fit. The audio stage is capped at 25 tokens per second of target plus
+  10 s for the ending; a cue cut off by the cap gets a 2 s fade.
+- `instrumental` (default true): every vocal note moves to the instrument voice,
+  lyrics become section tags only, and the style gains "no vocals, no singing…".
+- Key is a hint in the style text; the planner may choose another.
+- Each take keeps its score at `<take>.wav.score.abc` (local servers).
+- Repaint/cover run ACE-Step v1 in a subprocess (`ace_step_worker.py` with
+  `.venv-music`), after unloading YuE2. Repaint output is spliced: outside the
+  window (100 ms crossfades) the source is kept bit-for-bit at its bit depth.
+- ~8 GB VRAM peak; ~3x realtime on an RTX 4090 (60 s cue ≈ 20 s plus planning).
+- Weights are CC BY-NC 4.0 (creators may monetise; commercial use needs the authors).
 
-**LM planner sizes** (for text2music, lego, complete):
-`none (disabled) | 0.6B | 1.7B | 4B`
-Larger = better planning, slower. Disable for direct control when you know exactly what you want.
-
-**Extractable stems:**
-`vocals, backing_vocals, drums, bass, guitar, keyboard, percussion, strings, synth, fx, brass, woodwinds`
-
-**Known gotchas:**
-- Output is highly seed-sensitive ("gacha" results) — expose seed control and batch generation
-- Lego/Extract/Complete require base or SFT model, not turbo
-- LM planner is bypassed automatically for cover/repaint/extract (source audio replaces planning)
-- Vocal synthesis quality is coarse — use for underscore and ambience, not sung dialogue
+**ACE-Step v1** (`music_server.py`, `.venv-music`)
+- text2music, cover and repaint (`ace_step_tasks.py`). Repaint windows are in ms
+  on the API; ACE-Step takes seconds.
+- Highly seed-sensitive ("gacha") — expose seed control and batch generation.
+- Vocals are coarse — use it for underscore and ambience, not sung lines.
+- Stem extract/lego/complete belong to ACE-Step 1.5, which isn't installed (tracked in beads).
 
 ### Dissect server — port 18007
 
@@ -934,7 +932,7 @@ Lifecycle commands are tracked as Pharaoh-wnf.
   pharaoh generate tts-design --text <text> --voice-description <text> --output-path <wav>
   pharaoh generate tts-clone --text <text> --ref-audio-path <wav> --output-path <wav>
   pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
-  pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
+  pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--instrumental true|false] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh compose meta <render_wav>
   pharaoh compose final <project_id> [--crossfade <ms>] [--target-lufs <n>]
@@ -1016,6 +1014,7 @@ Lifecycle commands are tracked as Pharaoh-wnf.
 |-------|-----------|--------|
 | Qwen3-TTS | 24kHz | Resample to 48kHz before composition |
 | Woosh | 48kHz | No action needed |
+| YuE2 | 48kHz stereo, 24-bit | No action needed |
 | ACE-Step | 44.1kHz | Resample to 48kHz before composition |
 
 All composition and rendering operates at 48kHz / 24-bit.
@@ -1027,6 +1026,7 @@ All composition and rendering operates at 48kHz / 24-bit.
 | Dissect (all four models) | ~5.5GB  | —             |
 | Qwen3-TTS        | ~4GB (0.6B)     | ~6GB (1.7B)   |
 | Woosh            | ~2GB (DFlow)    | ~4GB (Flow)   |
+| YuE2             | ~8GB (3B)       | —             |
 | ACE-Step         | ~4GB (base)     | ~12–20GB (XL) |
 
 The model manager should default to loading only one model at a time on
@@ -1036,5 +1036,5 @@ consumer hardware (<= 16GB VRAM). Users with 24GB+ can configure concurrent load
 1. Dialogue intelligibility above everything — never let beds or music mask dialogue
 2. Auto-ducking is not optional — implement from Phase 5 day one
 3. Woosh output is monaural — stereo widening should be a default post-process
-4. ACE-Step is for underscore and ambience, not sung dialogue — vocal quality is coarse
+4. Score is instrumental by default (YuE2 "suppress vocals"); ACE-Step vocals are coarse
 5. Use Repaint to fix specific sections rather than regenerating entire music cues

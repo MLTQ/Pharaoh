@@ -28,6 +28,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from starlette.background import BackgroundTask
 from pydantic import BaseModel
 
+import ace_step_tasks
+from ace_step_tasks import MUSIC_MODEL_DIR, model_dir_status as _model_dir_status
 from _common import JobStore, new_job_id, remap_path, register_upload_route, server_output_path, is_server_owned, spawn_job
 
 log = logging.getLogger(__name__)
@@ -61,7 +63,6 @@ def _write_sidecar(audio_path: str, meta: dict) -> None:
 
 PORT            = int(os.environ.get("PHARAOH_MUSIC_PORT",    18003))
 MODEL_VARIANT   = os.environ.get("PHARAOH_MUSIC_VARIANT",  "ACE-Step-v1-3.5B")
-MUSIC_MODEL_DIR = Path(os.environ.get("PHARAOH_MUSIC_MODEL_DIR", "~/pharaoh-models/music")).expanduser()
 
 app = FastAPI(title="Pharaoh Music Server", version="0.1.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
@@ -74,21 +75,6 @@ STEMS = ["vocals", "backing_vocals", "drums", "bass", "guitar", "keyboard",
 _pipeline   = None         # ACEStepPipeline instance
 _load_lock  = asyncio.Lock()
 OOM_MARKER  = "MUSIC_OOM"  # FE matches this prefix to surface a memory toast
-
-REQUIRED_DIRS = ["ace_step_transformer", "music_dcae_f8c8", "music_vocoder", "umt5-base"]
-
-
-def _model_dir_status() -> dict:
-    if not MUSIC_MODEL_DIR.is_dir():
-        return {"ok": False, "reason": f"PHARAOH_MUSIC_MODEL_DIR not found: {MUSIC_MODEL_DIR}"}
-    missing = [d for d in REQUIRED_DIRS if not (MUSIC_MODEL_DIR / d).is_dir()]
-    if missing:
-        return {"ok": False, "reason": (
-            f"Missing checkpoint subdirs in {MUSIC_MODEL_DIR}: {', '.join(missing)}. "
-            f"Download with: hf download ACE-Step/ACE-Step-v1-3.5B --local-dir {MUSIC_MODEL_DIR}"
-        )}
-    return {"ok": True, "reason": ""}
-
 
 def _is_memory_error(exc: BaseException) -> bool:
     name = type(exc).__name__
@@ -104,17 +90,8 @@ def _is_memory_error(exc: BaseException) -> bool:
 def _do_load() -> None:
     """Construct the pipeline and eagerly load weights so /generate responses are fast."""
     global _pipeline
-    from acestep.pipeline_ace_step import ACEStepPipeline
-
     log.info(f"Loading ACE-Step from {MUSIC_MODEL_DIR}")
-    pipe = ACEStepPipeline(
-        checkpoint_dir=str(MUSIC_MODEL_DIR),
-        dtype="bfloat16",
-    )
-    # Construction is lazy — force the weight load now so we surface errors here
-    # instead of from a worker thread mid-generation.
-    pipe.load_checkpoint(str(MUSIC_MODEL_DIR))
-    _pipeline = pipe
+    _pipeline = ace_step_tasks.load_pipeline()
     log.info("ACE-Step loaded.")
 
 
@@ -200,73 +177,10 @@ async def _run_music(job_id: str, params: dict) -> None:
     try:
         endpoint = params.get("_endpoint", "text2music")
         out_path = remap_path(params.get("output_path")) or server_output_path(job_id)
-        seed     = int(params.get("seed", 0)) or None
-        steps    = int(params.get("diffusion_steps", 60))
-        duration = float(params.get("duration_seconds", 30.0))
-
-        # ACEStepPipeline writes the audio to save_path itself, so we just need
-        # to make sure the parent dir exists and pass the .wav path through.
-        Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-
-        loop = asyncio.get_running_loop()
         jobs.update(job_id, progress=0.10)
-
-        manual_seeds = [seed] if seed else None
-        common_kwargs = dict(
-            format="wav",
-            audio_duration=duration,
-            infer_step=steps,
-            manual_seeds=manual_seeds,
-            save_path=out_path,
-            batch_size=int(params.get("batch_size", 1)),
-        )
-
-        # ACEStepPipeline.__call__ does `len(lyrics) > 0` etc. without None-checks,
-        # so empty-string is required for unset text fields, not None.
-        if endpoint == "text2music":
-            caption = params.get("caption", "") or ""
-            lyrics  = params.get("lyrics",  "") or ""
-            ref     = params.get("reference_audio_path", "") or ""
-            await loop.run_in_executor(
-                None,
-                lambda: _pipeline(
-                    task="text2music",
-                    prompt=caption,
-                    lyrics=lyrics,
-                    audio2audio_enable=bool(ref),
-                    ref_audio_input=ref,
-                    ref_audio_strength=0.5,
-                    **common_kwargs,
-                ),
-            )
-        elif endpoint == "cover":
-            await loop.run_in_executor(
-                None,
-                lambda: _pipeline(
-                    task="audio2audio",
-                    prompt=params.get("caption", "") or "",
-                    lyrics="",
-                    audio2audio_enable=True,
-                    ref_audio_input=params["source_audio_path"],
-                    ref_audio_strength=float(params.get("cover_strength", 0.5)),
-                    **common_kwargs,
-                ),
-            )
-        elif endpoint == "repaint":
-            await loop.run_in_executor(
-                None,
-                lambda: _pipeline(
-                    task="repaint",
-                    prompt=params.get("caption", "") or "",
-                    lyrics="",
-                    src_audio_path=params["source_audio_path"],
-                    repaint_start=int(params.get("start_ms", 0)),
-                    repaint_end=int(params.get("end_ms", 10000)),
-                    **common_kwargs,
-                ),
-            )
-        else:
-            raise ValueError(f"Unsupported music endpoint: {endpoint}")
+        loop = asyncio.get_running_loop()
+        await loop.run_in_executor(
+            None, lambda: ace_step_tasks.run_task(_pipeline, endpoint, params, out_path))
 
         dur_ms = int(float(params.get("duration_seconds", 30.0)) * 1000)
         take   = int(params.get("take_index", 1))
@@ -277,7 +191,9 @@ async def _run_music(job_id: str, params: dict) -> None:
             "duration_target_ms": dur_ms, "duration_actual_ms": dur_ms,
             "sample_rate": 44100, "take_index": take,
         })
-        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path)
+        # The app labels the take from `result.model` (the port may run YuE2 instead).
+        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path,
+                    result={"model": "ace-step-v1", "model_variant": MODEL_VARIANT})
 
     except Exception as exc:
         log.exception("ACE-Step inference failed")
@@ -305,6 +221,7 @@ async def health() -> dict:
         "model_variant": MODEL_VARIANT,
         "vram_mb": 8192 if _pipeline is not None else 0,
         "stub": False,
+        "engine": "ace-step",
         "model_dir": str(MUSIC_MODEL_DIR),
         "model_dir_ready": status["ok"],
         "model_dir_error": status["reason"],

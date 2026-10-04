@@ -119,7 +119,7 @@ pub struct VoiceAssignment {
 /// the on-disk `rvc_corpus/` directory whenever a project is loaded, never
 /// trusted on read. They're persisted only so the on-disk shape stays
 /// round-trippable; the UI reads fresh values on each `get_project`.
-#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RvcConfig {
     /// Absolute path to the trained `.pth` weights file. None = model not yet trained.
     #[serde(default)]
@@ -136,11 +136,15 @@ pub struct RvcConfig {
     /// Voiceless consonant protection (0..=0.5). Default 0.33.
     #[serde(default = "default_rvc_protect")]
     pub protect: f32,
-    /// When true, production dialogue lines pass through RVC after Chatterbox.
-    /// Mirrors `VoiceAssignment::production_pipeline == "chatterbox+rvc"`; kept
-    /// here for the existing RvcModelStage toggle. Future cleanup: collapse.
+    /// Voice lock: production dialogue takes pass through RVC after the TTS
+    /// engine (Breeze or Chatterbox). Optional — Breeze alone is the default.
     #[serde(default)]
     pub enabled: bool,
+    /// Which lines get the lock: "calm" (default) skips whispered, sighed,
+    /// laughed, shouted and frightened deliveries, which RVC flattens; "all"
+    /// locks every line.
+    #[serde(default = "default_rvc_lock_lines")]
+    pub lock_lines: String,
     /// Number of WAV files in the corpus dir at last load (transient).
     #[serde(default)]
     pub corpus_count: u32,
@@ -166,8 +170,7 @@ impl VoiceAssignment {
                 index_rate: self.rvc_index_rate,
                 protect: self.rvc_protect,
                 enabled: self.rvc_enabled,
-                corpus_count: 0,
-                corpus_duration_ms: 0,
+                ..RvcConfig::default()
             });
         }
         // Reset legacy fields so a manual save doesn't accidentally round-trip them
@@ -412,6 +415,26 @@ fn default_rvc_index_rate() -> f32 {
 
 fn default_rvc_protect() -> f32 {
     0.33
+}
+
+fn default_rvc_lock_lines() -> String {
+    "calm".into()
+}
+
+impl Default for RvcConfig {
+    fn default() -> Self {
+        RvcConfig {
+            model_path: None,
+            index_path: None,
+            pitch_shift: 0,
+            index_rate: default_rvc_index_rate(),
+            protect: default_rvc_protect(),
+            enabled: false,
+            lock_lines: default_rvc_lock_lines(),
+            corpus_count: 0,
+            corpus_duration_ms: 0,
+        }
+    }
 }
 
 fn default_single_model_mode() -> bool {
@@ -675,9 +698,29 @@ pub struct MusicText2MusicRequest {
     pub seed: i64,
     pub batch_size: u32,
     pub output_path: String,
+    /// YuE2: move the planned vocal line to an instrument (server default: true).
+    /// ACE-Step ignores it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instrumental: Option<bool>,
 }
 
 // ── Sidecar model ────────────────────────────────────────────────────────
+
+impl SidecarMeta {
+    /// Take the model label from the job's `result` when the server reports one.
+    /// One port can run different engines (music: YuE2 or ACE-Step), so the
+    /// submitter's guess is only a fallback.
+    pub fn apply_server_model(&mut self, status: &JobStatus) {
+        let Some(result) = status.result.as_ref() else { return };
+        if let Some(model) = result.get("model").and_then(|v| v.as_str()) {
+            self.model = model.to_string();
+            self.model_variant = result
+                .get("model_variant")
+                .and_then(|v| v.as_str())
+                .map(str::to_string);
+        }
+    }
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SidecarMeta {

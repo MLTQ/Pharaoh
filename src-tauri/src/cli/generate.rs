@@ -339,6 +339,9 @@ pub(super) async fn generate_direct_music(
         seed: flag_parse(&flags, "seed", random_seed())?,
         batch_size: flag_parse(&flags, "batch_size", 1)?,
         output_path: output_path.clone(),
+        instrumental: flag_opt(&flags, "instrumental")
+            .map(|_| flag_parse(&flags, "instrumental", true))
+            .transpose()?,
     };
 
     let http = reqwest::Client::new();
@@ -356,30 +359,29 @@ pub(super) async fn generate_direct_music(
         "Music",
     )
     .await?;
-    let final_output = status.output_path.unwrap_or(output_path);
+    let final_output = status.output_path.clone().unwrap_or(output_path);
     let (duration_actual_ms, sample_rate) = cli_wav_info(&final_output);
-    write_sidecar(
-        final_output.clone(),
-        SidecarMeta {
-            model: "ace-step-1.5".into(),
-            model_variant: Some(params.lm_model_size.clone()),
-            prompt: params.caption.clone(),
-            instruct: (!params.lyrics.is_empty()).then_some(params.lyrics.clone()),
-            speaker: None,
-            language: Some(params.language.clone()),
-            seed: params.seed,
-            temperature: None,
-            top_p: None,
-            duration_target_ms: Some((params.duration_seconds * 1000.0) as u64),
-            duration_actual_ms,
-            sample_rate,
-            generated_at: Utc::now(),
-            parent: (!params.reference_audio_path.is_empty())
-                .then_some(params.reference_audio_path.clone()),
-            take_index: 1,
-            qa_status: "unreviewed".into(),
-            qa_notes: String::new(),
-        },
-    )?;
+    let mut meta = SidecarMeta {
+        model: "ace-step-1.5".into(),
+        model_variant: Some(params.lm_model_size.clone()),
+        prompt: params.caption.clone(),
+        instruct: (!params.lyrics.is_empty()).then_some(params.lyrics.clone()),
+        speaker: None,
+        language: Some(params.language.clone()),
+        seed: params.seed,
+        temperature: None,
+        top_p: None,
+        duration_target_ms: Some((params.duration_seconds * 1000.0) as u64),
+        duration_actual_ms,
+        sample_rate,
+        generated_at: Utc::now(),
+        parent: (!params.reference_audio_path.is_empty())
+            .then_some(params.reference_audio_path.clone()),
+        take_index: 1,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    meta.apply_server_model(&status);
+    write_sidecar(final_output.clone(), meta)?;
     print_json(&json!({ "job_id": job_id, "output_path": final_output }))
 }

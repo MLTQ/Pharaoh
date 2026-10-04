@@ -334,20 +334,20 @@ async fn generate_cloned(
     };
     let transcript = palette.and_then(|e| e.ref_transcript.clone()).or_else(|| c.voice_assignment.ref_transcript.clone()).unwrap_or_default();
     // Breeze serves the TTS port when installed: clone + direction there.
-    // Characters on the Chatterbox + RVC pipeline keep Chatterbox.
-    let breeze = c.voice_assignment.production_pipeline != "chatterbox+rvc" && tts_engine(&http, &config.tts_url).await == "breeze";
+    // Chatterbox is the fallback when it isn't. (Voice lock runs after either.)
+    let breeze = tts_engine(&http, &config.tts_url).await == "breeze";
     let base = if breeze { config.tts_url.clone() } else { config.chatterbox_url.clone() }.trim_end_matches('/').to_string();
     let remote = is_remote_url(&base);
     let ref_for_server = if remote { upload_input_file(&http, &base, &local_ref).await? } else { local_ref.clone() };
     let seed = random_seed();
     let out_field = if remote { String::new() } else { output_path.to_string() };
+    // The direction: the palette emotion's written direction, plus the row's
+    // own note when it says more than the emotion's name.
+    let note = format!("{} {}", row.emotion, row.instruct).trim().to_string();
+    let just_name = palette.is_some_and(|e| note.eq_ignore_ascii_case(&e.emotion) || note.eq_ignore_ascii_case(&e.label));
+    let direction = [if just_name { "" } else { note.as_str() }, palette.map(|e| e.direction.as_str()).unwrap_or("")]
+        .iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ");
     let (endpoint, label, body) = if breeze {
-        // The direction: the palette emotion's written direction, plus the row's
-        // own note when it says more than the emotion's name.
-        let note = format!("{} {}", row.emotion, row.instruct).trim().to_string();
-        let just_name = palette.is_some_and(|e| note.eq_ignore_ascii_case(&e.emotion) || note.eq_ignore_ascii_case(&e.label));
-        let direction = [if just_name { "" } else { note.as_str() }, palette.map(|e| e.direction.as_str()).unwrap_or("")]
-            .iter().filter(|s| !s.is_empty()).cloned().collect::<Vec<_>>().join(" ");
         ("voice_clone", "Breeze", serde_json::json!({
             "text": row.prompt, "ref_audio_path": ref_for_server, "ref_transcript": transcript,
             "instruct": direction, "seed": seed, "output_path": out_field,
@@ -365,6 +365,15 @@ async fn generate_cloned(
         download_remote_file_to(&http, &base, &job_id, output_path).await?
     } else {
         status.output_path.unwrap_or_else(|| output_path.to_string())
+    };
+    // Voice lock (optional): calm lines pass through the character's RVC model.
+    let (local_out, lock_note) = match voice_lock(config, projects_dir, project_id, c, &row.prompt, &direction, &local_out, &http).await {
+        Ok(Some((path, note))) => (path, note),
+        Ok(None) => (local_out, String::new()),
+        Err(e) => {
+            eprintln!("warning: voice lock skipped for row {}: {}", row_index, e);
+            (local_out, String::new())
+        }
     };
     // What the take check found (Breeze), kept with the take.
     let check = match (result["wer"].as_f64(), result["heard"].as_str()) {
@@ -385,12 +394,12 @@ async fn generate_cloned(
         top_p: None,
         duration_target_ms: None,
         duration_actual_ms: None,
-        sample_rate: 24000,
+        sample_rate: if lock_note.is_empty() { 24000 } else { 48000 },
         generated_at: Utc::now(),
         parent: Some(local_ref),
         take_index: 1,
         qa_status: "unreviewed".into(),
-        qa_notes: format!("{}{}", check, fixed_ref),
+        qa_notes: format!("{}{}{}", check, fixed_ref, lock_note),
     };
     let finalized = finalize_generation_output(projects_dir, project_id, scene_slug, row_index, &local_out, meta)?;
     Ok(GeneratedRowResult {
@@ -402,6 +411,35 @@ async fn generate_cloned(
         duration_ms: finalized.duration_ms,
         bound_to_script: finalized.bound_to_script,
     })
+}
+
+/// Run a finished take through the character's RVC model when voice lock is
+/// on and the line is one it suits. Returns the locked file and a note for the
+/// sidecar, or `None` when the take stays as the engine made it.
+#[allow(clippy::too_many_arguments)]
+async fn voice_lock(
+    config: &crate::models::AppConfig,
+    projects_dir: &Path,
+    project_id: &str,
+    c: &crate::models::Character,
+    text: &str,
+    direction: &str,
+    take: &str,
+    http: &reqwest::Client,
+) -> Result<Option<(String, String)>> {
+    use crate::commands::rvc;
+    let Some(cfg) = c.voice_assignment.rvc.as_ref().filter(|r| rvc::locks_line(r, text, direction)) else {
+        return Ok(None);
+    };
+    let char_dir = crate::app_support::character_dir(projects_dir, project_id, &c.id);
+    let pth = rvc::local_model(&char_dir, cfg).ok_or_else(|| Error::Other("voice lock is on but no model is trained".into()))?;
+    let base = config.rvc_url.trim_end_matches('/').to_string();
+    let (model, index) = rvc::server_model_paths(http, &base, &c.id, &pth).await?;
+    let out = rvc::lock_output_path(take);
+    let body = rvc::voice_lock_body(cfg, take, &out, &model, &index);
+    let job_id = submit_job(http, format!("{}/convert", base), &body, "RVC").await?;
+    let status = poll_job(http, format!("{}/jobs", base), &job_id, "RVC").await?;
+    Ok(Some((status.output_path.unwrap_or(out), format!(" · voice lock (RVC, index {:.2})", cfg.index_rate))))
 }
 
 /// The TTS server's engine ("breeze" or "" for Qwen), checked once per run.
@@ -571,6 +609,7 @@ async fn generate_music(
         seed: random_seed(),
         batch_size: 1,
         output_path: output_path.clone(),
+        instrumental: None,
     };
 
     let job_id = submit_job(
@@ -588,37 +627,39 @@ async fn generate_music(
         "Music",
     )
     .await?;
-    let output_path = status.output_path.ok_or_else(|| {
+    let output_path = status.output_path.clone().ok_or_else(|| {
         Error::Other(format!(
             "Music job {} completed without output_path (row {} of scene {})",
             job_id, row_index, scene_slug
         ))
     })?;
+    let mut meta = SidecarMeta {
+        model: "ace-step-1.5".into(),
+        model_variant: Some(params.lm_model_size.clone()),
+        prompt: params.caption.clone(),
+        instruct: None,
+        speaker: None,
+        language: Some(params.language.clone()),
+        seed: params.seed,
+        temperature: None,
+        top_p: None,
+        duration_target_ms: Some((params.duration_seconds * 1000.0) as u64),
+        duration_actual_ms: None,
+        sample_rate: 44100,
+        generated_at: Utc::now(),
+        parent: None,
+        take_index: 1,
+        qa_status: "unreviewed".into(),
+        qa_notes: String::new(),
+    };
+    meta.apply_server_model(&status);
     let finalized = finalize_generation_output(
         projects_dir,
         project_id,
         scene_slug,
         row_index,
         &output_path,
-        SidecarMeta {
-            model: "ace-step-1.5".into(),
-            model_variant: Some(params.lm_model_size.clone()),
-            prompt: params.caption.clone(),
-            instruct: None,
-            speaker: None,
-            language: Some(params.language.clone()),
-            seed: params.seed,
-            temperature: None,
-            top_p: None,
-            duration_target_ms: Some((params.duration_seconds * 1000.0) as u64),
-            duration_actual_ms: None,
-            sample_rate: 44100,
-            generated_at: Utc::now(),
-            parent: None,
-            take_index: 1,
-            qa_status: "unreviewed".into(),
-            qa_notes: String::new(),
-        },
+        meta,
     )?;
 
     Ok(GeneratedRowResult {

@@ -242,6 +242,8 @@ export const submitMusicText2Music = (args: {
     seed: number;
     batch_size: number;
     output_path: string;
+    /** YuE2: no singing — the planned vocal line goes to an instrument. Defaults to true. */
+    instrumental?: boolean;
   };
 }): Promise<string> => invoke("submit_music_text2music", args);
 

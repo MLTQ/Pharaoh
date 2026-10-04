@@ -20,7 +20,7 @@ Shared frontend hook for submitting scene-level TTS, SFX, and music jobs. It res
 - **Rationale**: Woosh is preferred for short foley; AudioLDM is reserved for long effects and soundscapes that should not be stitched from many short chunks.
 - **Woosh defaults**: Uses 4 Euler steps and CFG scale 4.5 unless the caller overrides them.
 - **AudioLDM defaults**: Uses upstream's recommended `audioldm-m-full` native checkpoint and 200 steps for quality. Candidate count defaults to 1 because upstream AudioLDM's multi-candidate CLAP ranking assumes CUDA and crashes on Apple Silicon/CPU.
-- **Music defaults**: Uses ACE-Step 1.7B, 60 diffusion steps, batch size 1, and thinking mode off unless the caller overrides them.
+- **Music defaults**: `instrumental: true` (YuE2 suppresses vocals; ACE-Step ignores it). ACE-Step fields: 1.7B, 60 diffusion steps, batch size 1, thinking mode off unless the caller overrides them.
 
 ## Contracts
 

@@ -276,7 +276,13 @@ export function ModelServerCards({
                     Nemotron-3-Diarization, TitaNet and Parakeet download from Hugging Face on the first import (~2.5 GB).
                   </div>
                 ) : (
-                  <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                    <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                      On an NVIDIA host, <code>./inference/setup.sh yue2</code> installs YuE2 and fetches its weights (~7.3 GB).
+                      ACE-Step v1 runs music on Macs and repaint/cover everywhere:
+                    </div>
+                    <CopyableCommand command={`hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music`} />
+                  </div>
                 )}
               </div>
 

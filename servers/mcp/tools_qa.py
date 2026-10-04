@@ -132,7 +132,7 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "max_new_tokens": meta.get("max_new_tokens", 2048),
             "output_path": output_path,
         }))
-    elif "ace" in lowered or "music" in lowered:
+    elif "ace" in lowered or "yue" in lowered or "music" in lowered:
         return json.dumps(_post("music", "/generate/text2music", {
             "caption": meta.get("prompt", ""),
             "lyrics": "",
@@ -157,7 +157,7 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "error": (
                 f"unrecognised model '{model}' — regenerate_asset does not know "
                 f"which server produced this asset. Known families: qwen/tts, "
-                f"ace/music, woosh/sfx/audioldm."
+                f"ace/yue/music, woosh/sfx/audioldm."
             )
         })
 

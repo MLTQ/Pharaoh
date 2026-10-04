@@ -24,7 +24,7 @@ def unload_model(server: str) -> str:
     Typical footprints (RAM, no GPU):
       tts         — ~8–12 GB (voice_design or custom_voice)
       sfx         — ~4–6 GB (AudioLDM)
-      music       — ~14–20 GB (ACE-Step 3.5B)
+      music       — ~8–9 GB GPU (YuE2 3B) or ~14–20 GB (ACE-Step 3.5B)
       post        — ~2–4 GB (AudioSR)
       chatterbox  — ~4–6 GB (Chatterbox Turbo 0.5B)
 

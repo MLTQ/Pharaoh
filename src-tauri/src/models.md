@@ -22,6 +22,8 @@ Shared serialized models for the Rust backend. This file defines project, scene,
 - **Does**: Encode generation payloads sent to the Python servers.
 - **Interacts with**: `inference.rs`, `cli.rs`.
 - **Rationale**: Clone requests include `max_new_tokens` because Qwen can otherwise spend unbounded time in generation.
+- **Music fields**: `MusicText2MusicRequest.instrumental` is optional and omitted when unset; the YuE2 server defaults it to true.
+- **Model label**: `SidecarMeta::apply_server_model` takes `model`/`model_variant` from a finished job's `result`. Port 18003 may run YuE2 or ACE-Step, so the submitter's label is only a fallback.
 - **SFX fields**: `SfxT2ARequest` carries backend, model variant, duration, steps, seed, Woosh CFG scale, and AudioLDM guidance/negative/candidate controls.
 
 ### `JobProgressEvent`, `JobCompleteEvent`, `JobFailedEvent`

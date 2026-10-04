@@ -5,7 +5,10 @@
 #   inference/.venv-breeze     → Breeze TTS 2: dialogue, voice design, cloning
 #                                with direction (Python 3.11; Linux + NVIDIA)
 #   inference/.venv-tts        → qwen-tts (transformers 4.57.3) — fallback TTS
-#   inference/.venv-music      → ace-step (transformers 4.50.0)
+#   inference/.venv-music      → ace-step (transformers 4.50.0): music on Macs,
+#                                repaint/cover everywhere
+#   inference/.venv-yue2       → YuE2 music (Python 3.12, Linux + NVIDIA; replaces
+#                                ACE-Step for new music where it can run)
 #   inference/.venv-audioldm   → optional upstream AudioLDM runner
 #   inference/.venv-audiosr    → optional AudioSR upscaler
 #   inference/.venv-rvc        → rvc-python for voice conversion (Python 3.9)
@@ -17,11 +20,14 @@
 # Usage:
 #   ./inference/setup.sh                 core envs + any optional ones enabled below
 #   ./inference/setup.sh dissect         ONLY the named sections (forces them on);
-#   ./inference/setup.sh core dissect    sections: core breeze chatterbox rvc
+#   ./inference/setup.sh core dissect    sections: core breeze yue2 chatterbox rvc
 #                                        audioldm audiosr dissect applio
 #
 # Breeze defaults to "auto" like dissect (PHARAOH_INSTALL_BREEZE=0/1); its
 # weights (~7 GB) go to PHARAOH_BREEZE_HOME (~/pharaoh-models/breeze).
+#
+# YuE2 defaults to "auto" too (PHARAOH_INSTALL_YUE2=0/1); its weights (~7.3 GB)
+# go to the Hugging Face cache.
 #
 # Optional sections are switched on with PHARAOH_INSTALL_<NAME>=1. Dissect
 # defaults to "auto": installed when an NVIDIA GPU is found on Linux, skipped
@@ -49,6 +55,8 @@ RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
 INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 DISSECT_VENV="${SCRIPT_DIR}/.venv-dissect"
+YUE2_VENV="${SCRIPT_DIR}/.venv-yue2"
+INSTALL_YUE2="${PHARAOH_INSTALL_YUE2:-auto}"
 BREEZE_VENV="${SCRIPT_DIR}/.venv-breeze"
 INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}"
 BREEZE_HOME="${PHARAOH_BREEZE_HOME:-$HOME/pharaoh-models/breeze}"
@@ -68,7 +76,7 @@ INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
 # ── Sections ─────────────────────────────────────────────────────────────────
 # With no arguments every section runs (optional ones per their flags). Naming
 # sections runs only those and switches the named optional ones on.
-KNOWN_SECTIONS="core breeze chatterbox rvc audioldm audiosr dissect applio"
+KNOWN_SECTIONS="core breeze yue2 chatterbox rvc audioldm audiosr dissect applio"
 SECTIONS=" "
 for arg in "$@"; do
     case "${arg}" in
@@ -77,6 +85,7 @@ for arg in "$@"; do
             exit 0 ;;
         core) ;;
         breeze) INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}" ;;
+        yue2) INSTALL_YUE2="${PHARAOH_INSTALL_YUE2:-auto}" ;;
         chatterbox) INSTALL_CHATTERBOX=1 ;;
         rvc) INSTALL_RVC=1 ;;
         audioldm) INSTALL_AUDIOLDM=1 ;;
@@ -327,12 +336,45 @@ else
 fi
 fi  # audiosr
 
-# ── Dissect (separation + diarization + ASR) ────────────────────────────────
+# Linux + NVIDIA: the GPU-only envs (YuE2, dissect) auto-install here.
 dissect_gpu() {
     [ "$(uname -s)" = "Linux" ] && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1
 }
 # Free GiB on the filesystem holding $1 (0 if unknown).
 free_gib() { df -Pk "$1" 2>/dev/null | awk 'NR==2 {printf "%d", $4 / 1048576}'; }
+
+# ── YuE2 music ───────────────────────────────────────────────────────────────
+if only yue2; then
+step "YuE2 music env (.venv-yue2)"
+if [ "${INSTALL_YUE2}" = "auto" ]; then
+    if dissect_gpu; then
+        INSTALL_YUE2=1
+        ok "NVIDIA GPU found — installing YuE2 (PHARAOH_INSTALL_YUE2=0 to skip)"
+    else
+        INSTALL_YUE2=0
+        hint "Skipped: YuE2 needs Linux + an NVIDIA GPU with BF16; music uses ACE-Step here."
+    fi
+fi
+if [ "${INSTALL_YUE2}" = "1" ]; then
+    if [ ! -d "${YUE2_VENV}" ]; then
+        uv venv --python 3.12 "${YUE2_VENV}"
+        ok "Created ${YUE2_VENV}"
+    else
+        ok "Reusing ${YUE2_VENV}"
+    fi
+    uv pip install --python "${YUE2_VENV}/bin/python" -r "${SCRIPT_DIR}/requirements-yue2.txt"
+    ok "YuE2 deps synced"
+    for repo in m-a-p/YuE2-3B m-a-p/YuE2-Vae; do
+        if "${YUE2_VENV}/bin/hf" download "${repo}" >/dev/null; then
+            ok "${repo} cached"
+        else
+            warn "Download of ${repo} failed — re-run ./inference/setup.sh yue2"
+        fi
+    done
+fi
+fi  # yue2
+
+# ── Dissect (separation + diarization + ASR) ────────────────────────────────
 
 if only dissect; then
 step "Dissect env (.venv-dissect, voices from existing recordings)"
@@ -488,7 +530,7 @@ echo "${DIM}Next: download model weights into the directories below if you haven
 echo "  TTS    → \$HOME/pharaoh-models/tts/{voice_design,base,custom_voice,tokenizer}/"
 echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
-echo "  Music  → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
+echo "  Music  → YuE2 weights fetched above on NVIDIA hosts; ACE-Step (Macs, repaint/cover) → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
 echo "  Chatterbox → model weights download from HuggingFace on first /load call"
 echo "  RVC        → HuBERT weights download on first /convert call; .pth/.index from Applio training"

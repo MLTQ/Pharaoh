@@ -32,7 +32,7 @@ fn cli_kind_from_model(model: &str) -> &'static str {
     let model = model.to_lowercase();
     if model.contains("qwen") || model.contains("tts") {
         "tts"
-    } else if model.contains("ace") || model.contains("music") {
+    } else if model.contains("ace") || model.contains("yue") || model.contains("music") {
         "music"
     } else {
         "sfx"

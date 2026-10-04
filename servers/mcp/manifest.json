@@ -3,7 +3,7 @@
   "name": "pharaoh",
   "display_name": "Pharaoh Audio Drama Suite",
   "version": "1.0.0",
-  "description": "AI production pipeline for audio dramas. Generate dialogue with Qwen3-TTS or Chatterbox voice cloning, sound effects, music via ACE-Step, and run RVC voice conversion — all from Claude. Connects to local or remote Pharaoh inference servers.\n\nRequires: uv (https://docs.astral.sh/uv/) and at least one running Pharaoh inference server.",
+  "description": "AI production pipeline for audio dramas. Generate dialogue with Qwen3-TTS or Chatterbox voice cloning, sound effects, music via YuE2 or ACE-Step, and run RVC voice conversion — all from Claude. Connects to local or remote Pharaoh inference servers.\n\nRequires: uv (https://docs.astral.sh/uv/) and at least one running Pharaoh inference server.",
   "author": {
     "name": "Aureum",
     "email": "max@aureum.ai"

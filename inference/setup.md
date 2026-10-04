@@ -34,7 +34,7 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Rationale**: Nemotron-3-Diarization needs NeMo newer than the 3.0.0 wheel, which in turn needs torch ≥ 2.7 — incompatible with the torch 2.6 pins in the other envs.
 
 ### Section arguments
-- **Does**: `./inference/setup.sh <section…>` runs only the named sections (`core chatterbox rvc audioldm audiosr dissect applio`) and switches named optional ones on; no arguments runs everything as before. `--help` prints the header.
+- **Does**: `./inference/setup.sh <section…>` runs only the named sections (`core breeze yue2 chatterbox rvc audioldm audiosr dissect applio`) and switches named optional ones on; no arguments runs everything as before. `--help` prints the header.
 - **Rationale**: Installing one optional server used to re-sync every core env. Naming `dissect` still honours GPU auto-detection so it can't half-install CUDA wheels on a Mac.
 
 ## Contracts
@@ -50,4 +50,5 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 ## Notes
 - SoX is a system dependency, not a Python package. On macOS the expected install command is `brew install sox`.
 - AudioSR 0.0.7 pulls older librosa code that imports `pkg_resources`, so the optional AudioSR requirements include `setuptools`. `urllib3<2` avoids noisy LibreSSL warnings on the macOS Python used by uv.
+- `yue2` section (auto on Linux + NVIDIA, `PHARAOH_INSTALL_YUE2=0/1`): builds `.venv-yue2` (Python 3.12) from `requirements-yue2.txt` (yue2-infer pinned to a YuE commit; torch 2.10) and downloads `m-a-p/YuE2-3B` + `m-a-p/YuE2-Vae` (~7.3 GB) into the Hugging Face cache. `.venv-music` (ACE-Step) is still built by `core` for Macs and for repaint/cover.
 - `breeze` section (auto on Linux + NVIDIA, `PHARAOH_INSTALL_BREEZE=0/1`): clones breeze-tts at a pinned commit into `PHARAOH_BREEZE_HOME`, builds `.venv-breeze` (Python 3.11), downloads the Breeze TTS 2 weights (non-commercial licence) and the Whisper take checker.

@@ -259,6 +259,7 @@ export function useGenerateJob() {
     batchSize?: number;
     seed?: number;
     rowIndex?: number;
+    instrumental?: boolean;
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
     const ts = Date.now();
@@ -279,6 +280,7 @@ export function useGenerateJob() {
         seed: params.seed ?? Math.floor(Math.random() * 99999),
         batch_size: params.batchSize ?? 1,
         output_path: makeOutputPath(pDir, projectId, sceneSlug, `music_${ts}.wav`),
+        instrumental: params.instrumental ?? true,
       },
     });
 

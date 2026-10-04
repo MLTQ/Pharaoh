@@ -1,0 +1,10 @@
+# YuE2 music server (port 18003, yue2_music_server.py).
+# Installed into inference/.venv-yue2 by setup.sh (Linux + NVIDIA; BF16 GPU).
+#
+# yue2-infer pins torch 2.10, transformers 4.57.6 and numpy 2.2.6 — its own
+# env, separate from ACE-Step's .venv-music (still used for repaint/cover).
+yue2-infer @ git+https://github.com/multimodal-art-projection/YuE.git@1dc1c50ef9a98597e2e82fe6bac232a05b160acf
+fastapi>=0.115.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.0
+soundfile>=0.12

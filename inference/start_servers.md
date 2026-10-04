@@ -27,4 +27,5 @@ Starts Pharaoh's inference servers with the expected isolated Python interpreter
 
 ## Notes
 - `PHARAOH_AUDIOLDM_CACHE_DIR` overrides the native AudioLDM checkpoint directory. If unset, an existing `AUDIOLDM_CACHE_DIR` is respected; otherwise Pharaoh uses `~/pharaoh-models/sfx/audioldm`.
+- Port 18003 runs YuE2 (`yue2_music_server.py`) when `.venv-yue2` exists, else ACE-Step (`music_server.py`); `PHARAOH_MUSIC_ENGINE=yue2|ace-step` forces one. It exports `PHARAOH_MUSIC_PYTHON` so the YuE2 server can run ACE-Step for repaint/cover.
 - Port 18001 runs Breeze TTS 2 (`breeze_server.py`) when `.venv-breeze` and its weights exist, else Qwen3-TTS (`tts_server.py`); `PHARAOH_TTS_ENGINE=qwen|breeze` forces one.
