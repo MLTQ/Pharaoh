@@ -34,4 +34,5 @@ Rows with `model: "dissect"` are added and updated by [dissectStore](./dissectSt
 
 ## Clearing
 `clearFinished()` drops every complete / failed / cancelled row (the queue's **Clear N** button); `removeJob` backs each finished row's ×. Only the list changes — nothing on disk is touched.
+- Voice lock: a completed take whose job has `voice_lock` calls `submit_voice_lock` first. When the line qualifies (lock on; calm lines only unless set to every line), an RVC job is added as a `post` row with `cleans_row` and the take's `audiosr` flag; its completion (model `rvc`) binds `<take>.lock.wav` to the row and then runs AudioSR if asked. When it doesn't qualify, AudioSR runs on the raw take as before. RVC completions never auto-select a take (their events carry no scene).
 - AudioSR clean-up: a completed take whose job has `audiosr` starts an AudioSR (speech) job with `cleans_row`; when that completes, `update_script_row` binds the cleaned file in place of the raw take.

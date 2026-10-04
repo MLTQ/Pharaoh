@@ -17,11 +17,15 @@ Character Library — the **canonical character creation suite** (Pharaoh-37l). 
 ### Palette tab (stage 2)
 - **Does**: Add emotions + generate per-emotion palette takes + approve as reference. Unchanged from Pharaoh-g8z.
 
+### Voice lock (stages 3–4, optional)
+- **Does**: Corpus and Model are hidden behind the pipeline bar's quiet "voice lock (optional)" toggle (`voiceLockOpen`, local state; also shown while one of those tabs is open). Opening or closing it never changes the character — the lock itself is `rvc.enabled`, set on the Model tab.
+- **Rationale**: Breeze alone is the normal path; RVC helps calm lines and hurts expressive ones (blind test, 2026-10-04), so it shouldn't look like a required step.
+
 ### Corpus tab (stage 3)
 - **Does**: Drops in `CorpusBuilder` with `projectId="_library"`. The component is project-store-independent — it takes `projectId + character + projectsDir + onCorpusUpdated` as props and routes all backend calls through the synthetic library project id.
 
 ### Model tab (stage 4)
-- **Does**: Drops in `RvcModelStage` similarly. Re-fetches the library character via `getLibraryCharacter` after training completes so the trained model path appears in the UI immediately.
+- **Does**: Drops in `RvcModelStage` similarly. Its settings (and the model path after training) come back through `onRvcChange`, which patches `voice_assignment.rvc`; Save persists them.
 
 ### Clone-from-file with sources list + gold pick (Pharaoh-b9hf / aonr / 0b3l)
 - **Does**: The Character reference audio section is now a sources list, not a single chip. `+ Upload…` adds N candidate files (each copied to `design/` individually). Each row in the list has a radio dot for the "gold" — the single file Chatterbox actually uses for cloning — plus play and remove. A `Concatenate all → gold` button creates a derived combined WAV and sets it as the gold (the individual sources stay in the list). Same pattern wired data-side for per-emotion palette via `ref_audio_sources`.

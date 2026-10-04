@@ -595,8 +595,7 @@ async def train(p: TrainParams) -> dict:
     """
     if not p.corpus_paths:
         raise HTTPException(status_code=400, detail="corpus_paths must not be empty")
-    if not p.output_model_path or not p.output_index_path:
-        raise HTTPException(status_code=400, detail="output_model_path and output_index_path are required")
+    # Empty output paths (a remote client) → the server's models folder.
     return _submit_train(p)
 
 
