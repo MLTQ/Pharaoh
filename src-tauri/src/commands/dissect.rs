@@ -1531,3 +1531,48 @@ mod tests {
     }
 
 }
+
+/// The transcript that belongs to a reference clip, if we know it: the
+/// sidecar's text for generated takes, or the Dissect manifest's candidate
+/// transcript for clips named `dissect_<import8>_<candidate>.wav`. Picking a
+/// different gold clip used to keep the previous clip's transcript, and
+/// models that condition on the reference's exact words (Breeze) garble when
+/// it's wrong.
+pub fn transcript_for_clip(projects_dir: &Path, clip: &str) -> Option<String> {
+    let p = Path::new(clip);
+    if let Ok(raw) = std::fs::read_to_string(format!("{}.meta.json", clip)) {
+        if let Ok(m) = serde_json::from_str::<Value>(&raw) {
+            for k in ["transcript", "text", "prompt"] {
+                if let Some(t) = m[k].as_str().filter(|t| !t.trim().is_empty()) {
+                    return Some(t.trim().to_string());
+                }
+            }
+        }
+    }
+    let stem = p.file_stem()?.to_str()?;
+    let rest = stem.strip_prefix("dissect_")?;
+    let (short, cand) = rest.split_once('_')?;
+    let root = imports_root(projects_dir);
+    for entry in std::fs::read_dir(&root).ok()?.flatten() {
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !name.starts_with(short) {
+            continue;
+        }
+        let manifest = read_manifest(&entry.path()).ok()??;
+        for sp in manifest["speakers"].as_array()? {
+            for c in sp["candidates"].as_array().into_iter().flatten() {
+                if c["id"].as_str() == Some(cand) {
+                    return c["transcript"].as_str().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Transcript for a clip about to become a character's reference (see
+/// [`transcript_for_clip`]); null when unknown.
+#[tauri::command]
+pub fn reference_transcript(app: AppHandle, clip_path: String) -> Result<Option<String>> {
+    Ok(transcript_for_clip(&app_projects_dir(&app)?, &clip_path))
+}

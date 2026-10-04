@@ -112,6 +112,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, project_id, scene_slug, rest @ ..] if group == "script" && action == "layout" => {
             dissect::layout(&config, project_id, scene_slug, rest)
         }
+        [group, action] if group == "library" && action == "fix-transcripts" => dissect::library_fix_transcripts(&config),
         [group, action] if group == "library" && action == "list" => dissect::library_list(&config),
         [group, action, library_id, rest @ ..] if group == "library" && action == "export" => {
             dissect::library_export(&config, library_id, rest)
@@ -327,6 +328,7 @@ fn usage() -> &'static str {
   pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
   pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
   pharaoh library list
+  pharaoh library fix-transcripts
   pharaoh library export <library_id> --output <file.zip> [--include-corpus true]
   pharaoh library import <file.zip>
   pharaoh library add-to-project <project_id> <library_id> [--name <character name>]

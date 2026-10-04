@@ -18,6 +18,7 @@ import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
   submitChatterboxClone,
+  referenceTranscript,
   importAudioIntoLibraryBundle,
   concatAudioIntoLibraryBundle,
 } from "../../lib/tauriCommands";
@@ -243,12 +244,19 @@ export const LibraryVoiceTab: React.FC<{
   };
 
   // Voice tab: pick which source is the active gold for cloning.
+  // The transcript must follow the gold clip: models that condition on the
+  // reference's exact words (Breeze) garble when it's another clip's text.
+  // Unknown → cleared, since a stale transcript is worse than none.
+  const transcriptFor = async (audioPath: string | null) =>
+    audioPath ? await referenceTranscript(audioPath).catch(() => null) : null;
+
   const handlePickCharacterGold = async (audioPath: string) => {
     const updated: Character = {
       ...character,
       voice_assignment: {
         ...character.voice_assignment,
         ref_audio_path: audioPath,
+        ref_transcript: await transcriptFor(audioPath),
       },
     };
     setCharacter(updated);
@@ -278,6 +286,9 @@ export const LibraryVoiceTab: React.FC<{
         ...character.voice_assignment,
         ref_audio_sources: sources,
         ref_audio_path: nextGold,
+        ref_transcript: nextGold === character.voice_assignment.ref_audio_path
+          ? character.voice_assignment.ref_transcript
+          : await transcriptFor(nextGold),
       },
     };
     setCharacter(updated);

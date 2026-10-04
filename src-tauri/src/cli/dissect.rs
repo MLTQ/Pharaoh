@@ -288,3 +288,23 @@ pub(super) fn layout(config: &AppConfig, project_id: &str, scene_slug: &str, res
     };
     print_json(&layout_scene(&projects_dir(config), project_id, scene_slug, &opts)?)
 }
+
+/// `library fix-transcripts` — give every Library character's gold clip the
+/// transcript that belongs to it (picking a new gold used to keep the old
+/// clip's text).
+pub(super) fn library_fix_transcripts(config: &AppConfig) -> Result<()> {
+    use crate::commands::character::{list_library, load_library_character, store_library_character};
+    let pd = projects_dir(config);
+    let mut fixed = vec![];
+    for s in list_library(&pd)? {
+        let mut c = load_library_character(&pd, &s.library_id)?;
+        let Some(gold) = c.voice_assignment.ref_audio_path.clone() else { continue };
+        let Some(t) = crate::commands::dissect::transcript_for_clip(&pd, &gold) else { continue };
+        if c.voice_assignment.ref_transcript.as_deref().map(str::trim) != Some(t.as_str()) {
+            c.voice_assignment.ref_transcript = Some(t);
+            fixed.push(c.name.clone());
+            store_library_character(&pd, c)?;
+        }
+    }
+    print_json(&serde_json::json!({ "fixed": fixed }))
+}

@@ -891,6 +891,10 @@ export interface CorpusFromRecording { added: number; skipped: number; seconds: 
 export const corpusFromDissect = (projectId: string, characterId: string, minutes?: number): Promise<CorpusFromRecording> =>
   invoke("corpus_from_dissect", { projectId, characterId, minutes });
 
+/** The transcript belonging to a reference clip (sidecar or Dissect manifest), or null when unknown. */
+export const referenceTranscript = (clipPath: string): Promise<string | null> =>
+  invoke("reference_transcript", { clipPath });
+
 /** Copy a found sound into a scene's assets (sidecar-indexed WAV). Returns its path. */
 export const dissectExtractSound = (request: {
   import_id: string;
