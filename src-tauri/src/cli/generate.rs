@@ -218,12 +218,15 @@ pub(super) async fn generate_direct_sfx(
     }
 
     let backend = flag_opt(&flags, "backend");
+    // No engine named: "auto", so the server picks (MOSS where installed).
     let model_variant = flag_opt(&flags, "model_variant").unwrap_or_else(|| {
-        if backend.as_deref() == Some("audioldm") {
-            "AudioLDM-M-Full".into()
-        } else {
-            "Woosh-DFlow".into()
+        match backend.as_deref() {
+            Some("audioldm") => "AudioLDM-M-Full",
+            Some("moss") => "MOSS-SFX-v2",
+            Some("woosh") => "Woosh-DFlow",
+            _ => "auto",
         }
+        .into()
     });
     let is_audioldm =
         backend.as_deref() == Some("audioldm") || model_variant.to_lowercase().contains("audioldm");
@@ -235,7 +238,7 @@ pub(super) async fn generate_direct_sfx(
             if is_audioldm { 10.0 } else { 3.0 },
         )?,
         model_variant: model_variant.clone(),
-        backend: backend.or_else(|| Some(if is_audioldm { "audioldm" } else { "woosh" }.into())),
+        backend: backend.or_else(|| is_audioldm.then(|| "audioldm".into())),
         steps: flag_parse(&flags, "steps", if is_audioldm { 200 } else { 4 })?,
         seed: flag_parse(&flags, "seed", random_seed())?,
         cfg_scale: if is_audioldm {
@@ -277,17 +280,19 @@ pub(super) async fn generate_direct_sfx(
     )
     .await?;
     let status = poll_job(&http, format!("{}/jobs", config.sfx_url), &job_id, "SFX").await?;
+    // The engine that actually ran ("auto" lets the server choose).
+    let moss = status.result.as_ref().and_then(|r| r["engine"].as_str()) == Some("moss");
     let final_output = status.output_path.unwrap_or(output_path);
     let (duration_actual_ms, sample_rate) = cli_wav_info(&final_output);
     write_sidecar(
         final_output.clone(),
         SidecarMeta {
-            model: format!(
-                "{}-{}",
-                if is_audioldm { "audioldm" } else { "woosh" },
-                params.model_variant.to_lowercase()
-            ),
-            model_variant: Some(params.model_variant.clone()),
+            model: if moss {
+                "moss-soundeffect-v2".into()
+            } else {
+                format!("{}-{}", if is_audioldm { "audioldm" } else { "woosh" }, params.model_variant.to_lowercase())
+            },
+            model_variant: Some(if moss { "MOSS-SFX-v2".into() } else { params.model_variant.clone() }),
             prompt: params.prompt.clone(),
             instruct: params
                 .negative_prompt

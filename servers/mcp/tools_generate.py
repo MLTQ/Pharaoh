@@ -176,7 +176,9 @@ def generate_sfx(
 ) -> str:
     """
     Submit an SFX generation job for an SFX or BED script row.
-    Uses Woosh-DFlow (fast, 4-step). Returns job_id immediately.
+    Uses the SFX server's default engine: MOSS-SoundEffect v2 where installed
+    (effects and beds up to 30 s; it runs 100 steps whatever `steps` says),
+    else Woosh-DFlow (4 steps, 10 s max). Returns job_id immediately.
     The prompt is read from the row's 'prompt' field.
     output_path should be the absolute path where the .wav should be saved.
     """
@@ -194,7 +196,7 @@ def generate_sfx(
     result = _post("sfx", "/generate/t2a", {
         "prompt": row["prompt"],
         "duration_seconds": duration_seconds,
-        "model_variant": "Woosh-DFlow",
+        "model_variant": "auto",
         "steps": steps,
         "seed": seed,
         "output_path": output_path,

@@ -345,6 +345,10 @@ fn usage() -> &'static str {
   pharaoh dissect list
   pharaoh dissect assign <import_id> <speaker_id> --clips <S1_c1,S1_c2> [--gold <clip>] (--name <new> | --library-id <id>) --confirm-rights yes [--performer <name>] [--project <project_id>]
   pharaoh dissect rebuild <import_id> --confirm-rights yes [--title <t>] [--chapters 0,2] [--plan true] [--sounds true|false] [--remainders true|false]
+  pharaoh dissect emotions <import_id>
+  pharaoh dissect clips <import_id> <speaker_id[,speaker_id]> <emotion> [--limit 8] [--like <clip_id>]
+  pharaoh dissect palette <library_id> [--per 4] [--replace true]
+  pharaoh dissect corpus <library_id> [--minutes 15]
   pharaoh dissect cancel <import_id>
   pharaoh dissect retry <import_id> [--wait true|false]
   pharaoh dissect delete <import_id>
@@ -361,7 +365,7 @@ fn usage() -> &'static str {
   pharaoh generate tts-custom --text <text> --output-path <wav> [--speaker <name>] [--instruct <text>]
   pharaoh generate tts-design --text <text> --voice-description <text> --output-path <wav>
   pharaoh generate tts-clone --text <text> --ref-audio-path <wav> --output-path <wav> [--ref-transcript <text>] [--instruct <direction>] [--cfg-scale 4]
-  pharaoh generate sfx --prompt <text> --output-path <wav> [--backend woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
+  pharaoh generate sfx --prompt <text> --output-path <wav> [--backend moss|woosh|audioldm] [--model-variant <name>] [--duration-seconds <n>] [--steps <n>] [--seed <n>] [--cfg-scale <n>] [--guidance-scale <n>] [--negative-prompt <text>] [--num-waveforms-per-prompt <n>]
   pharaoh generate music --caption <text> --output-path <wav> [--lyrics <text>] [--duration-seconds <n>] [--bpm <n>] [--key <key>] [--instrumental true|false] [--language <code>] [--lm-model-size <name>] [--diffusion-steps <n>] [--thinking-mode true|false] [--reference-audio-path <wav>] [--seed <n>] [--batch-size <n>]
   pharaoh compose render scene <project_id> <scene_slug>
   pharaoh compose meta <render_wav>

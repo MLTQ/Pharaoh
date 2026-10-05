@@ -8,6 +8,8 @@ Story Bible -> Storyboard -> Script -> Assets -> Composition -> Render
 
 The app is meant to be fully operable both by humans in the Tauri GUI and by agents through the headless CLI. Both surfaces use the same project files, script CSV rows, sidecar metadata, inference servers, and ffmpeg/audio-engine commands.
 
+Agents have two ways in: the **CLI** ([docs/cli.md](docs/cli.md)), which is the app's own Rust core and covers everything end to end, and the **MCP server** ([docs/mcp.md](docs/mcp.md)) for MCP clients such as Claude Desktop and Claude Code. `docs/mcp.md` ends with a table of what each can and can't do.
+
 ![Pharaoh Pyramid view — story bible, scene cards, and episode timeline](images/pyramid.png)
 
 <p align="center"><em>Pyramid view: the story bible at the apex, scenes and their assets below, episode timeline at the base.</em></p>
