@@ -55,7 +55,9 @@ export const createScene = (args: {
   description?: string;
   location?: string;
   index: number;
-}): Promise<Scene> => invoke("create_scene", args);
+  /** The act the scene belongs to (its row on the Pyramid). */
+  act?: string;
+}): Promise<Scene> => invoke("create_scene", { ...args, act: args.act ?? null });
 
 export const updateScene = (args: {
   projectId: string;
@@ -990,3 +992,22 @@ export const dissectRebuildStart = (importId: string, options: RebuildOptions): 
 
 export const dissectRebuildStatus = (jobId: string): Promise<RebuildStatus> =>
   invoke("dissect_rebuild_status", { jobId });
+
+// ── Scene layout ─────────────────────────────────────────────────────────────
+
+/** What `layout_scene_rows` did. */
+export interface LayoutReport {
+  placed: number;
+  kept: number;
+  /** Rows with no audio yet (generate them first). */
+  missing_audio: number;
+  scene_ms: number;
+}
+
+/**
+ * Place a scene's generated rows on the timeline in script order: lines with
+ * a short gap, effects where cued, beds under the scene (looped), music from
+ * its cue. Rows already placed keep their place unless `replace`.
+ */
+export const layoutSceneRows = (args: { projectId: string; sceneSlug: string; replace?: boolean }): Promise<LayoutReport> =>
+  invoke("layout_scene_rows", { projectId: args.projectId, sceneSlug: args.sceneSlug, replace: args.replace ?? false });

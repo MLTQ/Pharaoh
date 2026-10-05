@@ -909,6 +909,7 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
             connects_to: None,
             status: SceneStatus::AssetsReady,
             tension: None,
+            act: None,
         });
     }
     write_json(&root.join("storyboard.json"), &Storyboard { scenes: scenes_out })?;

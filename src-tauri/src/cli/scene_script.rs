@@ -98,6 +98,7 @@ pub(super) async fn scene_create(
         connects_to: flag_opt(&flags, "connects_to"),
         status: SceneStatus::Draft,
         tension: flag_opt(&flags, "tension").and_then(|v| v.parse::<f32>().ok()),
+        act: flag_opt(&flags, "act").map(|a| a.to_string()).filter(|a: &String| !a.trim().is_empty()),
     };
     let scene_root = scene_dir(&projects_dir, project_id, &slug);
     std::fs::create_dir_all(scene_root.join("assets"))?;
@@ -133,6 +134,10 @@ pub(super) async fn scene_update(
     }
     if let Some(value) = flag_opt(&flags, "notes") {
         scene.notes = value;
+    }
+    if let Some(value) = flag_opt(&flags, "act") {
+        // `--act ""` clears it.
+        scene.act = Some(value.trim().to_string()).filter(|a| !a.is_empty());
     }
     if let Some(value) = flag_opt(&flags, "characters") {
         scene.characters = value
@@ -566,6 +571,7 @@ pub(super) async fn script_import(
             connects_to: None,
             status: SceneStatus::Draft,
             tension: None,
+            act: parsed_scene.act.clone(),
         };
         planned.push((scene, rows));
     }

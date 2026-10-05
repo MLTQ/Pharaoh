@@ -40,6 +40,7 @@ export function realSceneToMock(scene: Scene): MockScene {
     nodes: [],
     slug: scene.slug,
     tension: scene.tension ?? null,
+    act: scene.act ?? null,
   };
 }
 
@@ -215,6 +216,7 @@ export const useProjectStore = create<ProjectState>((set, get) => {
                 ...(patch.script  !== undefined && { notes:       patch.script }),
                 // `null` is meaningful here (unshaped), so guard on undefined.
                 ...(patch.tension !== undefined && { tension:     patch.tension ?? null }),
+                ...(patch.act     !== undefined && { act:         patch.act?.trim() || null }),
               };
             })
           : state.realScenes;

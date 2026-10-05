@@ -3,6 +3,7 @@ import { useUiStore } from "../../store/uiStore";
 import { useJobStore } from "../../store/jobStore";
 import { useAudioStore } from "../../store/audioStore";
 import type { ScriptRow, TrackType, Character, ViewId } from "../../lib/types";
+import { VocalEventChips } from "../shared/VocalEventChips";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -96,6 +97,7 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
   const { jobs } = useJobStore();
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(row.prompt);
+  const editRef = useRef<HTMLTextAreaElement>(null);
 
   const status = rowStatus(row, rowIndex, sceneSlug, jobs);
   const isDirection = row.type === "DIRECTION";
@@ -182,7 +184,9 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
       {!isDirection ? (
         <div style={{ padding: "6px 8px" }}>
           {editingPrompt ? (
+            <>
             <textarea
+              ref={editRef}
               autoFocus
               value={promptDraft}
               onChange={(e) => setPromptDraft(e.target.value)}
@@ -195,6 +199,12 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
                 minHeight: 48, outline: "none",
               }}
             />
+            {row.type === "DIALOGUE" && (
+              <div style={{ marginTop: 4 }}>
+                <VocalEventChips target={editRef} value={promptDraft} onChange={setPromptDraft} compact />
+              </div>
+            )}
+            </>
           ) : (
             <div
               onClick={() => { setPromptDraft(row.prompt); setEditingPrompt(true); }}
@@ -395,6 +405,10 @@ const AddRowForm: React.FC<AddRowFormProps> = ({ sceneNo, characters, onAdd, onC
             placeholder="Track name…"
             style={{ fontSize: 11, padding: "3px 6px" }}
           />
+        )}
+
+        {type === "DIALOGUE" && (
+          <VocalEventChips target={promptRef} value={prompt} onChange={setPrompt} compact />
         )}
 
         {/* Prompt */}

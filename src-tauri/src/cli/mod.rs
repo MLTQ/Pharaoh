@@ -310,8 +310,8 @@ fn usage() -> &'static str {
   pharaoh project archive <project_id> [--output <path>]
   pharaoh scene list <project_id>
   pharaoh scene get <project_id> <scene_slug_or_id>
-  pharaoh scene create <project_id> --title <title> [--slug <slug>] [--index <n>]
-  pharaoh scene update <project_id> <scene_slug_or_id> [--status draft|generating|assets_ready|composed|rendered]
+  pharaoh scene create <project_id> --title <title> [--slug <slug>] [--index <n>] [--act <name>]
+  pharaoh scene update <project_id> <scene_slug_or_id> [--status draft|generating|assets_ready|composed|rendered] [--act <name> (empty clears)]
   pharaoh script read <project_id> <scene_slug>
   pharaoh script write <project_id> <scene_slug> <script.csv|script.json>
   pharaoh script fountain-read <project_id> <scene_slug>

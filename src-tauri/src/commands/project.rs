@@ -187,6 +187,7 @@ pub fn create_scene(
     description: Option<String>,
     location: Option<String>,
     index: u32,
+    act: Option<String>,
 ) -> Result<Scene> {
     let slug = format!(
         "{:02}_{}",
@@ -207,6 +208,7 @@ pub fn create_scene(
         connects_to: None,
         status: SceneStatus::Draft,
         tension: None,
+        act: act.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()),
     };
 
     // Create scene directories

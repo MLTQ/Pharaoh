@@ -1,8 +1,9 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { TakeRow, TakeList, EmptyTakes } from "../shared/TakeList";
 import { PlayButton } from "../shared/PlayButton";
 import { SceneRouter } from "./RichDirector";
+import { VocalEventChips } from "../shared/VocalEventChips";
 import { useGenerateJob, dialogueEngine, breezeDirection, paletteEntryFor } from "../../hooks/useGenerateJob";
 import { useProjectStore, deriveSlug } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
@@ -37,6 +38,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
   const [scene, setScene]         = useState(defaultScene);
   const [speakerId, setSpeakerId] = useState(characters[0]?.id ?? "");
   const [line, setLine]           = useState("");
+  const lineRef = useRef<HTMLTextAreaElement>(null);
   const [direction, setDirection] = useState(characters[0]?.voice_assignment.instruct_default ?? "");
   const [temperature, setTemperature] = useState(0.7);
   const [topP, setTopP] = useState(0.9);
@@ -243,7 +245,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
               {engine === "breeze"
                 ? <>{selectedChar!.name} speaks in the voice of their gold reference clip, performed the way the
                   Direction says ("furious, voice rising"). Naming a palette emotion adds its direction and uses its
-                  real clip as the reference. [laugh], [sigh], [cough] and [clears throat] are performed.</>
+                  real clip as the reference. Vocal events like [laughs] or [sighs] (the chips above the line) are performed, not read.</>
                 : engine === "chatterbox"
                 ? <>{selectedChar!.name} speaks in the voice of their gold reference clip. Direction picks a palette
                   emotion ("angry", "sadly…") — its reference sets the delivery; anything else uses the gold clip.</>
@@ -322,7 +324,13 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
               <span>Line</span>
               <span className="hint">{line.length} chars</span>
             </div>
+            {engine !== "preset" && (
+              <div style={{ marginBottom: 6 }}>
+                <VocalEventChips target={lineRef} value={line} onChange={setLine} />
+              </div>
+            )}
             <textarea
+              ref={lineRef}
               className="textarea"
               value={line}
               onChange={(e) => setLine(e.target.value)}

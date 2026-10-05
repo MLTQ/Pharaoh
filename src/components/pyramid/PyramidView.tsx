@@ -6,7 +6,7 @@ import { useJobStore } from "../../store/jobStore";
 import { createScene, readScript, readRenderMeta } from "../../lib/tauriCommands";
 import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
 import { StoryShapeView } from "./StoryShapeView";
-import { pyramidGeometry } from "../../lib/pyramidLayout";
+import { pyramidGeometry, actRows } from "../../lib/pyramidLayout";
 
 interface PyramidViewProps {
   project: MockProject;
@@ -21,6 +21,7 @@ interface NewSceneForm {
   title: string;
   description: string;
   location: string;
+  act: string;
 }
 
 export const PyramidView: React.FC<PyramidViewProps> = ({
@@ -39,7 +40,10 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   zoomRef.current = manualScale ?? scale;
   const [episodeDurationSec, setEpisodeDurationSec] = useState<number | null>(null);
   const [showForm, setShowForm] = useState(false);
-  const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "" });
+  const [form, setForm] = useState<NewSceneForm>({ title: "", description: "", location: "", act: "" });
+  // The act label being renamed on the pyramid (its current name), if any.
+  const [renamingAct, setRenamingAct] = useState<string | null>(null);
+  const [actDraft, setActDraft] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [formBusy, setFormBusy] = useState(false);
   // Tier II projection: scene plates, or the authored tension curve over the
@@ -82,9 +86,11 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   // Scene plates stack in courses that widen downward once there are more
   // than a handful; the canvas and its outline grow to hold them. The story
   // shape projection keeps the one-row canvas.
+  // Scenes with acts get a course per act; otherwise courses by count.
+  const acts = tierMode === "plates" ? actRows(scenes.map((s) => s.act)) : null;
   const geo = pyramidGeometry(tierMode === "plates" ? n + 1 : 1, {
     plateW: PLATE_W, plateH: PLATE_H, gap: plateGap, rowGap: 64, baseY: BASE_Y, minW: 1280, bottom: 152,
-  });
+  }, acts?.counts);
   const { W, H } = geo;
 
   useEffect(() => {
@@ -171,13 +177,15 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   // that hugs them: apex, each course's corners, then the base.
   const M = 24;
   const stacked = geo.rows.length > 1;
-  const baseL = stacked ? Math.min(60, last.left - M - 20) : 60;
+  // Never narrower than any course above (act rows needn't widen downward).
+  const hull = geo.rows.map((r, i) => ({ top: r.top, left: Math.min(...geo.rows.slice(0, i + 1).map((q) => q.left)) }));
+  const baseL = stacked ? Math.min(60, hull[hull.length - 1].left - M - 20) : 60;
   const outline = [
     `${APEX_X},40`,
-    ...(stacked ? geo.rows.map((r) => `${r.right + M},${r.top - 30}`) : []),
+    ...(stacked ? hull.map((r) => `${W - r.left + M},${r.top - 30}`) : []),
     `${W - baseL},${H - 40}`,
     `${baseL},${H - 40}`,
-    ...(stacked ? [...geo.rows].reverse().map((r) => `${r.left - M},${r.top - 30}`) : []),
+    ...(stacked ? [...hull].reverse().map((r) => `${r.left - M},${r.top - 30}`) : []),
   ].join(" ");
 
   const parseDurationSec = (s: string | undefined): number => {
@@ -200,7 +208,8 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   };
 
   const handleOpenForm = () => {
-    setForm({ title: "", description: "", location: "" });
+    // A new scene joins the last scene's act unless changed.
+    setForm({ title: "", description: "", location: "", act: scenes[scenes.length - 1]?.act ?? "" });
     setFormError(null);
     setShowForm(true);
   };
@@ -227,6 +236,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
         title: form.title.trim(),
         description: form.description.trim() || undefined,
         location: form.location.trim() || undefined,
+        act: form.act.trim() || undefined,
         index: scenes.length,
       });
       addScene(scene);
@@ -299,6 +309,20 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                 value={form.location}
                 onChange={(e) => setForm((f) => ({ ...f, location: e.target.value }))}
                 onKeyDown={(e) => { if (e.key === "Escape") handleCancelForm(); }}
+              />
+            </div>
+            <div className="field" style={{ marginBottom: 0, flex: "1 1 140px" }}>
+              <div className="field-label">
+                <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-3)" }}>
+                  Act
+                </span>
+              </div>
+              <input
+                className="input"
+                placeholder="Act One (optional)"
+                value={form.act}
+                onChange={(e) => setForm((f) => ({ ...f, act: e.target.value }))}
+                onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") handleCancelForm(); }}
               />
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", paddingBottom: 1 }}>
@@ -431,6 +455,46 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               ))}
             </div>
           </div>
+
+          {/* Act labels — click to rename the act for all its scenes */}
+          {acts && geo.rows.map((row, r) => {
+            const label = acts.labels[r];
+            if (!label) return null;
+            const commit = () => {
+              const next = actDraft.trim();
+              if (next && next !== label) {
+                scenes.filter((sc) => (sc.act ?? "").trim() === label).forEach((sc) => updateScene(sc.no, { act: next }));
+              }
+              setRenamingAct(null);
+            };
+            return (
+              <div key={`act-${r}`} style={{ position: "absolute", left: row.left, top: row.top - 22, zIndex: 6 }}>
+                {renamingAct === label ? (
+                  <input
+                    autoFocus
+                    className="input"
+                    value={actDraft}
+                    onChange={(e) => setActDraft(e.target.value)}
+                    onBlur={commit}
+                    onKeyDown={(e) => { if (e.key === "Enter") commit(); if (e.key === "Escape") setRenamingAct(null); }}
+                    onPointerDown={(e) => e.stopPropagation()}
+                    style={{ height: 18, fontSize: 10, padding: "0 6px", width: 220 }}
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setRenamingAct(label); setActDraft(label); }}
+                    title="Rename this act"
+                    style={{
+                      fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.18em", textTransform: "uppercase",
+                      color: "var(--fg-2)", background: "var(--bg-1)", border: "none", padding: "1px 8px", cursor: "text",
+                    }}
+                  >
+                    {label}
+                  </button>
+                )}
+              </div>
+            );
+          })}
 
           {/* Scene plates */}
           {tierMode === "plates" && scenes.map((s, i) => {

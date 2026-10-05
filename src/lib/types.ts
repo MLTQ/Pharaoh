@@ -337,6 +337,8 @@ export interface Scene {
   /** Authored dramatic tension, 0–1, for the story-shape view. `null` means
    *  unshaped — never coerce to 0, which is an authored trough. */
   tension: number | null;
+  /** The act (or part) the scene belongs to; the Pyramid gives each act a row. */
+  act?: string | null;
 }
 
 // ── Script CSV ──────────────────────────────────────────────────────────────
@@ -486,6 +488,13 @@ export interface Job {
   /** Voice lock to try when the take completes (the character's RVC settings
    *  and the line, which decides whether it qualifies). */
   voice_lock?: { character_id: string; rvc: RvcConfig; text: string; direction: string };
+  /** A follow-up step (voice lock, AudioSR) of another job: the line's first job. */
+  parent_id?: string;
+  /** This follow-up's stage name, shown in the queue ("voice lock", "AudioSR"). */
+  stage?: string;
+  /** On a line's first job: follow-up stages still expected. A stage leaves
+   *  this list when it starts (it becomes a child job) or is skipped. */
+  followups?: string[];
 }
 
 // ── Asset browser items ─────────────────────────────────────────────────────
@@ -607,6 +616,7 @@ export interface MockScene {
   nodes: MockSceneNode[];
   slug?: string; // real slug from Rust, overrides deriveSlug when present
   tension?: number | null; // authored story-shape tension; null/absent = unshaped
+  act?: string | null;      // act / part — its row on the Pyramid
 }
 
 export interface MockCastMember {

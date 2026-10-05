@@ -11,6 +11,8 @@ import { useAudioStore } from "../../store/audioStore";
 import { useJobStore } from "../../store/jobStore";
 import { usePeaksStore } from "../../store/peaksStore";
 import { readScript, updateScriptRow, writeScript, renderScene, readRenderMeta } from "../../lib/tauriCommands";
+import { layOutScene, describeLayout } from "../../lib/sceneLayout";
+import { useToastStore } from "../../store/toastStore";
 import { reportError } from "../../lib/errors";
 import {
   ASSET_DRAG_MIME,
@@ -481,6 +483,7 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
   const [editingTitle, setEditingTitle] = useState(false);
   const [titleDraft, setTitleDraft] = useState(scene.title);
   const [renderState, setRenderState] = useState<"idle" | "rendering" | "done" | "error">("idle");
+  const [layingOut, setLayingOut] = useState(false);
   const [renderPath, setRenderPath]   = useState<string | null>(null);
   const [renderError, setRenderError] = useState<string | null>(null);
   const [mode, setMode] = useState<ScriptMode>("direct");
@@ -1089,6 +1092,26 @@ export const CompositionView: React.FC<CompositionViewProps> = ({
         </div>
         <div className="comp-header-actions">
           <button className="btn"><Icon name="sparkle" style={{ width: 14, height: 14 }} /> Agent assist</button>
+          <button
+            className="btn"
+            disabled={!realProjectId || !activeSceneSlug || layingOut}
+            title="Place the scene's generated rows on the timeline in script order (lines with short gaps, effects where cued, beds under the scene). Rows you've placed stay put — ⌥-click to re-place everything."
+            onClick={async (e) => {
+              if (!realProjectId || !activeSceneSlug) return;
+              const replace = e.altKey;
+              setLayingOut(true);
+              try {
+                const r = await layOutScene(realProjectId, activeSceneSlug, replace);
+                useToastStore.getState().push({ kind: "info", title: replace ? "Scene re-laid out" : "Scene laid out", body: describeLayout(r) });
+              } catch (err) {
+                useToastStore.getState().push({ kind: "warn", title: "Layout didn't run", body: String(err) });
+              } finally {
+                setLayingOut(false);
+              }
+            }}
+          >
+            {layingOut ? "Laying out…" : "Lay out"}
+          </button>
           {/* Master target loudness — sets the loudnorm `I` parameter in render_scene */}
           <select
             value={targetLufs}

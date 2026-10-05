@@ -2,6 +2,16 @@ import { create } from "zustand";
 import type { Job, QaJobStatus } from "../lib/types";
 import { useToastStore } from "./toastStore";
 import { useUiStore } from "./uiStore";
+import { checkArmedLayouts } from "../lib/sceneLayout";
+import { groupJobs, groupIds } from "../lib/jobGroups";
+
+/** After a job ends, run any layout waiting for its scene to go quiet. The
+ *  delay lets a follow-up (voice lock, AudioSR) register as running first. */
+function scheduleLayoutCheck(get: () => { jobs: Job[] }) {
+  setTimeout(() => {
+    checkArmedLayouts((slug) => get().jobs.some((j) => j.scene_slug === slug && (j.status === "running" || j.status === "pending")));
+  }, 1500);
+}
 
 const OOM_MARKERS = ["TTS_OOM", "SFX_OOM", "MUSIC_OOM"] as const;
 
@@ -70,12 +80,15 @@ export const useJobStore = create<JobState>((set, get) => ({
 
   clearFinished: () => {
     const before = get().jobs.length;
-    set((state) => ({ jobs: state.jobs.filter((j) => j.status === "running" || j.status === "pending") }));
+    // A line's group goes only when every stage is done (or one failed).
+    const gone = new Set(groupJobs(get().jobs).filter((g) => g.status !== "running" && g.status !== "pending").flatMap(groupIds));
+    set((state) => ({ jobs: state.jobs.filter((j) => !gone.has(j.id)) }));
     return before - get().jobs.length;
   },
 
   removeJob: (id) =>
-    set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id) })),
+    // A line's follow-ups go with it.
+    set((state) => ({ jobs: state.jobs.filter((j) => j.id !== id && j.parent_id !== id) })),
 
   setActiveTake: (sceneSlug, rowIndex, jobId) =>
     set((state) => ({
@@ -116,6 +129,12 @@ export const useJobStore = create<JobState>((set, get) => ({
         // Run the speech model on it, and when that job completes, bind the
         // cleaned file to the same script row in place of the raw take.
         const done = get().jobs.find((j) => j.id === payload.job_id);
+        // The line's first job, which the queue groups follow-ups under.
+        const rootId = done?.parent_id ?? done?.id;
+        const dropFollowup = (stage: string) => {
+          const root = get().jobs.find((j) => j.id === rootId);
+          if (root?.followups) get().updateJob(root.id, { followups: root.followups.filter((s) => s !== stage) });
+        };
         // Voice lock: calm lines go through the character's RVC model first;
         // the locked take replaces the raw one and carries the AudioSR setting.
         let locking = false;
@@ -126,9 +145,11 @@ export const useJobStore = create<JobState>((set, get) => ({
               projectId: done.project_id, characterId: done.voice_lock.character_id, rvc: done.voice_lock.rvc,
               inputPath: payload.output_path, text: done.voice_lock.text, direction: done.voice_lock.direction,
             });
+            dropFollowup("voice lock");
             if (lockId) {
               locking = true;
               get().addJob({
+                parent_id: rootId, stage: "voice lock",
                 id: lockId, model: "post", description: `Voice lock · ${done.description}`, status: "running",
                 progress: 0, eta: "locking", started_at: new Date().toISOString(), scene_id: null,
                 scene_slug: done.scene_slug, row_index: done.row_index, output_path: null, peaks: null,
@@ -136,6 +157,7 @@ export const useJobStore = create<JobState>((set, get) => ({
               });
             }
           } catch (e) {
+            dropFollowup("voice lock");
             useToastStore.getState().push({ kind: "warn", title: "Voice lock skipped", body: String(e) });
           }
         }
@@ -144,7 +166,9 @@ export const useJobStore = create<JobState>((set, get) => ({
             try {
               const { upscaleAudioAsset } = await import("../lib/tauriCommands");
               const srId = `audiosr-${payload.job_id}`;
+              dropFollowup("AudioSR");
               get().addJob({
+                parent_id: rootId, stage: "AudioSR",
                 id: srId, model: "post", description: `AudioSR · ${done.description}`, status: "running",
                 progress: 0, eta: "cleaning up", started_at: new Date().toISOString(), scene_id: null,
                 scene_slug: done.scene_slug, row_index: done.row_index, output_path: null, peaks: null,
@@ -152,6 +176,7 @@ export const useJobStore = create<JobState>((set, get) => ({
               });
               await upscaleAudioAsset({ inputPath: payload.output_path, jobId: srId, modelName: "speech", ddimSteps: 50, guidanceScale: 3.5, seed: 0 });
             } catch (e) {
+              dropFollowup("AudioSR");
               useToastStore.getState().push({ kind: "warn", title: "AudioSR clean-up didn't start", body: String(e) });
             }
           })();
@@ -174,6 +199,7 @@ export const useJobStore = create<JobState>((set, get) => ({
         } catch {
           // Not fatal — peaks stay null, Wave fallback renders instead
         }
+        scheduleLayoutCheck(get);
       });
 
       const u3 = await listen<JobFailedEvent>("job-failed", ({ payload }) => {
@@ -181,6 +207,7 @@ export const useJobStore = create<JobState>((set, get) => ({
           status: "failed",
           error: payload.error,
         });
+        scheduleLayoutCheck(get);
 
         // Surface memory-related load failures as a toast that routes to the model manager.
         const oomMarker = OOM_MARKERS.find((m) => payload.error.includes(m));

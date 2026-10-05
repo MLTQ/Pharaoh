@@ -324,6 +324,10 @@ pub struct Scene {
     /// files loadable.
     #[serde(default)]
     pub tension: Option<f32>,
+    /// The act (or part) the scene belongs to — from a Fountain section
+    /// heading or set by hand. The Pyramid gives each act its own course.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub act: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -46,6 +46,8 @@ pub struct ParsedScene {
     pub title: String,         // derived from heading (after location/time-of-day strip)
     pub location: String,      // derived
     pub blocks: Vec<Block>,
+    /// The Fountain section (`# Act One`) this scene falls under, if any.
+    pub act: Option<String>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -192,6 +194,12 @@ fn parse_title_page<'a>(lines: &'a [&str]) -> (Option<String>, Option<String>, u
 
 // ── Main parse ─────────────────────────────────────────────────────────────
 
+/// `# Act One` → "Act One". Fountain sections are one or more `#` then text.
+fn section_name(line: &str) -> Option<String> {
+    let rest = line.strip_prefix('#')?.trim_start_matches('#').trim();
+    (!rest.is_empty()).then(|| rest.to_string())
+}
+
 pub fn parse_document(text: &str) -> ParsedDocument {
     let lines: Vec<&str> = text.split('\n').collect();
     let (title, author, mut i) = parse_title_page(&lines);
@@ -202,8 +210,11 @@ pub fn parse_document(text: &str) -> ParsedDocument {
         title: String::new(),
         location: String::new(),
         blocks: Vec::new(),
+        act: None,
     };
     let mut character_set: Vec<String> = Vec::new();
+    // The latest section heading; scenes after it belong to that act.
+    let mut act: Option<String> = None;
 
     while i < lines.len() {
         let raw = lines[i];
@@ -211,6 +222,17 @@ pub fn parse_document(text: &str) -> ParsedDocument {
 
         // Blank line — just advance
         if trimmed.is_empty() {
+            i += 1;
+            continue;
+        }
+
+        // Section heading (`# Act One`, `## Part 2`): names the act for the
+        // scenes that follow. Not spoken, not a direction.
+        if let Some(name) = section_name(trimmed) {
+            act = Some(name);
+            if current.heading.is_empty() && current.blocks.is_empty() {
+                current.act = act.clone();
+            }
             i += 1;
             continue;
         }
@@ -226,6 +248,7 @@ pub fn parse_document(text: &str) -> ParsedDocument {
                 title: title_part,
                 location: location_part,
                 blocks: Vec::new(),
+                act: act.clone(),
             };
             i += 1;
             continue;
@@ -424,6 +447,14 @@ pub fn blocks_to_rows(
 #[cfg(test)]
 mod title_page_tests {
     use super::*;
+
+    #[test]
+    fn sections_name_the_act_of_the_scenes_under_them() {
+        let doc = parse_document("# Act One\n\nINT. ARCHIVE - NIGHT\n\nWREN\nHello.\n\nEXT. QUAY - NIGHT\n\nA bell.\n\n## Act Two\n\nINT. BOAT - NIGHT\n\nPIP\nGo.\n");
+        let acts: Vec<_> = doc.scenes.iter().map(|s| s.act.as_deref()).collect();
+        assert_eq!(acts, vec![Some("Act One"), Some("Act One"), Some("Act Two")]);
+        assert!(doc.scenes.iter().all(|s| s.blocks.iter().all(|b| !b.text.starts_with('#'))), "sections aren't directions");
+    }
 
     #[test]
     fn a_scene_opening_with_cues_is_not_a_title_page() {

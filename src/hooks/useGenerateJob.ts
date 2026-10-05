@@ -176,6 +176,9 @@ export function useGenerateJob() {
       },
     });
 
+    const voiceLock = char && engine !== "preset" && char.voice_assignment.rvc?.enabled
+      ? { character_id: char.id, rvc: char.voice_assignment.rvc, text: params.text, direction }
+      : undefined;
     const job: Job = {
       id: jobId,
       model: "tts",
@@ -193,9 +196,8 @@ export function useGenerateJob() {
       error: null,
       audiosr: !!char?.voice_assignment.audiosr,
       project_id: projectId,
-      voice_lock: char && engine !== "preset" && char.voice_assignment.rvc?.enabled
-        ? { character_id: char.id, rvc: char.voice_assignment.rvc, text: params.text, direction }
-        : undefined,
+      voice_lock: voiceLock,
+      followups: [...(voiceLock ? ["voice lock"] : []), ...(char?.voice_assignment.audiosr ? ["AudioSR"] : [])],
     };
     addJob(job);
     triggerAgentActive();

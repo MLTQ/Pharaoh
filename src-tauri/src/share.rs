@@ -542,6 +542,7 @@ async fn dispatch(
             opt_s(a, "description"),
             opt_s(a, "location"),
             u(a, "index").map_err(bad)? as u32,
+            opt_s(a, "act"),
         )),
         "get_rvc_model_info" => ok(rvc::get_rvc_model_info(
             app,

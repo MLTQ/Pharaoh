@@ -15,6 +15,8 @@ import { draftScene, readFountain, writeFountain } from "../../lib/tauriCommands
 import { reportError } from "../../lib/errors";
 import type { ScriptRow, TrackType, Character, ViewId, Scene } from "../../lib/types";
 import { FLUSH_EVENT } from "../../lib/flush";
+import { VocalEventChips } from "../shared/VocalEventChips";
+import { layoutWhenSceneIdle } from "../../lib/sceneLayout";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -528,10 +530,12 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
       toast("info", "Nothing to generate — all blocks resolved");
       return;
     }
-    toast("info", `Queuing ${queue.length} blocks for generation`);
+    toast("info", `Queuing ${queue.length} blocks for generation — the scene is laid out on the timeline when they're done`);
     for (const { b, i } of queue) {
       await handleGenerate(b, i);
     }
+    // Place everything once the takes (and any voice lock / AudioSR) land.
+    if (realProjectId && sceneSlug) layoutWhenSceneIdle(realProjectId, sceneSlug);
   };
 
   // ── Tab to cycle line type ───────────────────────────────────────────────
@@ -662,6 +666,14 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
           >
             Gen all dialogue ({blocks.filter((b, i) => b.type === "DIALOGUE" && !rows[i]?.file && b.text.trim()).length})
           </button>
+        </div>
+
+        {/* Vocal events, inserted at the caret */}
+        <div style={{ padding: "4px 12px", borderBottom: "1px solid var(--line-1)", display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
+          <span style={{ fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.08em", color: "var(--fg-4)", textTransform: "uppercase", flexShrink: 0 }}>
+            Vocal events
+          </span>
+          <VocalEventChips target={taRef} value={text} onChange={setText} />
         </div>
 
         {/* Editor stack: highlighted overlay underneath, transparent textarea on top */}
