@@ -6,6 +6,7 @@ import { useJobStore } from "../../store/jobStore";
 import { createScene, readScript, readRenderMeta } from "../../lib/tauriCommands";
 import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
 import { StoryShapeView } from "./StoryShapeView";
+import { pyramidGeometry } from "../../lib/pyramidLayout";
 
 interface PyramidViewProps {
   project: MockProject;
@@ -29,8 +30,8 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const wrapRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [manualScale, setManualScale] = useState<number | null>(null);
-  // Pan offset in screen px. A rebuilt audiobook can have 60+ scenes — far
-  // wider than the 1280 px canvas — so the view drags and scrolls.
+  // Pan offset in screen px. The canvas grows with the scene count (see
+  // pyramidLayout), so the view drags and scrolls.
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const drag = useRef<{ x: number; y: number; px: number; py: number; moved: boolean } | null>(null);
   const suppressClick = useRef(false);
@@ -74,18 +75,30 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
     return () => { cancelled = true; };
   }, [realProjectId, scenes.map((s) => `${s.no}:${s.slug ?? ""}`).join("|"), completedJobsKey]);
 
+  const BASE_Y = 420;
+  const PLATE_W = 184, PLATE_H = 188;
+  const plateGap = 22;
+  const n = scenes.length;
+  // Scene plates stack in courses that widen downward once there are more
+  // than a handful; the canvas and its outline grow to hold them. The story
+  // shape projection keeps the one-row canvas.
+  const geo = pyramidGeometry(tierMode === "plates" ? n + 1 : 1, {
+    plateW: PLATE_W, plateH: PLATE_H, gap: plateGap, rowGap: 64, baseY: BASE_Y, minW: 1280, bottom: 152,
+  });
+  const { W, H } = geo;
+
   useEffect(() => {
     const fit = () => {
       if (!wrapRef.current) return;
-      const sx = wrapRef.current.clientWidth / 1280;
-      const sy = wrapRef.current.clientHeight / 760;
+      const sx = wrapRef.current.clientWidth / W;
+      const sy = wrapRef.current.clientHeight / H;
       setScale(Math.min(sx, sy, 1));
     };
     fit();
     const ro = new ResizeObserver(fit);
     if (wrapRef.current) ro.observe(wrapRef.current);
     return () => ro.disconnect();
-  }, []);
+  }, [W, H]);
 
   // Trackpad / wheel: scroll pans; pinch (ctrl+wheel) or ⌘+wheel zooms
   // about the cursor. Native listener so the page itself never zooms.
@@ -147,18 +160,25 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
       .catch(() => {});
   }, [realProjectId, projectsDir, scenes.map((s) => s.status).join("|")]);
 
-  const W = 1280, H = 760;
-  const APEX_X = 640, APEX_Y = 60;
+  const APEX_X = W / 2, APEX_Y = 60;
   const APEX_W = 340;
-  const BASE_Y = 420;
-  const PLATE_W = 184, PLATE_H = 188;
-
-  const n = scenes.length;
-  const plateGap = 22;
-  // When computing layout include the "+ Add scene" placeholder
-  const totalCards = n + 1;
-  const totalPlatesW = totalCards * PLATE_W + (totalCards - 1) * plateGap;
-  const startX = (W - totalPlatesW) / 2;
+  const first = geo.rows[0];
+  const last = geo.rows[geo.rows.length - 1];
+  const lastBottom = last.top + PLATE_H;
+  // Tier labels sit just left of the top course (the old fixed spots on a one-row canvas).
+  const tierLabelX = Math.max(80, first.left - 380);
+  // One course keeps the classic triangle; stacked courses get a silhouette
+  // that hugs them: apex, each course's corners, then the base.
+  const M = 24;
+  const stacked = geo.rows.length > 1;
+  const baseL = stacked ? Math.min(60, last.left - M - 20) : 60;
+  const outline = [
+    `${APEX_X},40`,
+    ...(stacked ? geo.rows.map((r) => `${r.right + M},${r.top - 30}`) : []),
+    `${W - baseL},${H - 40}`,
+    `${baseL},${H - 40}`,
+    ...(stacked ? [...geo.rows].reverse().map((r) => `${r.left - M},${r.top - 30}`) : []),
+  ].join(" ");
 
   const parseDurationSec = (s: string | undefined): number => {
     if (!s) return 0;
@@ -327,20 +347,20 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               </linearGradient>
             </defs>
             <polygon
-              points={`${APEX_X},40 ${W - 60},${H - 40} 60,${H - 40}`}
+              points={outline}
               fill="url(#pgrad)"
               stroke="oklch(0.5 0.025 145 / 0.5)"
               strokeWidth="1"
               strokeDasharray="2 4"
             />
-            <line x1={APEX_X} y1="40" x2={startX + 8} y2={BASE_Y - 4} stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="0.8" strokeDasharray="2 3" />
-            <line x1={APEX_X} y1="40" x2={startX + totalPlatesW - 8} y2={BASE_Y - 4} stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="0.8" strokeDasharray="2 3" />
+            <line x1={APEX_X} y1="40" x2={first.left + 8} y2={BASE_Y - 4} stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="0.8" strokeDasharray="2 3" />
+            <line x1={APEX_X} y1="40" x2={first.right - 8} y2={BASE_Y - 4} stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="0.8" strokeDasharray="2 3" />
             <line x1={APEX_X} y1="40" x2={APEX_X} y2={H - 40} stroke="oklch(0.5 0.025 145 / 0.22)" strokeWidth="0.8" strokeDasharray="1 4" />
             <line x1="120" y1={BASE_Y - 30} x2={W - 120} y2={BASE_Y - 30} stroke="oklch(0.5 0.025 145 / 0.3)" strokeWidth="0.8" strokeDasharray="2 3" />
-            <line x1="60"  y1={BASE_Y + PLATE_H + 14} x2={W - 60} y2={BASE_Y + PLATE_H + 14} stroke="oklch(0.5 0.025 145 / 0.25)" strokeWidth="0.8" strokeDasharray="2 3" />
+            <line x1="60"  y1={lastBottom + 14} x2={W - 60} y2={lastBottom + 14} stroke="oklch(0.5 0.025 145 / 0.25)" strokeWidth="0.8" strokeDasharray="2 3" />
             <g stroke="oklch(0.55 0.025 145 / 0.5)" strokeWidth="1" fill="none">
-              <path d={`M 60 ${H - 40} L 60 ${H - 60} M 60 ${H - 40} L 80 ${H - 40}`} />
-              <path d={`M ${W - 60} ${H - 40} L ${W - 60} ${H - 60} M ${W - 60} ${H - 40} L ${W - 80} ${H - 40}`} />
+              <path d={`M ${baseL} ${H - 40} L ${baseL} ${H - 60} M ${baseL} ${H - 40} L ${baseL + 20} ${H - 40}`} />
+              <path d={`M ${W - baseL} ${H - 40} L ${W - baseL} ${H - 60} M ${W - baseL} ${H - 40} L ${W - baseL - 20} ${H - 40}`} />
               <path d={`M ${APEX_X} 40 L ${APEX_X - 20} 40 M ${APEX_X} 40 L ${APEX_X + 20} 40`} />
             </g>
           </svg>
@@ -352,12 +372,12 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
           </div>
 
           {/* Tier labels */}
-          <div style={{ position: "absolute", top: 30, left: 200, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>I · STORY BIBLE</div>
-          <div style={{ position: "absolute", top: BASE_Y - 36, left: 80, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>II · SCENES &amp; CONTINUITY</div>
+          <div style={{ position: "absolute", top: 30, left: APEX_X - 440, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>I · STORY BIBLE</div>
+          <div style={{ position: "absolute", top: BASE_Y - 36, left: tierLabelX, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>II · SCENES &amp; CONTINUITY</div>
 
           {/* Tier II projection toggle */}
           <div style={{
-            position: "absolute", top: BASE_Y - 41, left: 300, zIndex: 6,
+            position: "absolute", top: BASE_Y - 41, left: tierLabelX + 220, zIndex: 6,
             display: "flex", background: "var(--bg-1)",
             border: "1px solid var(--line-1)", borderRadius: 2, overflow: "hidden",
           }}>
@@ -378,7 +398,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               </button>
             ))}
           </div>
-          <div style={{ position: "absolute", top: BASE_Y + PLATE_H + 6, left: 60, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>III · COMPOSITION &amp; MIX</div>
+          <div style={{ position: "absolute", top: lastBottom + 6, left: 60, fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.22em", textTransform: "uppercase", color: "var(--fg-4)", background: "var(--bg-1)", padding: "0 8px" }}>III · COMPOSITION &amp; MIX</div>
 
           {/* Apex card */}
           <div
@@ -414,7 +434,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
           {/* Scene plates */}
           {tierMode === "plates" && scenes.map((s, i) => {
-            const x = startX + i * (PLATE_W + plateGap);
+            const { x, y: rowY } = geo.slots[i];
             // Derive pip ordering from real script rows (falls back to mock
             // nodes for demo mode, then to empty in real-project edge cases)
             const pips = pipsByScene[s.no];
@@ -443,7 +463,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                 <div
                   className={`plate ${activeSceneNo === s.no ? "active" : ""}`}
                   onClick={() => onOpenScene(s.no)}
-                  style={{ position: "absolute", left: x, top: BASE_Y, width: PLATE_W, margin: 0 }}
+                  style={{ position: "absolute", left: x, top: rowY, width: PLATE_W, margin: 0 }}
                 >
                   <div className="plate-head">
                     <span className="plate-no">SCENE {s.no}</span>
@@ -463,7 +483,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                 </div>
 
                 {/* Connector + asset pips */}
-                <svg style={{ position: "absolute", left: x, top: BASE_Y + PLATE_H, width: PLATE_W, height: 36, pointerEvents: "none" }}>
+                <svg style={{ position: "absolute", left: x, top: rowY + PLATE_H, width: PLATE_W, height: 36, pointerEvents: "none" }}>
                   <line x1={PLATE_W / 2} y1="0" x2={PLATE_W / 2} y2="14" stroke="oklch(0.5 0.025 145 / 0.5)" strokeWidth="1" strokeDasharray="2 2" />
                   {totalNodes > 0 && (
                     <line x1={nodesStart - 4} y1="14" x2={nodesStart + nodesW + 4} y2="14" stroke="oklch(0.5 0.025 145 / 0.4)" strokeWidth="1" />
@@ -480,7 +500,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                       title={`${pip.kind.toUpperCase()} · ${placed ? "placed" : "planned"}`}
                       style={{
                         position: "absolute",
-                        left: cx, top: BASE_Y + PLATE_H + 18,
+                        left: cx, top: rowY + PLATE_H + 18,
                         width: NODE_SIZE, height: NODE_SIZE,
                         borderRadius: pip.kind === "tts" ? "50%" : 2,
                         background: placed ? color : "transparent",
@@ -497,7 +517,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
                     style={{
                       position: "absolute",
                       left: x + nodesStart + visiblePips.length * (NODE_SIZE + NODE_GAP),
-                      top: BASE_Y + PLATE_H + 17,
+                      top: rowY + PLATE_H + 17,
                       fontFamily: "var(--font-mono)", fontSize: 9,
                       color: "var(--fg-3)", letterSpacing: "0.04em",
                     }}
@@ -511,13 +531,13 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
 
           {/* "+ Add scene" placeholder card */}
           {tierMode === "plates" && (() => {
-            const addCardX = startX + n * (PLATE_W + plateGap);
+            const { x: addCardX, y: addCardY } = geo.slots[n];
             return (
               <div
                 onClick={handleOpenForm}
                 title="Add scene"
                 style={{
-                  position: "absolute", left: addCardX, top: BASE_Y,
+                  position: "absolute", left: addCardX, top: addCardY,
                   width: PLATE_W, height: PLATE_H,
                   border: "1.5px dashed var(--line-1)",
                   borderRadius: 4,
