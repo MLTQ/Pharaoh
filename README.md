@@ -378,3 +378,17 @@ Release outputs are in `src-tauri/target/release/bundle/`; the standalone execut
 - The LLM scene drafter is Anthropic-only; `project.json.llm_config.provider` is reserved for others.
 - Fountain support is practical, not complete: dual dialogue, transitions, centered text, explicit scene numbers and full title-page metadata aren't implemented.
 - Windows is untested; Tauri supports it, but ffmpeg discovery, paths and model runtimes may need work.
+
+## Linux Wayland / Hyprland
+
+Pharaoh supports native Wayland windows. On Wayland, GUI startup defaults to
+WebKitGTK's compatibility renderer to avoid DMA-BUF/GBM allocation failures
+that can leave the window blank on some GPU drivers. No Hyprland configuration
+changes are required. To opt back into the DMA-BUF renderer for troubleshooting:
+
+```bash
+WEBKIT_DISABLE_DMABUF_RENDERER=0 ./src-tauri/target/debug/pharaoh
+```
+
+Explicit renderer settings are preserved. X11-only sessions and headless CLI
+commands keep their existing behavior.

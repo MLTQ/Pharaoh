@@ -26,6 +26,13 @@ fn ensure_linux_gui_environment() {
     let has_x11 = has_non_empty_env("DISPLAY");
 
     if has_wayland || has_x11 {
+        // WebKitGTK's DMA-BUF renderer can fail to allocate GBM buffers on
+        // Wayland (notably NVIDIA/Hyprland), leaving the webview blank. Use
+        // its compatibility renderer unless the user explicitly overrides it.
+        // This runs before GTK/WebKit initialization and any app threads.
+        if has_wayland && std::env::var_os("WEBKIT_DISABLE_DMABUF_RENDERER").is_none() {
+            std::env::set_var("WEBKIT_DISABLE_DMABUF_RENDERER", "1");
+        }
         return;
     }
 
