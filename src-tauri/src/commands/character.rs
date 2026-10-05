@@ -12,6 +12,7 @@
 //! `library_version` so a future drift indicator (Pharaoh-wpk) can flag when
 //! the project version has diverged from the canonical library entry.
 
+use std::collections::HashMap;
 use std::io::{Read, Write};
 use std::path::Path;
 
@@ -262,27 +263,45 @@ pub fn import_into_project(
     // library_version stays as whatever the library entry had — that's the
     // version we imported from.
 
-    // Copy bundle contents into the project's characters dir.
     let project_bundle = character_dir(&projects_dir, &project_id, &new_id);
-    std::fs::create_dir_all(&project_bundle)?;
-    copy_dir_recursive(&library_bundle, &project_bundle)?;
-    // Remove the copy of character.json — in-project characters live inline
-    // in project.json, not as a sibling bundle file. Keeping a stale copy
-    // here would be confusing.
-    let _ = std::fs::remove_file(project_bundle.join(LIBRARY_BUNDLE_FILE));
-
-    // Rewrite all in-bundle paths from "relative to library bundle" to
-    // "absolute pointing at project bundle" so the rest of the codebase
-    // (TTS submission, MCP, etc.) keeps working unchanged.
-    absolutize_voice_paths(&mut character.voice_assignment, &project_bundle);
-
-    character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    copy_library_bundle(&library_bundle, &project_bundle, &mut character)?;
 
     project.characters.push(character.clone());
     project.updated_at = Utc::now();
     write_json(&project_path, &project)?;
 
     Ok(character)
+}
+
+/// Copy a library bundle into a project character folder and point the
+/// character's voice paths at the copy. The caller sets id, name and links.
+pub fn copy_library_bundle(library_bundle: &Path, project_bundle: &Path, character: &mut Character) -> Result<()> {
+    std::fs::create_dir_all(project_bundle)?;
+    copy_dir_recursive(library_bundle, project_bundle)?;
+    // In-project characters live inline in project.json; a stale
+    // character.json beside them would only confuse.
+    let _ = std::fs::remove_file(project_bundle.join(LIBRARY_BUNDLE_FILE));
+    // Library paths are relative to the library bundle; projects use
+    // absolute paths into their own copy (TTS, MCP and the CLI rely on it).
+    absolutize_voice_paths(&mut character.voice_assignment, project_bundle);
+    character.schema_version = CURRENT_CHARACTER_SCHEMA;
+    Ok(())
+}
+
+/// Library characters voiced from `import_id`'s speakers: speaker id →
+/// (library id, character). Named in the dissect review, so a rebuild of the
+/// same import should use them rather than "Speaker N".
+pub fn library_voices_of_import(projects_dir: &Path, import_id: &str) -> HashMap<String, (String, Character)> {
+    let mut out = HashMap::new();
+    let Ok(entries) = std::fs::read_dir(library_root_dir(projects_dir)) else { return out };
+    for e in entries.flatten() {
+        let Ok(c) = read_json::<Character>(&e.path().join(LIBRARY_BUNDLE_FILE)) else { continue };
+        let lib = e.file_name().to_string_lossy().into_owned();
+        for p in c.voice_provenance.iter().filter(|p| p.kind == "dissect" && p.import_id == import_id && !p.speaker_id.is_empty()) {
+            out.entry(p.speaker_id.clone()).or_insert_with(|| (lib.clone(), c.clone()));
+        }
+    }
+    out
 }
 
 /// Delete a library character entry. Does NOT touch any project character that

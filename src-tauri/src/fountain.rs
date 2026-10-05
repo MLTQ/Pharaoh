@@ -194,6 +194,22 @@ fn parse_title_page<'a>(lines: &'a [&str]) -> (Option<String>, Option<String>, u
 
 // ── Main parse ─────────────────────────────────────────────────────────────
 
+/// Name → id lookup for cues. Fountain reads "PERCEY WEASLEY (GOF)" as the
+/// cue "PERCEY WEASLEY" plus an extension, so a name ending in a parenthetical
+/// is also keyed without it; exact names win.
+pub fn cue_lookup<'a>(cast: impl Iterator<Item = (&'a str, &'a str)>) -> std::collections::HashMap<String, String> {
+    let cast: Vec<_> = cast.collect();
+    let mut map = std::collections::HashMap::new();
+    for (name, id) in &cast {
+        map.insert(name.trim().to_ascii_uppercase(), id.to_string());
+    }
+    for (name, id) in &cast {
+        let bare = name.split('(').next().unwrap_or(name).trim().to_ascii_uppercase();
+        map.entry(bare).or_insert_with(|| id.to_string());
+    }
+    map
+}
+
 /// `# Act One` → "Act One". Fountain sections are one or more `#` then text.
 fn section_name(line: &str) -> Option<String> {
     let rest = line.strip_prefix('#')?.trim_start_matches('#').trim();
@@ -447,6 +463,13 @@ pub fn blocks_to_rows(
 #[cfg(test)]
 mod title_page_tests {
     use super::*;
+
+    #[test]
+    fn cues_find_characters_whose_names_end_in_a_parenthetical() {
+        let map = cue_lookup([("Percey Weasley (GOF)", "C1"), ("Ron", "C2")].into_iter());
+        assert_eq!(map.get(&extract_character("PERCEY WEASLEY (GOF)").to_ascii_uppercase()).map(String::as_str), Some("C1"));
+        assert_eq!(map.get("RON").map(String::as_str), Some("C2"));
+    }
 
     #[test]
     fn sections_name_the_act_of_the_scenes_under_them() {

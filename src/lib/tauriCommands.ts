@@ -1036,3 +1036,35 @@ export const rowTakes = (args: { projectId: string; sceneSlug: string; rowIndex:
 /** Rate a take 1–5 (null clears). Stored in the scene's take_ratings.json. */
 export const rateTake = (args: { projectId: string; sceneSlug: string; key: string; rating: number | null }): Promise<void> =>
   invoke("rate_take", args);
+
+// ── Cast housekeeping ────────────────────────────────────────────────────────
+
+/** An unnamed rebuild voice and the named character from the same dissected speaker. */
+export interface CastMatch {
+  from_id: string;
+  from_name: string;
+  into_id: string;
+  into_name: string;
+  speaker_id: string;
+  lines: number;
+}
+
+export interface MergeReport {
+  rows_moved: number;
+  scenes_touched: number;
+  merged: string[];
+}
+
+export const castMatches = (projectId: string): Promise<CastMatch[]> =>
+  invoke("cast_matches", { projectId });
+
+/** Move every line of `fromIds` onto `intoId` and remove the merged characters. */
+export const mergeCharacters = (args: { projectId: string; fromIds: string[]; intoId: string }): Promise<MergeReport> =>
+  invoke("merge_characters", args);
+
+export const exportCastPack = (args: { projectId: string; characterIds: string[]; outputPath: string; includeCorpus?: boolean }): Promise<{ characters: string[]; bytes: number }> =>
+  invoke("export_cast_pack", { ...args, includeCorpus: args.includeCorpus ?? false });
+
+/** Add a .pharaoh-cast pack's characters to a project (clashing names get "(2)"). */
+export const importCastPack = (args: { projectId: string; filePath: string }): Promise<import("./types").Character[]> =>
+  invoke("import_cast_pack", args);

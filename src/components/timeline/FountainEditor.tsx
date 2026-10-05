@@ -5,6 +5,7 @@ import {
   serializeFountain,
   compileBlocksToRows,
   type FountainBlock,
+  findCharacterByCue,
 } from "../../lib/fountain";
 import { useJobStore } from "../../store/jobStore";
 import { useUiStore } from "../../store/uiStore";
@@ -93,8 +94,7 @@ const BlockCard: React.FC<BlockCardProps> = ({
   const status = rowStatus(row, rowIndex, sceneSlug, jobs);
   const typeColor = TYPE_COLOR[block.type] ?? "var(--fg-3)";
   const isDirection = block.type === "DIRECTION";
-  const charDisplay = characters.find((c) => c.name.toUpperCase() === block.character.toUpperCase())?.name
-    ?? block.character;
+  const charDisplay = findCharacterByCue(characters, block.character)?.name ?? block.character;
 
   return (
     <div
@@ -465,10 +465,8 @@ export const FountainEditor: React.FC<FountainEditorProps> = ({
 
     try {
       if (block.type === "DIALOGUE") {
-        const character = characters.find(
-          (c) => c.name.toUpperCase() === block.character.toUpperCase() ||
-                 c.id.toLowerCase() === block.character.toLowerCase(),
-        );
+        const character = findCharacterByCue(characters, block.character)
+          ?? characters.find((c) => c.id.toLowerCase() === block.character.toLowerCase());
         if (!character) {
           toast("warn", `Character "${block.character}" not in cast — add to Cast & Voices`);
           return;

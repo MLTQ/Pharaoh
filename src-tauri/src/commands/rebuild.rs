@@ -165,6 +165,10 @@ pub struct PlanCharacter {
     pub extras: bool,
     pub speech_s: f64,
     pub reference_clips: usize,
+    /// The Library character this speaker was named as in the dissect review;
+    /// the rebuild links it instead of making a fresh "Speaker N".
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub library_id: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -252,7 +256,8 @@ fn split_section(a: f64, b: f64, lines: &[PlanLine], max_s: f64, max_lines: usiz
     cuts.windows(2).map(|w| (w[0], w[1])).collect()
 }
 
-fn plan(m: &Manifest, opts: &RebuildOptions) -> Result<Plan> {
+/// `named`: speaker id → (library id, name) for voices named in the dissect review.
+fn plan(m: &Manifest, opts: &RebuildOptions, named: &HashMap<String, (String, String)>) -> Result<Plan> {
     let wanted: Option<HashSet<usize>> = opts.chapters.as_ref().filter(|c| !c.is_empty()).map(|c| c.iter().copied().collect());
     let mut sections: Vec<(f64, f64, String)> = Vec::new();
     if m.chapters.is_empty() {
@@ -313,16 +318,29 @@ fn plan(m: &Manifest, opts: &RebuildOptions) -> Result<Plan> {
     let min_speech = opts.min_character_speech_s.min((0.05 * total_speech).max(10.0));
     let mut characters: Vec<PlanCharacter> = Vec::new();
     let mut used_names: HashSet<String> = HashSet::new();
-    let mut extras = PlanCharacter { speaker_ids: vec![], name: "Extras".into(), performer: None, extras: true, speech_s: 0.0, reference_clips: 0 };
+    let mut extras = PlanCharacter { speaker_ids: vec![], name: "Extras".into(), performer: None, extras: true, speech_s: 0.0, reference_clips: 0, library_id: None };
     for sp in &m.speakers {
         if !present.contains(sp.id.as_str()) { continue; }
-        if sp.total_speech_s < min_speech {
+        let lib = named.get(&sp.id);
+        // Several speakers named as one Library character (diarization split
+        // a voice) are one character.
+        if let Some((lib_id, _)) = lib {
+            if let Some(existing) = characters.iter_mut().find(|c| c.library_id.as_deref() == Some(lib_id.as_str())) {
+                existing.speaker_ids.push(sp.id.clone());
+                existing.speech_s += sp.total_speech_s;
+                continue;
+            }
+        }
+        // A voice someone named is a character however little it speaks.
+        if sp.total_speech_s < min_speech && lib.is_none() {
             extras.speaker_ids.push(sp.id.clone());
             extras.speech_s += sp.total_speech_s;
             continue;
         }
         let credit = sp.credits.first();
-        let mut name = credit.map(|c| c.character.clone()).unwrap_or_else(|| sp.label.clone());
+        let mut name = lib.map(|l| l.1.clone())
+            .or_else(|| credit.map(|c| c.character.clone()))
+            .unwrap_or_else(|| sp.label.clone());
         let base = name.clone();
         let mut k = 2;
         while !used_names.insert(name.to_lowercase()) {
@@ -336,6 +354,7 @@ fn plan(m: &Manifest, opts: &RebuildOptions) -> Result<Plan> {
             extras: false,
             speech_s: sp.total_speech_s,
             reference_clips: sp.candidates.len().min(3),
+            library_id: lib.map(|l| l.0.clone()),
         });
     }
     if !extras.speaker_ids.is_empty() {
@@ -753,6 +772,24 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
         } else {
             format!("Voice from {} ({}).", m.source_name, pc.speaker_ids.join(", "))
         };
+        let projects_dir = root.parent().unwrap_or(&root);
+        let library = pc.library_id.as_ref().and_then(|lib| {
+            let bundle = crate::app_support::library_character_dir(projects_dir, lib);
+            read_json::<Character>(&bundle.join("character.json")).ok().map(|c| (lib.clone(), bundle, c))
+        });
+        if let Some((lib, bundle, mut c)) = library {
+            // Named in the dissect review: bring the Library character in,
+            // linked, with its voice and palette.
+            c.id = cid.clone();
+            c.name = pc.name.clone();
+            c.library_id = Some(lib);
+            crate::commands::character::copy_library_bundle(&bundle, &root.join("characters").join(&cid), &mut c)?;
+            for sid in &pc.speaker_ids {
+                char_of_speaker.insert(sid.clone(), (cid.clone(), pc.name.clone()));
+            }
+            characters.push(c);
+            continue;
+        }
         let mut c = new_project_character(&cid, &pc.name, &desc);
         if !pc.extras {
             if let Some(sp) = speakers.get(pc.speaker_ids[0].as_str()) {
@@ -950,9 +987,17 @@ fn load(projects_dir: &Path, import_id: &str) -> Result<(PathBuf, Manifest)> {
     Ok((dir, m))
 }
 
+/// Speakers of this import named in the dissect review (Library characters).
+fn named_speakers(projects_dir: &Path, import_id: &str) -> HashMap<String, (String, String)> {
+    crate::commands::character::library_voices_of_import(projects_dir, import_id)
+        .into_iter()
+        .map(|(sid, (lib, c))| (sid, (lib, c.name)))
+        .collect()
+}
+
 pub fn plan_for(projects_dir: &Path, import_id: &str, opts: &RebuildOptions) -> Result<PlanSummary> {
     let (_, m) = load(projects_dir, import_id)?;
-    let p = plan(&m, opts)?;
+    let p = plan(&m, opts, &named_speakers(projects_dir, import_id))?;
     Ok(PlanSummary {
         title: p.title.clone(),
         scenes: p.scenes.iter().map(|s| SceneSummary { title: s.title.clone(), start: s.start, end: s.end, lines: s.lines.len(), sounds: s.sounds.len() }).collect(),
@@ -971,7 +1016,7 @@ pub fn rebuild(projects_dir: &Path, import_id: &str, opts: &RebuildOptions, prog
         return Err(Error::Other("confirm you have the rights to this recording before rebuilding it — the project reproduces its performances".into()));
     }
     let (dir, m) = load(projects_dir, import_id)?;
-    let p = plan(&m, opts)?;
+    let p = plan(&m, opts, &named_speakers(projects_dir, import_id))?;
     if let Some(free) = free_bytes(projects_dir) {
         if p.est_bytes + (2u64 << 30) > free {
             return Err(Error::Other(format!(

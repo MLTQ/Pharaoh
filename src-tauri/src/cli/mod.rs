@@ -114,6 +114,10 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         }
         [group, action] if group == "library" && action == "fix-transcripts" => dissect::library_fix_transcripts(&config),
         [group, action] if group == "library" && action == "list" => dissect::library_list(&config),
+        [group, action, project_id] if group == "cast" && action == "matches" => dissect::cast_matches(&config, project_id),
+        [group, action, project_id, rest @ ..] if group == "cast" && action == "merge" => dissect::cast_merge(&config, project_id, rest),
+        [group, action, project_id, rest @ ..] if group == "cast" && action == "export" => dissect::cast_export(&config, project_id, rest),
+        [group, action, project_id, file] if group == "cast" && action == "import" => dissect::cast_import(&config, project_id, file),
         [group, action, library_id, rest @ ..] if group == "library" && action == "export" => {
             dissect::library_export(&config, library_id, rest)
         }
@@ -327,6 +331,10 @@ fn usage() -> &'static str {
   pharaoh character voice-set <project_id> <character_id> [--model CustomVoice|VoiceDesign|VoiceClone] [--instruct <text>]
   pharaoh character voice-design-test <project_id> <character_id> --voice-description <text> [--text <text>]
   pharaoh character voice-clone-test <project_id> <character_id> --ref-audio-path <wav> [--text <text>]
+  pharaoh cast matches <project_id>
+  pharaoh cast merge <project_id> <into_id> <from_id>... | --matches
+  pharaoh cast export <project_id> --characters <id,id,...> --output <file.pharaoh-cast> [--include-corpus true]
+  pharaoh cast import <project_id> <file.pharaoh-cast>
   pharaoh library list
   pharaoh library fix-transcripts
   pharaoh library export <library_id> --output <file.zip> [--include-corpus true]

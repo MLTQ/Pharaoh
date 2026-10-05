@@ -254,11 +254,8 @@ pub(super) fn compile_fountain_for_scene(
         ));
     }
     let scene_no = format!("S{:02}", scene.index + 1);
-    let cast_by_name: HashMap<String, String> = project
-        .characters
-        .iter()
-        .map(|c| (c.name.to_ascii_uppercase(), c.id.clone()))
-        .collect();
+    let cast_by_name: HashMap<String, String> =
+        crate::fountain::cue_lookup(project.characters.iter().map(|c| (c.name.as_str(), c.id.as_str())));
     let rows = doc
         .scenes
         .first()
@@ -471,11 +468,8 @@ pub(super) async fn script_import(
 
     // ── Resolve characters: keep existing, append new ────────────────────
     let mut project = load_project(config, project_id)?;
-    let mut name_to_id: HashMap<String, String> = project
-        .characters
-        .iter()
-        .map(|c| (c.name.to_ascii_uppercase(), c.id.clone()))
-        .collect();
+    let mut name_to_id: HashMap<String, String> =
+        crate::fountain::cue_lookup(project.characters.iter().map(|c| (c.name.as_str(), c.id.as_str())));
 
     let mut new_characters: Vec<crate::models::Character> = Vec::new();
     for name in &doc.characters {

@@ -183,6 +183,17 @@ export function serializeFountain(blocks: FountainBlock[]): string {
 
 // ── Block ↔ ScriptRow round-trip ───────────────────────────────────────────
 
+/**
+ * The character a cue names. Fountain reads "PERCEY WEASLEY (GOF)" as the cue
+ * "PERCEY WEASLEY" with an extension, so a character whose own name ends in a
+ * parenthetical is also matched without it (an exact match wins).
+ */
+export function findCharacterByCue<C extends { name: string }>(characters: C[], cue: string): C | undefined {
+  const want = cue.trim().toUpperCase();
+  const bare = (n: string) => n.replace(/\s*\([^)]*\)\s*$/, "").trim().toUpperCase();
+  return characters.find((c) => c.name.toUpperCase() === want) ?? characters.find((c) => bare(c.name) === want);
+}
+
 export function blockToRow(
   block: FountainBlock,
   sceneNo: string,
@@ -191,7 +202,7 @@ export function blockToRow(
 ): ScriptRow {
   const trackForBlock = (() => {
     if (block.type === "DIALOGUE") {
-      const c = characters.find((c) => c.name.toUpperCase() === block.character.toUpperCase());
+      const c = findCharacterByCue(characters, block.character);
       return (c?.id ?? block.character).toLowerCase().replace(/\s+/g, "_");
     }
     if (block.type === "SFX" || block.type === "BED") return "FOLEY";
@@ -200,7 +211,7 @@ export function blockToRow(
   })();
 
   const characterId = block.type === "DIALOGUE"
-    ? characters.find((c) => c.name.toUpperCase() === block.character.toUpperCase())?.id ?? block.character
+    ? findCharacterByCue(characters, block.character)?.id ?? block.character
     : "";
 
   const instructFromParen = block.parenthetical || (existing?.instruct ?? "");

@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useMemo } from "react";
+import { CastMatchBanner, CastPackButtons, MergeIntoControl } from "./CastTools";
 import { PlayButton } from "../shared/PlayButton";
 import { useProjectStore } from "../../store/projectStore";
 import { useUiStore } from "../../store/uiStore";
@@ -61,6 +62,7 @@ export const CharacterDesignerView: React.FC = () => {
     realProjectId,
     reloadProjectFromDisk,
     realScenes,
+    realProject,
   } = useProjectStore();
   const setView = useUiStore((s) => s.setView);
 
@@ -313,6 +315,9 @@ export const CharacterDesignerView: React.FC = () => {
             onClick={openCastModal}
           >+</button>
         </div>
+        {realProjectId && (
+          <CastPackButtons projectId={realProjectId} projectTitle={realProject?.title ?? "cast"} characters={characters} onChanged={reloadProjectFromDisk} />
+        )}
 
         {characters.map((c) => {
           const active = c.id === char.id;
@@ -349,11 +354,14 @@ export const CharacterDesignerView: React.FC = () => {
                 )}
               </span>
               <span style={{ flex: 1, minWidth: 0, overflow: "hidden" }}>
-                <span style={{
-                  display: "block", fontSize: 12, fontWeight: active ? 500 : 400,
-                  overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
-                }}>
-                  {c.name.split(" ")[0]}
+                <span
+                  title={c.name}
+                  style={{
+                    display: "block", fontSize: 12, fontWeight: active ? 500 : 400,
+                    overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap",
+                  }}
+                >
+                  {c.name}
                 </span>
                 <span style={{
                   fontFamily: "var(--font-mono)", fontSize: 8.5,
@@ -398,13 +406,17 @@ export const CharacterDesignerView: React.FC = () => {
       <div style={{ flex: 1, display: "flex", minWidth: 0, overflow: "hidden" }}>
       <div style={{ flex: 1, display: "flex", flexDirection: "column", overflowY: "auto", minWidth: 0 }}>
 
+        {realProjectId && (
+          <CastMatchBanner projectId={realProjectId} castKey={characters.map((c) => c.id).join(",")} onChanged={reloadProjectFromDisk} />
+        )}
+
         {/* Character header */}
         <div style={{
           padding: "20px 24px 16px",
           borderBottom: "1px solid var(--line-1)",
           background: "var(--bg-1)", flexShrink: 0,
         }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8, flexWrap: "wrap" }}>
             <span style={{
               width: 14, height: 14, borderRadius: "50%",
               background: charColor, display: "inline-block", flexShrink: 0,
@@ -416,7 +428,7 @@ export const CharacterDesignerView: React.FC = () => {
               onBlur={saveCharMeta}
               style={{
                 background: "transparent", border: "none", padding: 0,
-                fontSize: 20, fontWeight: 600, color: "var(--fg-1)", flex: 1,
+                fontSize: 20, fontWeight: 600, color: "var(--fg-1)", flex: "1 1 220px", minWidth: 180,
               }}
             />
             <span style={{
@@ -482,6 +494,9 @@ export const CharacterDesignerView: React.FC = () => {
             >
               Delete
             </button>
+            {realProjectId && characters.length > 1 && (
+              <MergeIntoControl projectId={realProjectId} character={char} characters={characters} onChanged={reloadProjectFromDisk} />
+            )}
           </div>
           <textarea
             className="input"

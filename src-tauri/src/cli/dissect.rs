@@ -308,3 +308,37 @@ pub(super) fn library_fix_transcripts(config: &AppConfig) -> Result<()> {
     }
     print_json(&serde_json::json!({ "fixed": fixed }))
 }
+
+// ── Cast housekeeping (merge, match, packs) ─────────────────────────────────
+
+pub(super) fn cast_matches(config: &AppConfig, project_id: &str) -> Result<()> {
+    print_json(&crate::commands::cast::cast_matches_in(&projects_dir(config), project_id)?)
+}
+
+/// `cast merge <project> <into_id> <from_id>…`, or `cast merge <project> --matches`
+/// to merge every Speaker N into its named match.
+pub(super) fn cast_merge(config: &AppConfig, project_id: &str, rest: &[String]) -> Result<()> {
+    let dir = projects_dir(config);
+    if rest.first().map(String::as_str) == Some("--matches") {
+        let mut reports = Vec::new();
+        for m in crate::commands::cast::cast_matches_in(&dir, project_id)? {
+            reports.push(crate::commands::cast::merge_characters_in(&dir, project_id, &[m.from_id.clone()], &m.into_id)?);
+        }
+        return print_json(&reports);
+    }
+    let (into, from) = rest.split_first().ok_or_else(|| Error::Other("usage: cast merge <project> <into_id> <from_id>… | --matches".into()))?;
+    print_json(&crate::commands::cast::merge_characters_in(&dir, project_id, from, into)?)
+}
+
+pub(super) fn cast_export(config: &AppConfig, project_id: &str, rest: &[String]) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let out = flag_opt(&flags, "output").ok_or_else(|| Error::Other("--output <file.pharaoh-cast> is required".into()))?;
+    let ids: Vec<String> = flag_opt(&flags, "characters").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    let corpus = matches!(flag_opt(&flags, "include_corpus").as_deref(), Some("true" | "yes" | "1"));
+    print_json(&crate::commands::cast::export_cast_pack_to(&projects_dir(config), project_id, &ids, std::path::Path::new(&out), corpus)?)
+}
+
+pub(super) fn cast_import(config: &AppConfig, project_id: &str, file: &str) -> Result<()> {
+    let added = crate::commands::cast::import_cast_pack_into(&projects_dir(config), project_id, std::path::Path::new(file))?;
+    print_json(&added.iter().map(|c| serde_json::json!({"id": c.id, "name": c.name})).collect::<Vec<_>>())
+}
