@@ -5,7 +5,7 @@
  * from the dissected source, ranked by the emotion's *recipe* — a blend of
  * emotion2vec's seven classes plus delivery targets (pace, loudness, pitch,
  * movement, breathiness) relative to the character's own average. Play one,
- * "Use" makes it the emotion's reference (Chatterbox copies a reference's
+ * "Use" makes it the emotion's reference (a clone copies a reference's
  * delivery as much as its voice), "≈" finds the clips that sound most like
  * it — for moods no recipe names.
  *

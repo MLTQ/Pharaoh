@@ -22,7 +22,8 @@ fn audio_path_from_meta(path: &Path) -> Option<PathBuf> {
 
 fn kind_from_model(model: &str) -> &'static str {
     let model = model.to_lowercase();
-    if model.contains("qwen") || model.contains("tts") {
+    // "chatterbox": dialogue takes from before Chatterbox was removed.
+    if model.contains("qwen") || model.contains("tts") || model.contains("breeze") || model.contains("chatterbox") {
         "tts"
     } else if model.contains("ace") || model.contains("yue") || model.contains("music") {
         "music"

@@ -11,7 +11,7 @@
 //! palette emotion's *recipe* — weights over the seven classes plus delivery
 //! targets (loud, pace, pitch, movement, breathy) against that character's
 //! own average — so the palette can offer real tender / furious / weary
-//! moments from the recording as clone references. Chatterbox copies a
+//! moments from the recording as clone references. A clone copies a
 //! reference's delivery as much as its voice. `dissect_similar_clips` finds
 //! the clips nearest one clip in emotion2vec's embedding space, for moods no
 //! recipe names.
@@ -1060,8 +1060,8 @@ mod tests {
         let mut c = Character {
             id: "C".into(), name: "Fred".into(), description: String::new(),
             voice_assignment: serde_json::from_value::<VoiceAssignment>(serde_json::json!({
-                "model": "Chatterbox", "speaker": null, "ref_audio_path": null, "ref_transcript": null,
-                "base_voice_description": "", "production_pipeline": "chatterbox",
+                "model": "Clone", "speaker": null, "ref_audio_path": null, "ref_transcript": null,
+                "base_voice_description": "",
                 "emotional_palette": [{ "emotion": "happy", "label": "Happy", "direction": "", "ref_audio_path": kept,
                                         "ref_audio_sources": [kept], "ref_transcript": null, "qa_status": "approved" }]
             })).unwrap(),

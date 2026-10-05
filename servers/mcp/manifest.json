@@ -3,7 +3,7 @@
   "name": "pharaoh",
   "display_name": "Pharaoh Audio Drama Suite",
   "version": "1.0.0",
-  "description": "AI production pipeline for audio dramas. Generate dialogue with Qwen3-TTS or Chatterbox voice cloning, sound effects, music via YuE2 or ACE-Step, and run RVC voice conversion — all from Claude. Connects to local or remote Pharaoh inference servers.\n\nRequires: uv (https://docs.astral.sh/uv/) and at least one running Pharaoh inference server.",
+  "description": "AI production pipeline for audio dramas. Generate dialogue with Breeze TTS 2 (or Qwen3-TTS) voice cloning, sound effects with MOSS-SoundEffect, music via YuE2 or ACE-Step, and run RVC voice lock \u2014 all from Claude. Connects to local or remote Pharaoh inference servers.\n\nRequires: uv (https://docs.astral.sh/uv/) and at least one running Pharaoh inference server.",
   "author": {
     "name": "Aureum",
     "email": "max@aureum.ai"
@@ -32,8 +32,6 @@
         "http://${user_config.inference_host}:18003",
         "--post-url",
         "http://${user_config.inference_host}:18004",
-        "--chatterbox-url",
-        "http://${user_config.inference_host}:18005",
         "--rvc-url",
         "http://${user_config.inference_host}:18006"
       ]
@@ -50,15 +48,27 @@
     "inference_host": {
       "type": "string",
       "title": "Inference Server Host",
-      "description": "Hostname or IP of the machine running the Pharaoh inference servers. Use 127.0.0.1 for local inference, or your server's IP/hostname for a remote GPU box. Individual server ports (18001–18006) are fixed.",
+      "description": "Hostname or IP of the machine running the Pharaoh inference servers. Use 127.0.0.1 for local inference, or your server's IP/hostname for a remote GPU box. Individual server ports (18001\u201318006) are fixed.",
       "required": false,
       "default": "127.0.0.1"
     }
   },
   "tools_generated": true,
-  "keywords": ["audio", "drama", "tts", "voice", "music", "sfx", "production"],
+  "keywords": [
+    "audio",
+    "drama",
+    "tts",
+    "voice",
+    "music",
+    "sfx",
+    "production"
+  ],
   "compatibility": {
-    "platforms": ["darwin", "linux", "win32"],
+    "platforms": [
+      "darwin",
+      "linux",
+      "win32"
+    ],
     "runtimes": {
       "python": ">=3.10"
     }

@@ -53,7 +53,7 @@ _SFX_NOISE = {
     "Noise", "Environmental noise",
 }
 # Nonverbal performance sounds that the separator routes to the effects stem.
-# They are real material (Chatterbox tags, breaths) but not sound effects.
+# They are real performance material (laughs, sighs, breaths) but not sound effects.
 HUMAN_VOCAL = {
     "Speech", "Conversation", "Narration, monologue", "Male speech, man speaking",
     "Female speech, woman speaking", "Child speech, kid speaking", "Babbling", "Whispering",

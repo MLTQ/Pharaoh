@@ -90,7 +90,7 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
 
     # Route by model family, and refuse anything this tool cannot regenerate.
     # The old chain fell through to the SFX branch for everything unmatched, so
-    # chatterbox, rvc, audiosr and clip-studio assets were re-submitted to Woosh
+    # rvc, audiosr and clip-studio assets were re-submitted to Woosh
     # — and a "tts-reference-import" asset (from import_audio) matched the "tts"
     # substring and got re-synthesised as speech over the writer's own audio.
     _UNSUPPORTED = {
@@ -108,11 +108,12 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
         ),
         "rvc": (
             "this asset is an RVC conversion. Re-run rvc_convert on the source "
-            "Chatterbox take instead."
+            "take instead."
         ),
+        # Takes from before Chatterbox was removed from Pharaoh.
         "chatterbox": (
-            "regenerating a Chatterbox take needs its palette reference. Use "
-            "generate_chatterbox with the character and emotion instead."
+            "this take came from Chatterbox, which Pharaoh no longer uses. Use "
+            "generate_tts on its script row to make a new take."
         ),
     }
     for marker, reason in _UNSUPPORTED.items():
@@ -121,6 +122,17 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
                 "error": f"cannot regenerate asset with model '{model}': {reason}"
             })
 
+    # A cloned voice (Breeze, or a Qwen3-TTS clone) re-clones from the same
+    # reference clip, recorded as the take's parent — a preset speaker would
+    # come back in the wrong voice.
+    if ("breeze" in lowered or "clone" in lowered) and meta.get("parent") and Path(meta["parent"]).is_file():
+        return json.dumps(_post("tts", "/generate/voice_clone", {
+            "text": meta.get("prompt", ""),
+            "ref_audio_path": meta["parent"],
+            "instruct": meta.get("instruct") or "",
+            "seed": (meta.get("seed", 0) or 0) + 1,
+            "output_path": output_path,
+        }, upload_fields=("ref_audio_path",)))
     if "qwen" in lowered or "tts" in lowered:
         return json.dumps(_post("tts", "/generate/custom_voice", {
             "text": meta.get("prompt", ""),
@@ -143,11 +155,12 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
             "batch_size": 1,
             "output_path": output_path,
         }))
-    elif "woosh" in lowered or "sfx" in lowered or "audioldm" in lowered:
+    elif "moss" in lowered or "woosh" in lowered or "sfx" in lowered or "audioldm" in lowered:
         return json.dumps(_post("sfx", "/generate/t2a", {
             "prompt": meta.get("prompt", ""),
             "duration_seconds": (meta.get("duration_actual_ms") or 3000) / 1000,
-            "model_variant": "Woosh-DFlow",
+            # The engine that made it, else the server's default.
+            "model_variant": meta.get("model_variant") or "auto",
             "steps": 4,
             "seed": meta.get("seed", 0),
             "output_path": output_path,
@@ -156,8 +169,8 @@ def regenerate_asset(audio_path: str, output_path: str = "") -> str:
         return json.dumps({
             "error": (
                 f"unrecognised model '{model}' — regenerate_asset does not know "
-                f"which server produced this asset. Known families: qwen/tts, "
-                f"ace/yue/music, woosh/sfx/audioldm."
+                f"which server produced this asset. Known families: breeze/clone, "
+                f"qwen/tts, ace/yue/music, moss/woosh/sfx/audioldm."
             )
         })
 

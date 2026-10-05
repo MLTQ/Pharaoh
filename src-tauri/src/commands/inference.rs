@@ -68,7 +68,7 @@ pub async fn detect_hardware() -> HardwareProfile {
 use crate::models::{
     AppState, JobCompleteEvent, JobFailedEvent, JobProgressEvent, JobStatus,
     MusicText2MusicRequest, ServerHealth, SfxT2ARequest, SidecarMeta, TtsCustomVoiceRequest,
-    ChatterboxCloneRequest, TtsVoiceCloneRequest, TtsVoiceDesignRequest,
+    TtsVoiceCloneRequest, TtsVoiceDesignRequest,
 };
 use chrono::Utc;
 
@@ -87,7 +87,6 @@ pub async fn check_server_health(app: AppHandle, model: String) -> Result<Server
             "sfx" => format!("{}/health", cfg.sfx_url),
             "music" => format!("{}/health", cfg.music_url),
             "post" => format!("{}/health", cfg.post_url),
-            "chatterbox" => format!("{}/health", cfg.chatterbox_url),
             "rvc" => format!("{}/health", cfg.rvc_url),
             "dissect" => format!("{}/health", cfg.dissect_url),
             "mcp" => format!("{}/health", cfg.mcp_url),
@@ -155,7 +154,6 @@ pub async fn load_model(app: AppHandle, model: String, variant: Option<String>) 
             "sfx" => format!("{}/load", cfg.sfx_url),
             "music" => format!("{}/load", cfg.music_url),
             "post" => format!("{}/load", cfg.post_url),
-            "chatterbox" => format!("{}/load", cfg.chatterbox_url),
             "rvc" => format!("{}/load", cfg.rvc_url),
             "dissect" => format!("{}/load", cfg.dissect_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
@@ -235,7 +233,6 @@ pub async fn unload_model(app: AppHandle, model: String) -> Result<()> {
             "sfx" => format!("{}/unload", cfg.sfx_url),
             "music" => format!("{}/unload", cfg.music_url),
             "post" => format!("{}/unload", cfg.post_url),
-            "chatterbox" => format!("{}/unload", cfg.chatterbox_url),
             "rvc" => format!("{}/unload", cfg.rvc_url),
             "dissect" => format!("{}/unload", cfg.dissect_url),
             other => return Err(Error::Other(format!("unknown model: {}", other))),
@@ -877,84 +874,6 @@ pub async fn submit_tts_voice_clone(
         seed: params.seed,
         temperature: Some(params.temperature),
         top_p: Some(params.top_p),
-        duration_target_ms: None,
-        duration_actual_ms: None,
-        sample_rate: 24000,
-        generated_at: Utc::now(),
-        parent: Some(params.ref_audio_path.clone()),
-        take_index: 1,
-        qa_status: "unreviewed".into(),
-        qa_notes: String::new(),
-    };
-
-    tokio::spawn(poll_until_done(
-        app.clone(),
-        http,
-        base_url.clone(),
-        format!("{}/jobs", base_url),
-        job_id.clone(),
-        "tts".into(),
-        project_id,
-        scene_slug,
-        row_index,
-        projects_dir,
-        params.output_path.clone(),
-        meta,
-    ));
-    Ok(job_id)
-}
-
-/// Clone a character's voice with Chatterbox Turbo from its reference clip.
-#[tauri::command]
-pub async fn submit_chatterbox_clone(
-    app: AppHandle,
-    project_id: String,
-    scene_slug: String,
-    row_index: usize,
-    params: ChatterboxCloneRequest,
-) -> Result<String> {
-    if params.text.trim().is_empty() {
-        return Err(Error::Other("nothing to say: the line is empty".into()));
-    }
-    if params.ref_audio_path.trim().is_empty() {
-        return Err(Error::Other("this character has no reference clip to clone from — pick a gold reference first".into()));
-    }
-    let state = app.state::<AppState>();
-    let projects_dir = app_projects_dir(&app)?;
-    let (base_url, http) = {
-        let cfg = state
-            .server_config
-            .read()
-            .map_err(|_| Error::Other("lock poisoned".into()))?;
-        (cfg.chatterbox_url.clone(), state.http.clone())
-    };
-
-    let resp: serde_json::Value = http
-        .post(format!("{}/generate/clone", base_url))
-        .json(&remote_body(&http, &base_url, &params, &["ref_audio_path"]).await?)
-        .timeout(Duration::from_secs(60))
-        .send()
-        .await
-        .map_err(|e| Error::Other(format!("Chatterbox server unreachable at {} ({}). Start it from the Models tab.", base_url, e)))?
-        .json()
-        .await
-        .map_err(|e| Error::Other(format!("Chatterbox response error: {}", e)))?;
-
-    let job_id = resp["job_id"]
-        .as_str()
-        .ok_or_else(|| Error::Other(format!("server rejected job (no job_id): {}", resp)))?
-        .to_string();
-
-    let meta = SidecarMeta {
-        model: "chatterbox-turbo".into(),
-        model_variant: Some("0.5B".into()),
-        prompt: params.text.clone(),
-        instruct: Some(format!("exaggeration {:.2}, cfg {:.2}", params.exaggeration, params.cfg_weight)),
-        speaker: None,
-        language: Some("en".into()),
-        seed: params.seed,
-        temperature: None,
-        top_p: None,
         duration_target_ms: None,
         duration_actual_ms: None,
         sample_rate: 24000,

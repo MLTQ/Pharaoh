@@ -26,16 +26,15 @@ def unload_model(server: str) -> str:
       sfx         — ~4–6 GB (AudioLDM)
       music       — ~8–9 GB GPU (YuE2 3B) or ~14–20 GB (ACE-Step 3.5B)
       post        — ~2–4 GB (AudioSR)
-      chatterbox  — ~4–6 GB (Chatterbox Turbo 0.5B)
 
     Recommended workflow for CPU-only sessions:
       1. Build palette: generate_palette_take for each emotion → approve → unload_model("tts")
-      2. Generate all dialogue with Chatterbox → unload_model("chatterbox")
+      2. Generate all dialogue → unload_model("tts")
       3. Generate all SFX
       4. Generate music → unload_model("music")
       5. Generate post-processing as needed
 
-    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
+    server: "tts" | "sfx" | "music" | "post" | "rvc"
     """
     if server not in SERVER_URLS:
         return json.dumps({"error": f"unknown server: {server}. Valid: {list(SERVER_URLS.keys())}"})
@@ -50,7 +49,7 @@ def unload_model(server: str) -> str:
 def server_health(server: str = "") -> str:
     """
     Check health of inference servers.
-    server: "tts" | "sfx" | "music" | "post" | "chatterbox" | "" (check all)
+    server: "tts" | "sfx" | "music" | "post" | "rvc" | "" (check all)
     Returns model_loaded, model_variant, and vram_mb for each.
 
     RAM WARNING: On CPU-only systems, loading multiple heavy models simultaneously
@@ -77,7 +76,7 @@ def load_model(server: str) -> str:
     Call this before starting a generation batch to avoid cold-start latency on
     the first job. Complement with unload_model when switching servers.
 
-    server: "tts" | "sfx" | "music" | "chatterbox" | "rvc" | "post"
+    server: "tts" | "sfx" | "music" | "rvc" | "post"
     """
     try:
         resp = _post(server, "/load", {})
@@ -98,7 +97,6 @@ def get_server_config() -> str:
         "sfx": SERVER_URLS["sfx"],
         "music": SERVER_URLS["music"],
         "post": SERVER_URLS["post"],
-        "chatterbox": SERVER_URLS["chatterbox"],
         "rvc": SERVER_URLS["rvc"],
         "projects_dir": str(PROJECTS_DIR),
     }, indent=2)

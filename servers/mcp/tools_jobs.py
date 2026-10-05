@@ -19,7 +19,7 @@ from server import mcp
 def job_status(server: str, job_id: str) -> str:
     """
     Poll a generation job for status and progress.
-    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
+    server: "tts" | "sfx" | "music" | "post" | "rvc"
     Returns: {status: "pending|running|complete|failed", progress: 0.0-1.0, output_path, error}
     """
     if server not in SERVER_URLS:
@@ -35,7 +35,7 @@ def wait_for_job(server: str, job_id: str, timeout_seconds: int = 300) -> str:
     Block until a generation job completes or fails (polls every 2 seconds).
     Returns the final job record with output_path on success.
     Use this instead of manually polling job_status in a loop.
-    server: "tts" | "sfx" | "music" | "post" | "chatterbox"
+    server: "tts" | "sfx" | "music" | "post" | "rvc"
     """
     deadline = time.time() + timeout_seconds
     while time.time() < deadline:

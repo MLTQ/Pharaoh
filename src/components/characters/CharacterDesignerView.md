@@ -6,7 +6,7 @@ Per-episode **Cast manifest** (Pharaoh-8xu) — a read-only browser of who's in 
 ## Components
 
 ### `deriveVoiceBadge`
-- **Does**: Pure derivation of the UI mode badge ("Chatterbox + RVC" / "Chatterbox" / "Reference" / "Voice Design" / "Empty") from data shape, replacing the overloaded legacy `model` enum.
+- **Does**: Pure derivation of the UI mode badge ("Palette" / "Reference", with "+ lock" when voice lock is on, / "Voice Design" / "Empty") from data shape, replacing the overloaded legacy `model` enum.
 - **Interacts with**: sidebar chip, detail header chip, right-meta "Mode" section.
 - **Rationale**: The `VoiceAssignment.model` field is retained for back-compat reads but no longer drives the UI — `production_pipeline`, palette state, and ref presence are the real source. Lets us delete the enum cleanly when MCP no longer writes it.
 

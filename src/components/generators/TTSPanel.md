@@ -42,7 +42,7 @@ Dialogue-generation panel for scene-level spoken lines. It collects a character,
 | Users | Completed current-session and persisted takes can be selected and routed to a scene | Making the take list review-only |
 
 ## Notes
-- A character with a gold reference clip and a Chatterbox pipeline (`clonesVoice` in `useGenerateJob.ts`) speaks through Chatterbox clone instead of CustomVoice — here and in the script editor's per-row generate. Direction is not used in that mode; inline tags like [laugh] are.
+- A character with a gold reference clip (`clonesVoice` in `useGenerateJob.ts`) is cloned on the TTS port instead of using a preset speaker — here and in the script editor's per-row generate. Breeze performs the Direction; under Qwen3-TTS (no Breeze) the header says the direction isn't performed.
 - Character Designer still owns voice clone and voice design probes. This panel is for production dialogue takes that need direction control.
 - “Send to scene” targets dialogue rows in the selected scene; scenes with no assignable dialogue rows report an error instead of silently dropping the assignment.
 - With Breeze (`dialogueEngine`), the header reads "breeze tts 2 · cloned from …" and Direction is free-form delivery direction (palette emotion names add that emotion's direction and clip); the hint shows what Breeze will perform.

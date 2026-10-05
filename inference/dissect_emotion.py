@@ -5,7 +5,7 @@ Diarization turns are short (median ~2 s), so consecutive turns by the same
 speaker are first joined into *utterances* of up to ~12 s — the length a
 voice-clone reference wants. Each utterance gets emotion2vec's utterance-level
 scores over seven emotions. The palette then offers a character's real clips
-per emotion as clone references: Chatterbox copies a reference's delivery as
+per emotion as clone references: a clone copies a reference's delivery as
 much as its timbre, so a genuinely angry clip gives angry lines.
 
 Each utterance also gets a delivery profile — pace (words/s from the word

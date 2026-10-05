@@ -16,7 +16,7 @@ import {
   type SfxServerHealth,
 } from "./settingsShared";
 import { ModelServerCards } from "./ModelServerCards";
-import { ChatterboxRvcCards, type ChatterboxHealth } from "./ChatterboxRvcCards";
+import { RvcCard } from "./RvcCard";
 
 export const SettingsView: React.FC = () => {
   const hw = useHardwareProfile();
@@ -28,7 +28,6 @@ export const SettingsView: React.FC = () => {
   const [urls, setUrls] = useState<Record<string, string>>(defaultServerUrls());
   const [inferenceHost, setInferenceHost] = useState(LOOPBACK_HOST);
   const [splitServers, setSplitServers] = useState(false);
-  const [chatterboxHealth, setChatterboxHealth] = useState<ChatterboxHealth>("unknown");
 
   const [wooshDir, setWooshDir] = useState("");
   const [singleModelMode, setSingleModelMode] = useState(false);
@@ -41,7 +40,6 @@ export const SettingsView: React.FC = () => {
         sfx:        cfg.sfx_url,
         music:      cfg.music_url,
         post:       cfg.post_url,
-        chatterbox: cfg.chatterbox_url ?? defaultServerUrls().chatterbox,
         rvc:        cfg.rvc_url        ?? defaultServerUrls().rvc,
         dissect:    cfg.dissect_url    ?? defaultServerUrls().dissect,
       });
@@ -69,7 +67,6 @@ export const SettingsView: React.FC = () => {
           sfx_url:        derived.sfx,
           music_url:      derived.music,
           post_url:       derived.post,
-          chatterbox_url: derived.chatterbox,
           rvc_url:        derived.rvc,
           dissect_url:    derived.dissect,
         },
@@ -90,15 +87,6 @@ export const SettingsView: React.FC = () => {
       await invoke("save_app_config", { config: { ...cfg, [`${kind}_url`]: urls[kind] } });
     } catch (e) {
       reportError("Save server URL", e);
-    }
-  };
-
-  const handleChatterboxUrlBlur = async () => {
-    try {
-      const cfg = await invoke<AppConfig>("get_app_config");
-      await invoke("save_app_config", { config: { ...cfg, chatterbox_url: urls.chatterbox } });
-    } catch (e) {
-      reportError("Save Chatterbox URL", e);
     }
   };
 
@@ -124,7 +112,7 @@ export const SettingsView: React.FC = () => {
             split_inference_servers: false,
             inference_host: inferenceHost,
             tts_url: derived.tts, sfx_url: derived.sfx, music_url: derived.music,
-            post_url: derived.post, chatterbox_url: derived.chatterbox, rvc_url: derived.rvc,
+            post_url: derived.post, rvc_url: derived.rvc,
             dissect_url: derived.dissect,
           },
         });
@@ -133,15 +121,6 @@ export const SettingsView: React.FC = () => {
       }
     } catch (e) {
       reportError("Save server settings", e);
-    }
-  };
-
-  const checkChatterboxHealth = async () => {
-    try {
-      const res = await fetch(`${effectiveUrl("chatterbox")}/health`);
-      setChatterboxHealth(res.ok ? "online" : "offline");
-    } catch {
-      setChatterboxHealth("offline");
     }
   };
 
@@ -295,14 +274,10 @@ export const SettingsView: React.FC = () => {
           onBrowseWoosh={handleBrowseWoosh}
         />
 
-        <ChatterboxRvcCards
+        <RvcCard
           splitServers={splitServers}
           urls={urls}
           setUrls={setUrls}
-          effectiveUrl={effectiveUrl}
-          chatterboxHealth={chatterboxHealth}
-          onCheckChatterboxHealth={checkChatterboxHealth}
-          onChatterboxUrlBlur={handleChatterboxUrlBlur}
           onRvcUrlBlur={handleRvcUrlBlur}
         />
       </div>

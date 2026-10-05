@@ -1,9 +1,9 @@
 """
 MCP tools: character voice pipeline — emotional palette and RVC training.
 
-Covers the four-stage voice identity workflow: design palette takes (Qwen3
-VoiceDesign), approve references, build a Chatterbox training corpus, train
-an RVC model, and convert audio with it. Importing this module registers the
+Covers palette takes (designed or cloned), approving references, and the
+optional voice lock: corpus status, training an RVC model on the character's
+real lines, and converting audio with it. Importing this module registers the
 tools against the shared FastMCP instance from server.py.
 """
 import json
@@ -119,11 +119,10 @@ def approve_palette_take(
     Lock a palette take as the approved reference for this emotion slot.
 
     Updates project.json: sets emotional_palette[emotion].ref_audio_path = audio_path
-    and qa_status = 'approved'. Also sets voice_assignment.model = 'Chatterbox' if not
-    already set.
+    and qa_status = 'approved'.
 
-    After approval, generate_tts / generate_chatterbox will automatically use this
-    reference when generating lines with this emotion.
+    After approval, generate_tts clones from this reference (and performs the
+    entry's direction) for rows with this emotion.
     """
     if not Path(audio_path).is_file():
         return json.dumps({"error": (
@@ -148,8 +147,6 @@ def approve_palette_take(
             # so project.json stays portable across machines / library imports.
             entry["ref_audio_path"] = _relativize_voice_path(project_id, character_id, audio_path)
             entry["qa_status"] = "approved"
-            # Promote model to Chatterbox
-            va["model"] = "Chatterbox"
             break
     else:
         return json.dumps({"error": (
@@ -241,8 +238,9 @@ def corpus_status(project_id: str, character_id: str) -> str:
     their total duration, and whether the corpus meets the 5-minute minimum
     recommended for good RVC training results.
 
-    Run this before build_corpus to see current state, and after to verify
-    the corpus is ready for train_rvc_model.
+    Run this before train_rvc_model to check the corpus is ready. Fill the
+    corpus with the character's real lines in the app (Corpus tab → "Use lines
+    from the recording") or with `pharaoh dissect corpus`.
     """
     proj = _project_json(project_id)
     char_dir = _project_dir(project_id) / "characters" / character_id
@@ -269,135 +267,16 @@ def corpus_status(project_id: str, character_id: str) -> str:
         "ready_for_training": ready,
         "recommendation": (
             "Ready for training." if ready
-            else f"Need {round((5*60000 - total_ms)/60000, 1)} more minutes of audio. Run build_corpus."
+            else f"Need {round((5*60000 - total_ms)/60000, 1)} more minutes of audio. Add the character's real lines (pharaoh dissect corpus)."
         ),
-    }, indent=2)
-
-
-@mcp.tool()
-def build_corpus(
-    project_id: str,
-    character_id: str,
-    target_count: int = 50,
-) -> str:
-    """
-    Generate a Chatterbox corpus for RVC training (Stage 3 of voice pipeline).
-
-    Generates `target_count` takes of the character's palette test line across
-    all approved emotional states. Each take uses a different paralinguistic
-    tag combination ([sigh], [chuckle], [laugh], [gasp], [clears throat], [hmm])
-    so the resulting corpus covers the character's expressive range.
-
-    Output: characters/{character_id}/rvc_corpus/{emotion}_{i}.wav
-    Uses the character's approved palette reference WAVs as Chatterbox clone sources.
-
-    PREREQUISITES: Stage 2 must be complete — at least 2 approved palette entries.
-    This is a long-running operation. Returns a list of job_ids.
-    Poll job_status(job_id) on each to track progress (~8 min total on GPU).
-
-    Args:
-        target_count: Total WAVs to generate across all emotions (default 50).
-    """
-    proj = _project_json(project_id)
-    char = next(
-        (c for c in proj.get("characters", []) if c["id"] == character_id),
-        None,
-    )
-    if char is None:
-        return json.dumps({"error": (
-            f"character {character_id} not found in project {project_id}. "
-            f"Known characters: {_known_characters(proj)}"
-        )})
-
-    palette = char.get("voice_assignment", {}).get("emotional_palette", [])
-    approved = [e for e in palette if e.get("qa_status") == "approved" and e.get("ref_audio_path")]
-    if not approved:
-        return json.dumps({"error": "No approved palette entries found. Complete Stage 2 first."})
-
-    # Paralinguistic tag variants: the same line is generated clean and with each
-    # tag in prefix + suffix position to maximise prosodic variety in the corpus.
-    tag_variants = [
-        "",                   # clean (no tag) — baseline voice
-        "[sigh] ",            # prefix sigh
-        "[chuckle] ",
-        "[laugh] ",
-        "[gasp] ",
-        "[clears throat] ",
-        "[hmm] ",
-        " [sigh]",            # suffix sigh (different prosodic shape)
-        " [chuckle]",
-        " [laugh]",
-    ]
-
-    # Use a fixed corpus test line — NOT instruct_default (which is a voice description,
-    # not a line of speech). Rotate through varied lines so the corpus has prosodic diversity.
-    _CORPUS_TEST_LINES = [
-        "And then she said — nothing at all.",
-        "The signal was gone before I could trace it.",
-        "I knew what it meant. I just didn't want to say it out loud.",
-        "Something is wrong with the archive.",
-        "You were never supposed to find this.",
-        "Three days. That's all we had.",
-        "It doesn't matter anymore. None of it does.",
-        "She looked at me like I was already gone.",
-        "I've seen that look before. It never ends well.",
-        "The door was open. It shouldn't have been.",
-    ]
-    char_dir = _project_dir(project_id) / "characters" / character_id
-    corpus_dir = char_dir / "rvc_corpus"
-    corpus_dir.mkdir(parents=True, exist_ok=True)
-
-    per_emotion = max(1, target_count // len(approved))
-    job_ids = []
-    global_take = 0  # used to rotate test lines across all takes
-
-    for entry in approved:
-        emotion = entry["emotion"]
-        # Resolve relative paths (Pharaoh-1qp) so the chatterbox server sees absolute.
-        ref_path = _resolve_voice_path(project_id, character_id, entry["ref_audio_path"])
-        tag_cycle = tag_variants * ((per_emotion // len(tag_variants)) + 1)
-
-        for i in range(per_emotion):
-            tag = tag_cycle[i % len(tag_variants)]
-            # Rotate through varied test lines for prosodic diversity
-            base_line = _CORPUS_TEST_LINES[global_take % len(_CORPUS_TEST_LINES)]
-            text = f"{tag}{base_line}" if tag.startswith("[") else f"{base_line}{tag}" if tag else base_line
-            global_take += 1
-            out_path = str(corpus_dir / f"{emotion}_{i:03d}.wav")
-
-            try:
-                resp = _post("chatterbox", "/generate/clone", {
-                    "text": text.strip(),
-                    "ref_audio_path": ref_path,
-                    "exaggeration": 0.45,
-                    "cfg_weight": 0.5,
-                    "temperature": 0.8,
-                    "seed": i,
-                    "output_path": out_path,
-                }, upload_fields=("ref_audio_path",))
-                job_ids.append(resp.get("job_id", "unknown"))
-            except Exception as exc:
-                return json.dumps({
-                    "error": (
-                        f"corpus generation stopped after queueing {len(job_ids)} take(s) "
-                        f"(failed on emotion '{emotion}', take {i}): {exc}"
-                    ),
-                    "partial_job_ids": job_ids,
-                })
-
-    return json.dumps({
-        "status": "queued",
-        "total_takes": len(job_ids),
-        "job_ids": job_ids,
-        "corpus_dir": str(corpus_dir),
-        "note": "Poll job_status(job_id) for each. Takes ~8 min total. Then run train_rvc_model.",
     }, indent=2)
 
 
 @mcp.tool()
 def train_rvc_model(project_id: str, character_id: str, epochs: int = 100) -> str:
     """
-    Train an RVC voice model from the character's Chatterbox corpus (Stage 4).
+    Train the character's optional voice-lock (RVC) model on its corpus — its
+    real lines, filled in the app or with `pharaoh dissect corpus`.
 
     Scans characters/{character_id}/rvc_corpus/ for WAV files and submits a
     training job to the RVC server (port 18006). Training typically takes
@@ -473,17 +352,16 @@ def rvc_convert(
 
     Use this to:
     - Test the pipeline on a sample line before committing to full production
-    - Manually apply the RVC pass to a specific Chatterbox take
-    - A/B compare Chatterbox-only vs Chatterbox+RVC output
+    - Apply voice lock to a take by hand (generate_tts doesn't run RVC itself)
+    - A/B compare a take with and without voice lock
 
-    The character must have a trained RVC model (Stage 4 complete).
-    call this after generate_tts() when the character's production_pipeline is 'chatterbox+rvc' — generate_tts does NOT run RVC itself.
+    The character must have a trained RVC model.
 
     Args:
-        input_path:   Absolute path to Chatterbox output WAV.
+        input_path:   Absolute path to a TTS take.
         output_path:  Where to write the RVC-converted WAV.
         pitch_shift:  Semitones (default 0). Use negative to lower pitch.
-        index_rate:   0–1. Lower preserves [sigh][chuckle] tags; higher = more consistent.
+        index_rate:   0–1 (0.5 tested best: as much likeness as 0.35, better delivery).
     """
     proj = _project_json(project_id)
     char = next(

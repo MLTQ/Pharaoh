@@ -62,12 +62,12 @@ relativization pass.
 ### `concat_audio_into_library_bundle` (Pharaoh-aonr)
 - **Does**: Takes N source audio paths and writes a single normalized WAV (48kHz mono 16-bit PCM) inside the bundle. N=1 is a fast-path copy (raw WAVs pass straight through, other formats round-trip ffmpeg). N>=2 uses ffmpeg's `concat` audio filter, which resamples/remixes mismatched inputs and emits a single stream. Always writes a `<dest>.sources.json` sidecar listing the originals for provenance.
 - **Interacts with**: `LibraryView.tsx` Voice-tab "Upload audio file…" and Palette-tab "Upload reference…" buttons (both now multi-select capable).
-- **Rationale**: Best-practice for zero-shot voice cloners is 30-60s of varied reference, not a single short clip. A longer/multi-take concatenated ref gives Chatterbox a much more stable speaker embedding — less single-take bias bleeding into the cloned voice. The N=1 fast-path keeps the command general so the UI only ever calls one upload API.
+- **Rationale**: Best-practice for zero-shot voice cloners is 30-60s of varied reference, not a single short clip. A longer/multi-take concatenated ref gives the clone a much more stable sense of the voice — less single-take bias bleeding into the cloned voice. The N=1 fast-path keeps the command general so the UI only ever calls one upload API.
 
 ### `import_audio_files_into_corpus` (Pharaoh-mo0q)
 - **Does**: Bulk-imports external audio files into a library character's `rvc_corpus/`. Each file is normalized via ffmpeg to 48kHz mono 16-bit WAV and given a unique timestamped filename derived from the original stem. Writes a `<file>.meta.json` sidecar with `duration_ms` + source path so `scan_rvc_corpus_dir` picks it up. Files that fail to convert are skipped (counted, not fatal).
 - **Interacts with**: `CorpusBuilder.tsx` "Import audio files…" button (visible when `projectId === "_library"`).
-- **Rationale**: The Auto-Generate path fills the corpus from Chatterbox synthesized output — useful for a consistency fingerprint but bounded by Chatterbox's quality. When the user has real recordings of the voice actor, training RVC on real audio gives substantially better identity preservation. This opens that door without retraining or restructuring anything.
+- **Rationale**: Voice lock trains on the character's real voice: these imported recordings, or its lines from a dissected recording (`emotions::corpus_from_dissect`).
 
 ## Contracts
 

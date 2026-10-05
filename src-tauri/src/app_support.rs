@@ -43,9 +43,8 @@ fn derive_missing_server_urls(raw: &serde_json::Value, config: &mut AppConfig) {
         return;
     }
     let host = config.inference_host.trim_end_matches('/').to_string();
-    let slots: [(&str, u16, &mut String); 4] = [
+    let slots: [(&str, u16, &mut String); 3] = [
         ("post_url", 18004, &mut config.post_url),
-        ("chatterbox_url", 18005, &mut config.chatterbox_url),
         ("rvc_url", 18006, &mut config.rvc_url),
         ("dissect_url", 18007, &mut config.dissect_url),
     ];
@@ -541,7 +540,8 @@ fn wav_duration_ms(path: &str) -> Result<u64> {
 /// Mirrors `commands::sidecar::kind_from_model`.
 pub fn asset_kind_from_model(model: &str) -> &'static str {
     let model = model.to_lowercase();
-    if model.contains("qwen") || model.contains("tts") || model.contains("chatterbox") {
+    // "chatterbox": takes from before Chatterbox was removed are still dialogue.
+    if model.contains("qwen") || model.contains("tts") || model.contains("breeze") || model.contains("chatterbox") {
         "tts"
     } else if model.contains("ace") || model.contains("yue") || model.contains("music") {
         "music"

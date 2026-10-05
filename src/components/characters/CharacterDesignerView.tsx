@@ -192,7 +192,6 @@ export const CharacterDesignerView: React.FC = () => {
         ref_transcript: null,
         base_voice_description: "",
         emotional_palette: [],
-        production_pipeline: "chatterbox",
       },
       schema_version: 2,
     });

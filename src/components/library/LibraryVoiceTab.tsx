@@ -17,7 +17,6 @@ import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList"
 import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
-  submitChatterboxClone,
   submitTtsVoiceClone,
   referenceTranscript,
   importAudioIntoLibraryBundle,
@@ -69,9 +68,8 @@ export const LibraryVoiceTab: React.FC<{
 
   // ── Voice Design generation (moved from CharacterDesignerView, library-scoped) ──
 
-  // ── Clone test: speak a line in the gold reference's voice (Chatterbox) ──
+  // ── Clone test: speak a line in the gold reference's voice ──
   const [cloneLine, setCloneLine] = React.useState("");
-  const [exaggeration, setExaggeration] = React.useState(0.5);
   const [cloneDirection, setCloneDirection] = React.useState("");
   useModelStore((s) => s.health.tts?.engine); // re-render when the engine changes
   const engine = dialogueEngine(character);
@@ -90,23 +88,16 @@ export const LibraryVoiceTab: React.FC<{
     const outputPath = `${projectsDir}/_library/characters/${character.library_id}/design/clone_${Date.now()}.wav`;
     try {
       const ref = libraryBundlePath(projectsDir, character.library_id, gold);
-      const jobId = engine === "breeze"
-        ? await submitTtsVoiceClone({
-            projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_CLONE_ROW,
-            params: {
-              text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
-              language: "en", icl_mode: false, seed: Math.floor(Math.random() * 9999),
-              temperature: 0.7, top_p: 0.9, max_new_tokens: 2048, output_path: outputPath,
-              instruct: breezeDirection(character, cloneDirection),
-            },
-          })
-        : await submitChatterboxClone({
-            projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_CLONE_ROW,
-            params: {
-              text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
-              exaggeration, cfg_weight: 0.5, seed: Math.floor(Math.random() * 9999), output_path: outputPath,
-            },
-          });
+      const jobId = await submitTtsVoiceClone({
+        projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_CLONE_ROW,
+        params: {
+          text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
+          language: "en", icl_mode: false, seed: Math.floor(Math.random() * 9999),
+          temperature: 0.7, top_p: 0.9, max_new_tokens: 2048, output_path: outputPath,
+          // Breeze performs it; Qwen3-TTS clones the voice only.
+          instruct: breezeDirection(character, cloneDirection),
+        },
+      });
       addJob({
         id: jobId, model: "tts", description: `Clone · ${character.name}`, status: "pending", progress: 0, eta: "…",
         started_at: new Date().toISOString(), scene_id: null, scene_slug: slug, row_index: LIBRARY_CLONE_ROW,
@@ -455,7 +446,7 @@ export const LibraryVoiceTab: React.FC<{
         >+ Upload…</button>
       </div>
       <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
-        Multiple uploads are kept as separate candidates. The dot picks the "gold" — the single file Chatterbox uses for 0-shot cloning. Approved Voice Design takes are also added here.
+        Multiple uploads are kept as separate candidates. The dot picks the "gold" — the single file the voice is cloned from. Approved Voice Design takes are also added here.
       </p>
 
       {(() => {
@@ -526,7 +517,7 @@ export const LibraryVoiceTab: React.FC<{
         placeholder="What is spoken in the reference audio…"
       />
 
-      {/* Speak with this voice — Breeze (or Chatterbox) clones the gold clip */}
+      {/* Speak with this voice — the TTS port (Breeze, or Qwen3-TTS) clones the gold clip */}
       <div style={{
         margin: "4px 0 16px", padding: "12px 12px 10px",
         border: "1px solid var(--line-2)", borderRadius: "var(--r)", background: "var(--bg-1)",
@@ -535,9 +526,9 @@ export const LibraryVoiceTab: React.FC<{
         <p style={{ fontSize: 10.5, color: "var(--fg-4)", marginBottom: 8, lineHeight: 1.6 }}>
           {engine === "breeze"
             ? <>Breeze clones the gold clip above and performs the line the way the direction says. Scene
-              dialogue for this character works the same way. [laugh], [sigh], [cough] and [clears throat] are performed.</>
-            : <>Chatterbox clones the gold clip above — no description needed. Scene dialogue for this
-              character uses the same clone.</>}
+              dialogue for this character works the same way. Vocal events like [laughs] or [sighs] are performed.</>
+            : <>Qwen3-TTS clones the gold clip above (Breeze isn't running, so the direction isn't performed).
+              Scene dialogue for this character uses the same clone.</>}
         </p>
         <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
           <input
@@ -556,19 +547,11 @@ export const LibraryVoiceTab: React.FC<{
             style={{ background: "var(--tts)", borderColor: "var(--tts)", color: "var(--bg-1)", flexShrink: 0 }}
           >{cloning ? "Sending…" : "Speak"}</button>
         </div>
-        {engine === "breeze" ? (
+        {engine === "breeze" && (
           <input className="input" value={cloneDirection} onChange={(e) => setCloneDirection(e.target.value)}
                  onKeyDown={(e) => { if (e.key === "Enter") void handleClone(); }}
                  style={{ width: "100%", fontSize: 12, marginTop: 8, boxSizing: "border-box" }}
                  placeholder="Direction: furious, voice rising… (or a palette emotion; blank = as the reference)" />
-        ) : (
-        <label style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}>
-          Expressiveness
-          <input type="range" min={0} max={1} step={0.05} value={exaggeration}
-                 onChange={(e) => setExaggeration(Number(e.target.value))} style={{ flex: 1, maxWidth: 220 }} />
-          <span style={{ fontFamily: "var(--font-mono)", width: 32 }}>{exaggeration.toFixed(2)}</span>
-          <span style={{ color: "var(--fg-4)" }}>0.5 = like the reference</span>
-        </label>
         )}
         <label style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 8, fontSize: 10.5, color: "var(--fg-3)" }}
                title="Runs AudioSR (speech model) on every take this character generates and swaps the cleaned file into the scene — restores sibilants and breath the 24 kHz voice models leave out. Needs the post server; adds ~10–30 s per take.">

@@ -1,6 +1,6 @@
 # servers/mcp/tools_generate.py
 
-MCP tools: audio generation for script rows (TTS, Chatterbox, SFX, music).
+MCP tools: audio generation for script rows (TTS, SFX, music).
 
 ## Purpose
 
@@ -13,8 +13,7 @@ All tools return a job record — poll with `job_status` / `wait_for_job`.
 
 | Tool | Row type | Server | Notes |
 |------|----------|--------|-------|
-| `generate_tts` | DIALOGUE | tts (or chatterbox) | auto-routes to Chatterbox clone when the character's voice_assignment.model is "Chatterbox" (palette ref resolved per row emotion); else voice_description → /generate/voice_design, else speaker+instruct → /generate/custom_voice |
-| `generate_chatterbox` | DIALOGUE | chatterbox | explicit 0-shot clone; ref_audio_path auto-resolves from the emotional palette when omitted |
+| `generate_tts` | DIALOGUE | tts | a character with a gold reference is cloned with /generate/voice_clone (the row emotion's palette reference and direction when it names one; Breeze performs the direction, Qwen3-TTS ignores it); else voice_description → /generate/voice_design, else speaker+instruct → /generate/custom_voice |
 | `generate_sfx` | SFX/BED | sfx | server default: MOSS-SoundEffect v2 (≤30 s) where installed, else Woosh-DFlow |
 | `generate_music` | MUSIC | music | batch_size > 1 fans out seeds into `_takeN` output paths (gacha workflow); `instrumental` (default true) and `bpm` apply to YuE2 |
 

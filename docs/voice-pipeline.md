@@ -38,8 +38,8 @@ OPTIONAL — VOICE LOCK (Corpus → Model, folded away in the UI)
   Model:  RVC trained on that corpus (~20–30 min on the GPU box).
 ```
 
-Without Breeze installed, cloned voices fall back to Chatterbox; voice lock
-runs after either engine.
+Without Breeze installed, Qwen3-TTS serves the TTS port and clones the voice
+(it doesn't perform direction); voice lock runs after either.
 
 ---
 

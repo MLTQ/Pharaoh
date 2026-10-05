@@ -1,21 +1,13 @@
 """
 Pharaoh RVC Server — port 18006
 
-Implements a two-stage voice pipeline on top of the Chatterbox TTS server:
+The optional voice lock: an RVC model trained on a character's real lines
+(their corpus — clean lines from a dissected recording, or imported
+recordings), applied to calm TTS takes so they sound more like the character.
 
-  Stage 1 — Chatterbox corpus generation (handled by MCP build_corpus tool):
-    Generate N WAV takes of a character's test line using the approved emotional
-    palette as voice-clone references. Output goes to:
-      characters/{id}/rvc_corpus/{emotion}_{i}.wav
-
-  Stage 2 — RVC training + inference (this server):
-    POST /train   — fine-tune an RVC v2 model on the Chatterbox corpus WAVs.
+    POST /train   — train an RVC v2 model on the corpus WAVs.
     POST /convert — run RVC voice conversion on any WAV (e.g. a TTS take).
     GET  /models  — list .pth files in a directory.
-
-The net effect is a lightweight custom voice that retains the naturalness of
-Chatterbox (paralinguistic tags, zero-shot expression) but consistently sounds
-like a specific character rather than a reference clip.
 
 Dependencies:
   inference/.venv-rvc    — rvc-python, soundfile, librosa (Python 3.9; conversion)
@@ -154,7 +146,7 @@ async def _ensure_model() -> Optional[str]:
 class TrainParams(BaseModel):
     job_id: Optional[str] = None
     corpus_paths: list[str]
-    """Absolute paths to WAV files (Chatterbox output) that form the training corpus."""
+    """Absolute paths to the WAV files that form the training corpus (the character's real lines)."""
     output_model_path: str = ""
     """Absolute path where the trained .pth model file should be saved (empty: under MODELS_DIR)."""
     output_index_path: str = ""
@@ -170,7 +162,7 @@ class TrainParams(BaseModel):
 class ConvertParams(BaseModel):
     job_id: Optional[str] = None
     input_path: str
-    """Absolute path to the source WAV (e.g. a Chatterbox TTS take)."""
+    """Absolute path to the source WAV (e.g. a Breeze TTS take)."""
     output_path: str = ""
     """Absolute path where the RVC-converted WAV should be saved (empty: server-owned, fetch via /files)."""
     model_path: str
@@ -604,7 +596,7 @@ async def convert(p: ConvertParams) -> dict:
     """
     Submit an RVC voice-conversion job.
 
-    Converts a single WAV (typically a Chatterbox TTS take) using the specified
+    Converts a single WAV (typically a Breeze TTS take) using the specified
     .pth model. Returns a job_id immediately; poll GET /jobs/{job_id}.
     """
     if not p.input_path:

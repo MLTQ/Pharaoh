@@ -1,7 +1,7 @@
 # dissect_emotion.py
 
 ## Purpose
-Emotion tags for dissected dialogue, so a character's palette can use real moments from the recording (a genuinely angry line, a frightened one) as clone references. Chatterbox copies a reference's delivery as much as its voice.
+Emotion tags for dissected dialogue, so a character's palette can use real moments from the recording (a genuinely angry line, a frightened one) as clone references. A clone copies a reference's delivery as much as its voice.
 
 ## Components
 

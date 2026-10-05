@@ -22,8 +22,8 @@
 # Usage:
 #   ./inference/setup.sh                 core envs + any optional ones enabled below
 #   ./inference/setup.sh dissect         ONLY the named sections (forces them on);
-#   ./inference/setup.sh core dissect    sections: core breeze moss yue2 chatterbox
-#                                        rvc audioldm audiosr dissect applio
+#   ./inference/setup.sh core dissect    sections: core breeze moss yue2 rvc
+#                                        audioldm audiosr dissect applio
 #
 # Breeze defaults to "auto" like dissect (PHARAOH_INSTALL_BREEZE=0/1); its
 # weights (~7 GB) go to PHARAOH_BREEZE_HOME (~/pharaoh-models/breeze).
@@ -50,7 +50,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 TTS_VENV="${SCRIPT_DIR}/.venv-tts"
 MUSIC_VENV="${SCRIPT_DIR}/.venv-music"
-CHATTERBOX_VENV="${SCRIPT_DIR}/.venv-chatterbox"
 AUDIOLDM_VENV="${SCRIPT_DIR}/.venv-audioldm"
 AUDIOSR_VENV="${SCRIPT_DIR}/.venv-audiosr"
 WOOSH_DIR="${PHARAOH_WOOSH_DIR:-$HOME/Code/Woosh}"
@@ -58,7 +57,6 @@ INSTALL_AUDIOLDM="${PHARAOH_INSTALL_AUDIOLDM:-0}"
 INSTALL_AUDIOSR="${PHARAOH_INSTALL_AUDIOSR:-0}"
 RVC_VENV="${SCRIPT_DIR}/.venv-rvc"
 INSTALL_RVC="${PHARAOH_INSTALL_RVC:-0}"
-INSTALL_CHATTERBOX="${PHARAOH_INSTALL_CHATTERBOX:-0}"
 DISSECT_VENV="${SCRIPT_DIR}/.venv-dissect"
 YUE2_VENV="${SCRIPT_DIR}/.venv-yue2"
 INSTALL_YUE2="${PHARAOH_INSTALL_YUE2:-auto}"
@@ -85,7 +83,7 @@ INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
 # ── Sections ─────────────────────────────────────────────────────────────────
 # With no arguments every section runs (optional ones per their flags). Naming
 # sections runs only those and switches the named optional ones on.
-KNOWN_SECTIONS="core breeze moss yue2 chatterbox rvc audioldm audiosr dissect applio"
+KNOWN_SECTIONS="core breeze moss yue2 rvc audioldm audiosr dissect applio"
 SECTIONS=" "
 for arg in "$@"; do
     case "${arg}" in
@@ -96,7 +94,6 @@ for arg in "$@"; do
         breeze) INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}" ;;
         moss) INSTALL_MOSS="${PHARAOH_INSTALL_MOSS:-auto}" ;;
         yue2) INSTALL_YUE2="${PHARAOH_INSTALL_YUE2:-auto}" ;;
-        chatterbox) INSTALL_CHATTERBOX=1 ;;
         rvc) INSTALL_RVC=1 ;;
         audioldm) INSTALL_AUDIOLDM=1 ;;
         audiosr) INSTALL_AUDIOSR=1 ;;
@@ -278,27 +275,6 @@ else
     [ "${INSTALL_MOSS}" = "0" ] && hint "MOSS skipped (PHARAOH_INSTALL_MOSS=1 ./inference/setup.sh moss to force)"
 fi
 fi  # moss
-
-# ── Optional Chatterbox Turbo ────────────────────────────────────────────────
-if only chatterbox; then
-step "Chatterbox env (.venv-chatterbox)"
-if [ "${INSTALL_CHATTERBOX}" = "1" ]; then
-    if [ ! -d "${CHATTERBOX_VENV}" ]; then
-        uv venv --python 3.11 "${CHATTERBOX_VENV}"
-        ok "Created ${CHATTERBOX_VENV}"
-    else
-        ok "Reusing ${CHATTERBOX_VENV}"
-    fi
-    uv pip install --python "${CHATTERBOX_VENV}/bin/python" \
-        chatterbox-tts soundfile fastapi uvicorn httpx pydantic
-    # chatterbox depends on `perth` which uses pkg_resources (removed in setuptools>=71).
-    # Pin to a version that still ships the pkg_resources shim.
-    uv pip install --python "${CHATTERBOX_VENV}/bin/python" "setuptools<71"
-    ok "Chatterbox deps synced"
-else
-    hint "Optional 0-shot voice cloning + paralinguistic tags: PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh"
-fi
-fi  # chatterbox
 
 # ── Optional RVC voice conversion ────────────────────────────────────────────
 if only rvc; then
@@ -573,7 +549,6 @@ echo "  SFX    → ${WOOSH_DIR}/checkpoints/"
 echo "  SFX+   → ${AUDIOLDM_CACHE_DIR}/audioldm-m-full.ckpt  (native AudioLDM)"
 echo "  Music  → YuE2 weights fetched above on NVIDIA hosts; ACE-Step (Macs, repaint/cover) → \$HOME/pharaoh-models/music/  (ACE-Step/ACE-Step-v1-3.5B)"
 echo "  Post   → AudioSR server runs on :18004; checkpoints download on first upscale"
-echo "  Chatterbox → model weights download from HuggingFace on first /load call"
 echo "  RVC        → HuBERT weights download on first /convert call; .pth/.index from Applio training"
 echo "  Applio     → pretrained G/D + HuBERT download on first training run (auto, ~1 GB)"
 echo "  Dissect    → separator + NeMo weights fetched above (PHARAOH_DISSECT_PREFETCH=0 defers them to the first import)"

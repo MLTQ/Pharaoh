@@ -14,7 +14,7 @@ pub struct PaletteEntry {
     pub direction: String,
     /// Absolute path to locked reference .wav (None = not yet generated/approved).
     /// This is the "gold" — whichever of `ref_audio_sources` (or a concat-derived
-    /// file) is currently used by Chatterbox for cloning this emotion.
+    /// file) is currently used for cloning this emotion.
     pub ref_audio_path: Option<String>,
     /// All uploaded / generated takes for this emotion. The gold (`ref_audio_path`)
     /// is normally one of these. Empty list = single-source legacy state — read code
@@ -65,7 +65,7 @@ pub struct VoiceAssignment {
     pub speaker: Option<String>,
     pub instruct_default: Option<String>,
     /// "Gold" character reference — whichever of `ref_audio_sources` (or a
-    /// concat-derived file) Chatterbox should use for 0-shot cloning.
+    /// concat-derived file) the TTS engine clones from.
     pub ref_audio_path: Option<String>,
     /// All uploaded / generated takes available for this character's voice.
     /// The gold (`ref_audio_path`) is normally one of these. Lifted from
@@ -77,14 +77,14 @@ pub struct VoiceAssignment {
     /// Palette take generation prepends this to each entry's `direction`.
     #[serde(default)]
     pub base_voice_description: String,
-    /// Named emotional states for the Chatterbox Turbo palette workflow.
+    /// Named emotional states: each a written direction plus a reference clip.
     #[serde(default)]
     pub emotional_palette: Vec<PaletteEntry>,
-    /// Which production pipeline runs per dialogue line.
-    /// "chatterbox" (default) skips RVC. "chatterbox+rvc" runs RVC after Chatterbox.
-    /// Replaces the overloaded legacy `model` enum as the only thing that affects
-    /// per-line generation.
-    #[serde(default = "default_production_pipeline")]
+    /// Legacy, ignored. Older projects named the cloning engine here
+    /// ("chatterbox", "chatterbox+rvc"); cloning now always goes through the
+    /// TTS port (Breeze, or Qwen3-TTS where Breeze isn't installed) and voice
+    /// lock is `rvc.enabled`. Kept so those files still load.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub production_pipeline: String,
     /// Nested RVC config. None when RVC is not configured for this character.
     /// Legacy flat `rvc_*` fields below are lifted into this struct on load
@@ -137,7 +137,7 @@ pub struct RvcConfig {
     #[serde(default = "default_rvc_protect")]
     pub protect: f32,
     /// Voice lock: production dialogue takes pass through RVC after the TTS
-    /// engine (Breeze or Chatterbox). Optional — Breeze alone is the default.
+    /// engine (Breeze, or Qwen3-TTS without it). Optional — Breeze alone is the default.
     #[serde(default)]
     pub enabled: bool,
     /// Which lines get the lock: "calm" (default) skips whispered, sighed,
@@ -180,19 +180,7 @@ impl VoiceAssignment {
         self.rvc_pitch_shift = 0;
         self.rvc_enabled = false;
 
-        // Back-fill production_pipeline from legacy rvc enable state if unset.
-        if self.production_pipeline.is_empty() {
-            self.production_pipeline = if self.rvc.as_ref().is_some_and(|r| r.enabled) {
-                "chatterbox+rvc".to_string()
-            } else {
-                "chatterbox".to_string()
-            };
-        }
     }
-}
-
-fn default_production_pipeline() -> String {
-    "chatterbox".to_string()
 }
 
 fn default_character_schema_version() -> u32 {
@@ -370,7 +358,6 @@ pub struct ServerConfig {
     pub sfx_url: String,
     pub music_url: String,
     pub post_url: String,
-    pub chatterbox_url: String,
     pub mcp_url: String,
     /// Base URL of the RVC voice-conversion server (default port 18006).
     pub rvc_url: String,
@@ -385,7 +372,6 @@ impl Default for ServerConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: "http://127.0.0.1:18004".to_string(),
-            chatterbox_url: "http://127.0.0.1:18005".to_string(),
             mcp_url: "http://127.0.0.1:18000".to_string(),
             rvc_url: "http://127.0.0.1:18006".to_string(),
             dissect_url: default_dissect_url(),
@@ -395,10 +381,6 @@ impl Default for ServerConfig {
 
 fn default_post_url() -> String {
     "http://127.0.0.1:18004".to_string()
-}
-
-fn default_chatterbox_url() -> String {
-    "http://127.0.0.1:18005".to_string()
 }
 
 fn default_mcp_url() -> String {
@@ -474,8 +456,6 @@ pub struct AppConfig {
     pub music_url: String,
     #[serde(default = "default_post_url")]
     pub post_url: String,
-    #[serde(default = "default_chatterbox_url")]
-    pub chatterbox_url: String,
     #[serde(default = "default_mcp_url")]
     pub mcp_url: String,
     /// Base URL of the RVC voice-conversion server (default port 18006).
@@ -488,8 +468,6 @@ pub struct AppConfig {
     pub tts_public: bool,
     pub sfx_public: bool,
     pub music_public: bool,
-    #[serde(default)]
-    pub chatterbox_public: bool,
     pub projects_dir: String,
     pub models_dir: String,
     /// Path to the cloned Woosh repo (https://github.com/SonyResearch/Woosh)
@@ -527,14 +505,12 @@ impl AppConfig {
             sfx_url: "http://127.0.0.1:18002".to_string(),
             music_url: "http://127.0.0.1:18003".to_string(),
             post_url: default_post_url(),
-            chatterbox_url: default_chatterbox_url(),
             mcp_url: default_mcp_url(),
             rvc_url: default_rvc_url(),
             dissect_url: default_dissect_url(),
             tts_public: false,
             sfx_public: false,
             music_public: false,
-            chatterbox_public: false,
             projects_dir: home.join("pharaoh-projects").to_string_lossy().into_owned(),
             models_dir: home.join("pharaoh-models").to_string_lossy().into_owned(),
             woosh_dir: home
@@ -558,7 +534,6 @@ pub struct AllServerHealth {
     pub sfx: Option<ServerHealth>,
     pub music: Option<ServerHealth>,
     pub post: Option<ServerHealth>,
-    pub chatterbox: Option<ServerHealth>,
     pub mcp: Option<ServerHealth>,
     /// Health of the RVC voice-conversion server.
     pub rvc: Option<ServerHealth>,
@@ -580,7 +555,6 @@ impl AppState {
             sfx_url: app_config.sfx_url.clone(),
             music_url: app_config.music_url.clone(),
             post_url: app_config.post_url.clone(),
-            chatterbox_url: app_config.chatterbox_url.clone(),
             mcp_url: app_config.mcp_url.clone(),
             rvc_url: app_config.rvc_url.clone(),
             dissect_url: app_config.dissect_url.clone(),
@@ -640,22 +614,6 @@ pub struct TtsVoiceCloneRequest {
     /// Breeze: how strongly to follow the direction (docs recommend 4).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cfg_scale: Option<f32>,
-}
-
-/// Chatterbox Turbo zero-shot clone: the voice comes from `ref_audio_path`
-/// (a character's gold reference), the words from `text`.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ChatterboxCloneRequest {
-    pub text: String,
-    pub ref_audio_path: String,
-    #[serde(default)]
-    pub ref_transcript: String,
-    /// 0–1: how strongly to colour the performance (0.5 = neutral).
-    pub exaggeration: f32,
-    /// Classifier-free guidance; lower = slower, more deliberate pacing.
-    pub cfg_weight: f32,
-    pub seed: i64,
-    pub output_path: String,
 }
 
 // ── SFX request models ───────────────────────────────────────────────────
@@ -813,7 +771,7 @@ pub struct ScriptRow {
     pub fade_in_ms: String,
     pub fade_out_ms: String,
     pub reverb_send: String,
-    /// Palette emotion key for Chatterbox routing (e.g. "neutral", "tense"). Empty = use default.
+    /// Palette emotion key (e.g. "neutral", "tense"); its reference and direction voice the line. Empty = the gold clip.
     #[serde(default)]
     pub emotion: String,
     pub notes: String,

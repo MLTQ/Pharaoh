@@ -18,4 +18,4 @@ Renders one card per entry in `MODELS` (tts/sfx/music/post): status header, URL/
 | `modelStore.ts` | `statusMap`/`healthMap` keyed by `ModelKind` | Adding a model kind requires a `MODELS` entry |
 
 ## Notes
-- The card layout/classNames were moved verbatim from the pre-split `SettingsView.tsx`; keep visual changes in sync with the Chatterbox/RVC cards which mirror the same card chrome.
+- The card layout/classNames were moved verbatim from the pre-split `SettingsView.tsx`; keep visual changes in sync with the RVC card which mirror the same card chrome.

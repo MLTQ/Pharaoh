@@ -22,7 +22,6 @@ parser.add_argument("--tts-url", default="http://127.0.0.1:18001")
 parser.add_argument("--sfx-url", default="http://127.0.0.1:18002")
 parser.add_argument("--music-url", default="http://127.0.0.1:18003")
 parser.add_argument("--post-url", default="http://127.0.0.1:18004")
-parser.add_argument("--chatterbox-url", default="http://127.0.0.1:18005")
 parser.add_argument("--rvc-url", default="http://127.0.0.1:18006")
 parser.add_argument("--transport", default="stdio", choices=["stdio", "sse"])
 parser.add_argument("--host", default="127.0.0.1")
@@ -37,7 +36,6 @@ SERVER_URLS = {
     "sfx": args.sfx_url,
     "music": args.music_url,
     "post": args.post_url,
-    "chatterbox": args.chatterbox_url,
     "rvc": args.rvc_url,
 }
 

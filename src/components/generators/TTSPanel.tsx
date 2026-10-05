@@ -236,8 +236,8 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
             <span className="eyebrow tts">
               {engine === "breeze"
                 ? <>breeze tts 2 · cloned from {selectedChar!.voice_assignment.ref_audio_path!.split("/").pop()}</>
-                : engine === "chatterbox"
-                ? <>chatterbox · cloned from {selectedChar!.voice_assignment.ref_audio_path!.split("/").pop()}</>
+                : engine === "clone"
+                ? <>qwen3-tts clone · cloned from {selectedChar!.voice_assignment.ref_audio_path!.split("/").pop()}</>
                 : <>preset voice · {customSpeaker}</>}
             </span>
             <span className="ttl">Voice / Dialogue</span>
@@ -246,9 +246,10 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
                 ? <>{selectedChar!.name} speaks in the voice of their gold reference clip, performed the way the
                   Direction says ("furious, voice rising"). Naming a palette emotion adds its direction and uses its
                   real clip as the reference. Vocal events like [laughs] or [sighs] (the chips above the line) are performed, not read.</>
-                : engine === "chatterbox"
-                ? <>{selectedChar!.name} speaks in the voice of their gold reference clip. Direction picks a palette
-                  emotion ("angry", "sadly…") — its reference sets the delivery; anything else uses the gold clip.</>
+                : engine === "clone"
+                ? <>{selectedChar!.name} speaks in the voice of their gold reference clip (Qwen3-TTS — Breeze isn't
+                  running, so written direction isn't performed). Direction can name a palette emotion ("angry",
+                  "sadly…") to clone that emotion's reference instead.</>
                 : <>Write the spoken line separately from the performance direction. Direction is sent as
                   Qwen CustomVoice instruction text, not spoken dialogue.</>}
             </span>
@@ -344,7 +345,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
               <span className="hint">
                 {engine === "breeze"
                   ? (breezeDirection(selectedChar, direction) ? `performs: ${breezeDirection(selectedChar, direction).slice(0, 60)}` : "plain clone")
-                  : engine === "chatterbox"
+                  : engine === "clone"
                   ? `emotion → ${paletteEntryFor(selectedChar, direction)?.label ?? "gold reference"}`
                   : "instruction"}
               </span>
@@ -365,7 +366,7 @@ export const TTSPanel: React.FC<TTSPanelProps> = ({ scenes, defaultScene }) => {
               onChange={(e) => setDirection(e.target.value)}
               placeholder={engine === "breeze"
                 ? "Describe the delivery (\"quiet and heartbroken, slow\") or name a palette emotion — or leave blank."
-                : engine === "chatterbox"
+                : engine === "clone"
                 ? "Name a palette emotion (angry, tender, sadly…) — or leave blank for the gold reference."
                 : "Describe delivery, emotion, pacing, proximity, or accent."}
               style={{ minHeight: 148, fontSize: 12, lineHeight: 1.55 }}

@@ -517,7 +517,7 @@ pub fn import_audio_into_library_bundle(
 
 /// Concatenate multiple external audio files into a single WAV inside the
 /// library bundle. Use case: build a longer / more-varied reference clip from
-/// several recordings of the same actor so Chatterbox's speaker embedding is
+/// several recordings of the same actor so the clone's sense of the voice is
 /// more stable.
 ///
 /// The N=1 case is a fast-path file copy (equivalent to
@@ -679,11 +679,9 @@ pub struct CorpusImportResult {
 }
 
 /// Bulk-import real audio recordings into a library character's
-/// `rvc_corpus/` directory. The synthesized-from-Chatterbox corpus build is
-/// still available — this command just adds an orthogonal path for users who
-/// already have hours of real audio of a voice actor and want to train RVC
-/// on the actual recordings (substantially better quality than training on
-/// Chatterbox output).
+/// `rvc_corpus/` directory, for voice lock trained on a performer's real
+/// recordings (the other source is `corpus_from_dissect`, the character's
+/// lines from a dissected recording).
 ///
 /// Each source file is normalized via ffmpeg to 48kHz mono 16-bit PCM WAV so
 /// the RVC trainer sees a consistent format. Files that fail to convert are

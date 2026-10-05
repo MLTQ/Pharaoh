@@ -8,5 +8,5 @@ Stage 3 of the character voice pipeline: build the RVC training corpus.
 - Per-emotion counts read a clip's sidecar `emotion` before falling back to the filename prefix.
 
 ## Notes
-- Auto-generate works against a remote Chatterbox server: each approved palette reference is uploaded once, each take downloaded into `rvc_corpus/` with a duration sidecar. In the Library (projectId `_library`) the character is read from its bundle.
+- The corpus is the character's real voice only: "Use lines from the recording" (characters made from a dissected recording) and "Import audio files" (Library). The old Chatterbox auto-generate path is gone.
 - Errors from Tauri arrive as strings; the panel shows them instead of a generic "Failed to start".

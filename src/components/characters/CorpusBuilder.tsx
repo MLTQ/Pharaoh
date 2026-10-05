@@ -1,19 +1,14 @@
 /**
  * CorpusBuilder.tsx
  *
- * Stage 3 of the character voice pipeline. Manages generation of the Chatterbox
- * training corpus used to train the character's RVC voice model.
+ * Stage 3 of the optional voice lock: the corpus the character's RVC model
+ * trains on, in <bundle>/rvc_corpus/. It is the character's real voice —
+ * clean lines from a dissected recording ("Use lines from the recording"), or
+ * imported recordings of the performer.
  *
- * The corpus is a set of 50–100 WAV files stored under
- * <project>/characters/<char>/rvc_corpus/. Each WAV is synthesised with varied
- * paralinguistic tags ([sigh], [chuckle], etc.) across all approved palette emotions,
- * giving the RVC trainer diverse vocal texture to learn from.
- *
- * Key UX decisions:
- * - Generation is explicitly a background task — the UI makes this clear up front.
  * - Duration readiness (green ≥5 min, amber 2–5 min, red <2 min) matters more
- *   than raw count because short takes produce bad models.
- * - A "Clear Corpus" danger action is available for restarting the process.
+ *   than raw count because short corpora produce bad models.
+ * - "Clear Corpus" starts over.
  */
 
 import React, { useState, useEffect, useCallback } from "react";
@@ -22,8 +17,6 @@ import {
   importAudioFilesIntoCorpus,
   corpusFromDissect,
   getCorpusEmotionCounts,
-  getCorpusJobStatus,
-  buildCorpus,
   clearCorpus,
   type EmotionCorpusCount,
 } from "../../lib/tauriCommands";
@@ -41,15 +34,6 @@ export interface CorpusBuilderProps {
 }
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-
-const PARALINGUISTIC_TAGS = [
-  "[sigh]",
-  "[chuckle]",
-  "[laugh]",
-  "[gasp]",
-  "[clears throat]",
-  "[hmm]",
-];
 
 const STAGE_COLOR = "oklch(0.72 0.16 25)";
 
@@ -95,23 +79,6 @@ const SectionTitle: React.FC<{ children: React.ReactNode }> = ({ children }) => 
   </div>
 );
 
-const TagChip: React.FC<{ label: string }> = ({ label }) => (
-  <span style={{
-    display: "inline-flex",
-    alignItems: "center",
-    padding: "2px 7px",
-    background: `color-mix(in oklch, ${STAGE_COLOR} 12%, var(--bg-2))`,
-    border: `1px solid color-mix(in oklch, ${STAGE_COLOR} 30%, var(--line-1))`,
-    borderRadius: "var(--r)",
-    fontFamily: "var(--font-mono)",
-    fontSize: 10,
-    color: STAGE_COLOR,
-    letterSpacing: "0.02em",
-  }}>
-    {label}
-  </span>
-);
-
 interface ProgressBarProps {
   value: number;   // 0..1
   color: string;
@@ -148,12 +115,9 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
   corpusTarget,
   onCorpusUpdated,
 }) => {
-  const [isGenerating, setIsGenerating] = useState(false);
-  const [generationProgress, setGenerationProgress] = useState<{ completed: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [emotionCounts, setEmotionCounts] = useState<EmotionCorpusCount[]>([]);
-  const [activeJobId, setActiveJobId] = useState<string | null>(null);
   const [importing, setImporting] = useState(false);
   // Real lines from a dissected recording (the actor's own voice — the best
   // RVC training data there is).
@@ -239,63 +203,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
     fetchEmotionCounts();
   }, [fetchEmotionCounts, corpusCount]);
 
-  // Poll for generation progress while a job is active
-  useEffect(() => {
-    if (!activeJobId) return;
-
-    let cancelled = false;
-
-    const poll = async () => {
-      while (!cancelled) {
-        try {
-          const status = await getCorpusJobStatus(activeJobId);
-
-          if (cancelled) break;
-
-          setGenerationProgress({ completed: status.completed, total: status.total });
-
-          if (status.done) {
-            setIsGenerating(false);
-            setActiveJobId(null);
-            onCorpusUpdated();
-            if (status.error) setError(status.error);
-            break;
-          }
-        } catch (e: unknown) {
-          if (!cancelled) {
-            setError(e instanceof Error ? e.message : "Lost contact with corpus job.");
-            setIsGenerating(false);
-            setActiveJobId(null);
-          }
-          break;
-        }
-
-        // Poll every 2 seconds
-        await new Promise<void>((resolve) => { setTimeout(resolve, 2000); });
-      }
-    };
-
-    poll();
-    return () => { cancelled = true; };
-  }, [activeJobId, onCorpusUpdated]);
-
   // ── Actions ───────────────────────────────────────────────────────────────
-
-  const handleGenerate = useCallback(async () => {
-    if (isGenerating) return;
-    setError(null);
-    setIsGenerating(true);
-    setGenerationProgress(null);
-
-    try {
-      const result = await buildCorpus({ projectId, characterId: character.id });
-      setGenerationProgress({ completed: 0, total: result.total });
-      setActiveJobId(result.job_id);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : String(e) || "Failed to start corpus generation.");
-      setIsGenerating(false);
-    }
-  }, [isGenerating, projectId, character.id]);
 
   const handleClear = useCallback(async () => {
     setConfirmClear(false);
@@ -311,9 +219,6 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
   // ── Derived values ────────────────────────────────────────────────────────
 
   const progressFraction = corpusCount / Math.max(1, corpusTarget);
-  const genFraction = generationProgress
-    ? generationProgress.completed / Math.max(1, generationProgress.total)
-    : 0;
   const rColor = readinessColor(corpusDurationMs);
 
   // ── Render ────────────────────────────────────────────────────────────────
@@ -323,11 +228,9 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
 
       {/* Description */}
       <p style={{ fontSize: 11.5, color: "var(--fg-3)", lineHeight: 1.7, marginBottom: 20 }}>
-        The corpus is a set of {corpusTarget}+ short WAV files used to train {character.name}'s
-        RVC voice model. Chatterbox generates each take with varied paralinguistic tags and emotions,
-        giving the trainer enough vocal diversity to learn the character's fingerprint without
-        overfitting to a single tone. More audio time (aim for 5+ minutes) consistently produces
-        better models than raw take count alone.
+        The corpus is {character.name}'s real voice, used to train the optional voice-lock model:
+        clean lines from the dissected recording, spread across their emotional range, or recordings
+        of the performer you import. Aim for 5+ minutes — more audio makes a better model than more files.
       </p>
 
       {/* ── Overall progress ── */}
@@ -423,61 +326,6 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
         </div>
       )}
 
-      {/* ── Paralinguistic tags ── */}
-      <div style={{ marginBottom: 20 }}>
-        <SectionTitle>Injected tags</SectionTitle>
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 5 }}>
-          {PARALINGUISTIC_TAGS.map((tag) => (
-            <TagChip key={tag} label={tag} />
-          ))}
-        </div>
-        <p style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 7, lineHeight: 1.6 }}>
-          These tags are randomly injected into corpus takes during generation to ensure
-          the trained model preserves expressive vocal behaviours in production.
-        </p>
-      </div>
-
-      {/* ── Generation progress ── */}
-      {isGenerating && generationProgress && (
-        <div style={{
-          marginBottom: 16,
-          padding: "10px 14px",
-          background: `color-mix(in oklch, ${STAGE_COLOR} 8%, var(--bg-2))`,
-          border: `1px solid color-mix(in oklch, ${STAGE_COLOR} 25%, var(--line-1))`,
-          borderRadius: "var(--r)",
-        }}>
-          <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
-            <span style={{ fontSize: 11, color: STAGE_COLOR, fontFamily: "var(--font-mono)" }}>
-              Generating {generationProgress.completed} / {generationProgress.total} takes…
-            </span>
-            <span style={{ fontSize: 10, color: "var(--fg-4)", fontFamily: "var(--font-mono)" }}>
-              running in background
-            </span>
-          </div>
-          <ProgressBar value={genFraction} color={STAGE_COLOR} height={5} />
-          <p style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 7, lineHeight: 1.5 }}>
-            This takes 8–15 minutes. You can switch to other views — corpus generation
-            continues in the background and this panel updates automatically.
-          </p>
-        </div>
-      )}
-
-      {/* ── Generating spinner (no count yet) ── */}
-      {isGenerating && !generationProgress && (
-        <div style={{
-          marginBottom: 16,
-          padding: "10px 14px",
-          background: "var(--bg-2)",
-          border: "1px solid var(--line-1)",
-          borderRadius: "var(--r)",
-          fontSize: 11,
-          color: "var(--fg-3)",
-          fontFamily: "var(--font-mono)",
-        }}>
-          Starting corpus generation…
-        </div>
-      )}
-
       {/* ── Error ── */}
       {error && (
         <div style={{
@@ -500,7 +348,7 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
           padding: "10px 12px", marginBottom: 12, background: `color-mix(in oklch, ${STAGE_COLOR} 5%, var(--bg-1))`,
         }}>
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-            <button className="btn btn-primary" disabled={isGenerating || importing} onClick={handleFromRecording}
+            <button className="btn btn-primary" disabled={importing} onClick={handleFromRecording}
                     style={{ background: STAGE_COLOR, borderColor: STAGE_COLOR, color: "var(--bg-0)", fontFamily: "var(--font-mono)", fontSize: 11 }}
                     title="Fill the corpus with this character's own clean lines from the dissected recording">
               {importing ? "Adding…" : "⤓ Use lines from the recording"}
@@ -523,29 +371,12 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
 
       {/* ── Actions ── */}
       <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
-        <button
-          className="btn btn-primary"
-          disabled={isGenerating || importing}
-          onClick={handleGenerate}
-          style={{
-            background: STAGE_COLOR,
-            borderColor: STAGE_COLOR,
-            color: "var(--bg-0)",
-            opacity: isGenerating ? 0.5 : 1,
-            fontFamily: "var(--font-mono)",
-            fontSize: 11,
-            letterSpacing: "0.04em",
-          }}
-        >
-          {isGenerating ? "Generating…" : corpusCount > 0 ? "Auto-Generate More" : "Auto-Generate Corpus"}
-        </button>
-
         {projectId === "_library" && (
           <button
             className="btn btn-sm"
-            disabled={isGenerating || importing}
+            disabled={importing}
             onClick={handleBulkImport}
-            title="Add real audio files to the corpus (recordings of the actual voice actor — generally better RVC training data than Chatterbox-synthesized output)"
+            title="Add recordings of the performer to the corpus"
             style={{ fontFamily: "var(--font-mono)", fontSize: 10 }}
           >
             {importing ? "Importing…" : "Import audio files…"}
@@ -555,7 +386,6 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
         {corpusCount > 0 && !confirmClear && (
           <button
             className="btn btn-sm"
-            disabled={isGenerating}
             onClick={() => setConfirmClear(true)}
             style={{
               color: "var(--sfx)",
@@ -598,10 +428,9 @@ export const CorpusBuilder: React.FC<CorpusBuilderProps> = ({
         )}
       </div>
 
-      {corpusCount === 0 && !isGenerating && (
+      {corpusCount === 0 && !fromRecording && projectId === "_library" && (
         <p style={{ fontSize: 10, color: "var(--fg-4)", marginTop: 8, lineHeight: 1.6 }}>
-          Make sure you have approved palette entries before generating — each emotion
-          needs at least one approved Chatterbox reference WAV.
+          This character wasn't made from a dissected recording, so import recordings of the performer.
         </p>
       )}
     </div>

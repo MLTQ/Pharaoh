@@ -1,5 +1,5 @@
 /**
- * A line's jobs as one group: the take (Breeze, Chatterbox, …) plus the
+ * A line's jobs as one group: the take (Breeze, Qwen3-TTS, …) plus the
  * follow-ups chained after it (voice lock, AudioSR). The queue shows one row
  * per group with a stage strip and a single progress bar.
  */

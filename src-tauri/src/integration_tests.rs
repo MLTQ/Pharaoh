@@ -119,7 +119,7 @@ async fn end_to_end_render_pipeline() {
                 ref_transcript: None,
                 base_voice_description: String::new(),
                 emotional_palette: vec![],
-                production_pipeline: "chatterbox".into(),
+                production_pipeline: String::new(),
                 rvc: None,
                 rvc_model_path: None,
                 rvc_index_path: None,

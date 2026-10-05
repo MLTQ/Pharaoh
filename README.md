@@ -19,11 +19,10 @@ Pharaoh is a Tauri 2 desktop app (React + TypeScript frontend, Rust backend) con
 | Port | Service | Engine (fallback) |
 |------|---------|-------------------|
 | 18000 | MCP | Agent control plane — no models |
-| 18001 | TTS | **Breeze TTS 2**: voice cloning with performed direction and vocal events (Qwen3-TTS where Breeze isn't installed) |
+| 18001 | TTS | **Breeze TTS 2**: voice cloning with performed direction and vocal events (Qwen3-TTS, which clones without direction, where Breeze isn't installed) |
 | 18002 | SFX | **MOSS-SoundEffect v2**: effects and beds up to 30 s (Woosh, AudioLDM) |
 | 18003 | Music | **YuE2**, instrumental by default (ACE-Step on Macs; ACE-Step also does repaint/cover) |
 | 18004 | Post | AudioSR clean-up / upscaling |
-| 18005 | Chatterbox | Fallback voice cloning |
 | 18006 | RVC | Optional voice lock: training and conversion (Applio) |
 | 18007 | Dissect | Voices from recordings: separation, diarization, transcription, emotion tagging |
 
@@ -93,7 +92,7 @@ If the servers are on another machine, set their URLs in Settings (or `pharaoh s
 
 ## Inference Setup
 
-`./inference/setup.sh` creates isolated environments because the model stacks pin incompatible runtimes. With no arguments it installs everything that fits the machine; `./inference/setup.sh breeze moss` installs just those sections (`core breeze moss yue2 chatterbox rvc audioldm audiosr dissect applio`).
+`./inference/setup.sh` creates isolated environments because the model stacks pin incompatible runtimes. With no arguments it installs everything that fits the machine; `./inference/setup.sh breeze moss` installs just those sections (`core breeze moss yue2 rvc audioldm audiosr dissect applio`).
 
 | Environment | Path | Purpose | Installed |
 |-------------|------|---------|-----------|
@@ -106,7 +105,6 @@ If the servers are on another machine, set their URLs in Settings (or `pharaoh s
 | SFX | `~/Code/Woosh/.venv` | Woosh (fallback SFX), managed by the Woosh checkout | core |
 | Post | `inference/.venv-audiosr` | AudioSR | `PHARAOH_INSTALL_AUDIOSR=1` or `setup.sh audiosr` |
 | SFX+ | `inference/.venv-audioldm` | AudioLDM | `setup.sh audioldm` |
-| Chatterbox | `inference/.venv-chatterbox` | Fallback cloning | `setup.sh chatterbox` |
 | RVC / Applio | `inference/.venv-rvc`, `.venv-applio` | Voice lock | `setup.sh rvc applio` |
 
 Weights for Breeze, MOSS and YuE2 download during setup; the others download on first use or from the commands on the app's Models page. Breeze's weights are under a research / non-commercial licence; MOSS-SoundEffect is Apache 2.0.
@@ -125,7 +123,7 @@ cd "$HOME/Code/Woosh" && uv sync
 
 curl http://127.0.0.1:18001/health    # "engine": "breeze" when Breeze serves the port
 curl http://127.0.0.1:18002/health    # reports "engine": "moss" | "woosh"
-# … 18003 music, 18004 post, 18005 chatterbox, 18006 rvc, 18007 dissect
+# … 18003 music, 18004 post, 18006 rvc, 18007 dissect
 ```
 
 Useful overrides:
@@ -341,7 +339,6 @@ inference/
   sfx_server.py           18002 MOSS (moss_sfx_worker.py) / Woosh / AudioLDM
   yue2_music_server.py    18003 YuE2 (music_server.py: ACE-Step)
   post_server.py          18004 AudioSR
-  chatterbox_server.py    18005
   rvc_server.py           18006
   dissect_server.py       18007
   setup.sh, start_servers.sh

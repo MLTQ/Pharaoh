@@ -24,7 +24,6 @@ it lags behind on newer features; the comparison at the end says where.
     "--sfx-url", "http://192.168.0.202:18002",
     "--music-url", "http://192.168.0.202:18003",
     "--post-url", "http://192.168.0.202:18004",
-    "--chatterbox-url", "http://192.168.0.202:18005",
     "--rvc-url", "http://192.168.0.202:18006"
   ]
 }
@@ -54,13 +53,13 @@ Requires Python ≥ 3.10 with `servers/mcp/requirements.txt` (or `uv run
 | `pharaoh://projects/{project_id}/scenes/{scene_slug}/assets` | A scene's generated audio. |
 | `pharaoh://projects/{project_id}/pipeline` | Per-character voice pipeline status. |
 
-## Tools (49)
+## Tools (47)
 
 | Area | Tools |
 |---|---|
 | Projects & scripts | `list_projects`, `get_project`, `create_project`, `update_project`, `project_status`, `list_scenes`, `get_scene`, `create_scene`, `update_scene`, `read_script`, `write_script`, `update_script_row`, `spatialize_row`, `list_characters`, `add_character`, `update_character`, `delete_character` |
-| Generation | `generate_tts` (row → TTS; resolves the row's palette emotion; Breeze serves the TTS port, so cloned lines go through Breeze), `generate_chatterbox`, `generate_sfx` (server default engine: MOSS where installed), `generate_music` |
-| Voices | `list_character_palette`, `generate_palette_take`, `list_palette_takes`, `approve_palette_take`, `corpus_status`, `build_corpus`, `train_rvc_model`, `rvc_convert`, `list_rvc_models` |
+| Generation | `generate_tts` (row → TTS; resolves the row's palette emotion; clones characters with a reference clip on the TTS port — Breeze, performing the direction), `generate_sfx` (server default engine: MOSS where installed), `generate_music` |
+| Voices | `list_character_palette`, `generate_palette_take`, `list_palette_takes`, `approve_palette_take`, `corpus_status`, `train_rvc_model`, `rvc_convert`, `list_rvc_models` |
 | Jobs | `job_status`, `wait_for_job` |
 | QA & takes | `list_assets`, `read_asset_meta`, `list_asset_takes`, `qa_approve`, `qa_reject`, `regenerate_asset` |
 | Post | `import_audio`, `process_clip`, `normalize_audio`, `resample_audio`, `upscale_audio` |

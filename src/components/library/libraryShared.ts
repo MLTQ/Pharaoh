@@ -26,37 +26,35 @@ export function libraryPaletteSlug(libraryId: string, emotion: string): string {
 }
 
 /**
- * Baseline emotional palette. `direction` drives Voice Design (text-described
- * voices); `line` and `exaggeration` drive Chatterbox clones, which take no
- * written direction — the emotion has to be in the words and the
- * expressiveness setting.
+ * Baseline emotional palette. `direction` is what Breeze (and Voice Design)
+ * performs; `line` is a test line whose words carry the emotion too.
  */
-export const BASELINE_EMOTIONS: { emotion: string; label: string; direction: string; line: string; exaggeration: number }[] = [
-  { emotion: "neutral", label: "Neutral", exaggeration: 0.5,
+export const BASELINE_EMOTIONS: { emotion: string; label: string; direction: string; line: string }[] = [
+  { emotion: "neutral", label: "Neutral",
     direction: "Even and conversational, natural pace.",
     line: "The train leaves at eleven, so we really ought to get going." },
-  { emotion: "happy", label: "Happy", exaggeration: 0.6,
+  { emotion: "happy", label: "Happy",
     direction: "Bright and warm, smiling through the words.",
     line: "Oh, that's wonderful! I knew you could do it!" },
-  { emotion: "excited", label: "Excited", exaggeration: 0.75,
+  { emotion: "excited", label: "Excited",
     direction: "Fast and high-energy, words tumbling out.",
     line: "You'll never guess what just happened — come on, quickly!" },
-  { emotion: "tender", label: "Tender", exaggeration: 0.4,
+  { emotion: "tender", label: "Tender",
     direction: "Soft, warm and close; gentle reassurance.",
     line: "It's all right. I'm here, and I'm not going anywhere." },
-  { emotion: "sad", label: "Sad", exaggeration: 0.55,
+  { emotion: "sad", label: "Sad",
     direction: "Quiet and heavy, slower, falling at the ends of phrases.",
     line: "I just thought... it would all turn out differently." },
-  { emotion: "angry", label: "Angry", exaggeration: 0.8,
+  { emotion: "angry", label: "Angry",
     direction: "Hard, clipped consonants; rising force, barely held back.",
     line: "Don't you dare walk away while I'm talking to you!" },
-  { emotion: "afraid", label: "Afraid", exaggeration: 0.7,
+  { emotion: "afraid", label: "Afraid",
     direction: "Breathy and quick, voice tight with fear.",
     line: "Did you hear that? There's something out there." },
-  { emotion: "sardonic", label: "Sardonic", exaggeration: 0.5,
+  { emotion: "sardonic", label: "Sardonic",
     direction: "Dry and unimpressed; flat delivery with a slight sneer.",
     line: "Oh, brilliant. Another plan that can't possibly go wrong." },
-  { emotion: "whisper", label: "Whisper", exaggeration: 0.35,
+  { emotion: "whisper", label: "Whisper",
     direction: "Hushed and close, conspiratorial.",
     line: "Keep your voice down — they'll hear us." },
 ];
@@ -103,7 +101,6 @@ export function emptyCharacter(): Character {
       ref_transcript: null,
       base_voice_description: "",
       emotional_palette: [],
-      production_pipeline: "chatterbox",
     },
     schema_version: 2,
     library_id: null,
@@ -130,8 +127,8 @@ export type TakeJob = Parameters<typeof TakeRow>[0]["job"];
 
 // Native open dialog → returns picked source paths (multi-select) or [].
 // Multi-file upload is preferred for voice cloning: concatenating several
-// takes of the same actor into one ref gives Chatterbox a much more stable
-// speaker embedding than a single short clip (Pharaoh-aonr).
+// takes of the same actor into one ref gives the clone a much more stable
+// sense of the voice than a single short clip (Pharaoh-aonr).
 export async function pickAudioFiles(multi: boolean): Promise<string[]> {
   try {
     const { open } = await import("@tauri-apps/plugin-dialog");

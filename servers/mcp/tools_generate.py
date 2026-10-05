@@ -1,5 +1,5 @@
 """
-MCP tools: audio generation for script rows (TTS, Chatterbox, SFX, music).
+MCP tools: audio generation for script rows (TTS, SFX, music).
 
 Each tool validates the target script row, then proxies the request to the
 matching inference server via remote._post (which handles remote upload/
@@ -54,9 +54,10 @@ def generate_tts(
     output_path should be the absolute path where the .wav should be saved.
 
     Voice modes (in priority order):
-      1. Chatterbox (automatic): if the character's voice_assignment.model == "Chatterbox" and the
-         row has a non-empty 'emotion' field, automatically resolves the palette reference and routes
-         to the Chatterbox server. No extra parameters needed.
+      1. Cloned voice (automatic): a character with a gold reference clip is
+         cloned on the TTS port. The row's 'emotion' picks a palette entry: its
+         reference is cloned and its direction performed (Breeze; Qwen3-TTS
+         clones the voice only). No extra parameters needed.
       2. voice_description: pass a rich natural-language description of the desired voice.
          Routes to Qwen3-TTS /generate/voice_design.
       3. speaker + instruct: preset speaker with optional style instruction.
@@ -76,13 +77,13 @@ def generate_tts(
     # ── Single model mode: unload other heavy servers before generation ──────────
     _auto_unload_others("tts")
 
-    # ── Chatterbox routing (auto, based on character voice_assignment) ──────────
+    # ── Cloned voice (auto: the character has a gold reference) ─────────────────
     char_id = row.get("character", "")
-    chatterbox_ref = None   # (character_name, resolved_ref, ref_transcript)
+    clone = None   # (character_name, resolved_ref, ref_transcript, direction)
     if char_id:
-        # Deciding *whether* this row routes to Chatterbox is best-effort: a
-        # project that cannot be read just means we fall through to Qwen, the
-        # same as a character with no Chatterbox assignment.
+        # Deciding *whether* this row clones is best-effort: a project that
+        # cannot be read just means we fall through to a preset voice, the
+        # same as a character with no reference clip.
         try:
             project = _project_json(project_id)
             character = next(
@@ -90,49 +91,51 @@ def generate_tts(
                  if c["id"] == char_id or c.get("name", "").upper() == char_id.upper()),
                 None,
             )
-            if character:
-                va = character.get("voice_assignment", {})
-                if va.get("model") == "Chatterbox":
-                    emotion_key = row.get("emotion", "").strip() or "neutral"
-                    palette = va.get("emotional_palette", [])
-                    entry = next(
-                        (e for e in palette if e["emotion"] == emotion_key),
-                        palette[0] if palette else None,
-                    )
-                    if entry and entry.get("ref_audio_path"):
-                        # Resolve relative paths (Pharaoh-1qp) against the
-                        # character's bundle dir before uploading.
-                        chatterbox_ref = (
-                            character.get("name", char_id),
-                            _resolve_voice_path(
-                                project_id, character["id"], entry["ref_audio_path"]
-                            ),
-                            entry.get("ref_transcript") or "",
-                        )
+            va = (character or {}).get("voice_assignment", {})
+            if character and va.get("ref_audio_path"):
+                emotion_key = row.get("emotion", "").strip().lower()
+                entry = next(
+                    (e for e in va.get("emotional_palette", [])
+                     if e.get("ref_audio_path") and emotion_key
+                     and emotion_key in (e.get("emotion", "").lower(), e.get("label", "").lower())),
+                    None,
+                )
+                ref = entry["ref_audio_path"] if entry else va["ref_audio_path"]
+                transcript = (entry.get("ref_transcript") if entry else va.get("ref_transcript")) or ""
+                note = (instruct or row.get("instruct", "")).strip()
+                direction = " ".join(x for x in (note, (entry or {}).get("direction", "")) if x).strip()
+                # Resolve relative paths (Pharaoh-1qp) against the character's
+                # bundle dir before uploading.
+                clone = (
+                    character.get("name", char_id),
+                    _resolve_voice_path(project_id, character["id"], ref),
+                    transcript,
+                    direction,
+                )
         except Exception as exc:
-            log.warning(f"Could not check Chatterbox routing for {char_id}: {exc}")
+            log.warning(f"Could not check the cloned voice for {char_id}: {exc}")
 
-    # Once we know the row *is* Chatterbox-routed, a failure is fatal. Falling
-    # through to Qwen here returned a job_id and the preset speaker's voice with
+    # Once we know the row *is* a cloned voice, a failure is fatal. Falling
+    # through to a preset here would return a job_id and the wrong voice with
     # no signal that the character's cloned voice was not used.
-    if chatterbox_ref is not None:
-        char_name, resolved_ref, ref_transcript = chatterbox_ref
+    if clone is not None:
+        char_name, resolved_ref, ref_transcript, direction = clone
         try:
-            return json.dumps(_post("chatterbox", "/generate/clone", {
+            return json.dumps(_post("tts", "/generate/voice_clone", {
                 "text": row["prompt"],
                 "ref_audio_path": resolved_ref,
                 "ref_transcript": ref_transcript,
+                "instruct": direction,
                 "seed": seed,
                 "output_path": output_path,
             }, upload_fields=("ref_audio_path",)))
         except Exception as exc:
-            log.warning(f"Chatterbox generation failed for {char_name}: {exc}")
+            log.warning(f"Clone failed for {char_name}: {exc}")
             return json.dumps({
                 "error": (
-                    f"character '{char_name}' is configured for the Chatterbox "
-                    f"pipeline but the request failed: {exc}. Check the "
-                    f"Chatterbox server (port 18005) with server_health, or "
-                    f"pass speaker=... to synthesise with a Qwen preset voice "
+                    f"character '{char_name}' has a cloned voice but the request "
+                    f"failed: {exc}. Check the TTS server (port 18001) with "
+                    f"server_health, or pass speaker=... to use a preset voice "
                     f"on purpose."
                 )
             })
@@ -277,91 +280,3 @@ def generate_music(
         return json.dumps({"batch": True, "jobs": jobs})
 
 
-@mcp.tool()
-def generate_chatterbox(
-    project_id: str,
-    scene_slug: str,
-    row_index: int,
-    output_path: str,
-    ref_audio_path: str = "",
-    emotion: str = "",
-    exaggeration: float = 0.5,
-    cfg_weight: float = 0.5,
-    seed: int = 0,
-) -> str:
-    """
-    Submit a Chatterbox Turbo 0-shot voice clone job for a DIALOGUE script row.
-
-    Chatterbox Turbo clones the vocal identity from ref_audio_path and renders
-    the row's prompt text. Inline paralinguistic tags in the prompt text are
-    honoured (e.g. '[sigh] I knew it.' or 'That's funny. [chuckle]').
-
-    ref_audio_path: if empty, auto-resolves from the character's emotional palette
-                    using the row's 'emotion' field (falls back to first palette entry,
-                    then to the character's gold reference clip).
-    emotion:        override the emotion key (ignores row's 'emotion' field).
-    exaggeration:   0–1, how strongly to colour the vocal performance.
-    cfg_weight:     classifier-free guidance strength.
-    """
-    rows = _script_rows(project_id, scene_slug)
-    err = _row_range_error(project_id, scene_slug, rows, row_index)
-    if err:
-        return json.dumps({"error": err})
-    row = rows[row_index]
-    if row.get("type", "").upper() != "DIALOGUE":
-        return json.dumps({"error": (
-            f"generate_chatterbox only applies to DIALOGUE rows — row {row_index} of "
-            f"scene '{scene_slug}' is type '{row.get('type', '')}'"
-        )})
-
-    _auto_unload_others("chatterbox")
-
-    resolved_ref = ref_audio_path
-    if not resolved_ref:
-        char_id = row.get("character", "")
-        emotion_key = emotion or row.get("emotion", "").strip() or "neutral"
-        try:
-            project = _project_json(project_id)
-            character = next(
-                (c for c in project.get("characters", [])
-                 if c["id"] == char_id or c.get("name", "").upper() == char_id.upper()),
-                None,
-            )
-            if character:
-                palette = character.get("voice_assignment", {}).get("emotional_palette", [])
-                entry = next(
-                    (e for e in palette if e["emotion"] == emotion_key),
-                    palette[0] if palette else None,
-                )
-                if entry and entry.get("ref_audio_path"):
-                    # Resolve relative paths (Pharaoh-1qp) against the bundle dir.
-                    resolved_ref = _resolve_voice_path(
-                        project_id, character["id"], entry["ref_audio_path"]
-                    )
-                elif character.get("voice_assignment", {}).get("ref_audio_path"):
-                    # No palette (e.g. a voice lifted by Dissect): clone the
-                    # character's gold reference clip.
-                    resolved_ref = _resolve_voice_path(
-                        project_id, character["id"], character["voice_assignment"]["ref_audio_path"]
-                    )
-        except Exception as exc:
-            return json.dumps({"error": (
-                f"palette resolution failed for character '{char_id}' "
-                f"(emotion '{emotion_key}') in project {project_id}: {exc}"
-            )})
-
-    if not resolved_ref:
-        return json.dumps({"error": (
-            "ref_audio_path not supplied, and the character has no approved palette entry "
-            "or gold reference clip. Pick a gold reference or approve a palette take first."
-        )})
-
-    result = _post("chatterbox", "/generate/clone", {
-        "text": row["prompt"],
-        "ref_audio_path": resolved_ref,
-        "exaggeration": exaggeration,
-        "cfg_weight": cfg_weight,
-        "seed": seed,
-        "output_path": output_path,
-    }, upload_fields=("ref_audio_path",))
-    return json.dumps(result)

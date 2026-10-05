@@ -5,7 +5,6 @@ import { useModelStore } from "../store/modelStore";
 import {
   submitTtsCustomVoice,
   submitTtsVoiceClone,
-  submitChatterboxClone,
   submitSfxT2a,
   submitMusicText2Music,
 } from "../lib/tauriCommands";
@@ -20,22 +19,21 @@ function makeOutputPath(projectsDir: string, projectId: string, sceneSlug: strin
 }
 
 /**
- * How a character's lines are voiced:
- *  - "breeze"     — Breeze TTS 2 serves the TTS port: clone the gold clip (or the
- *                   line's palette reference) and perform the line's direction.
- *  - "chatterbox" — Chatterbox clone, for cloned voices when Breeze isn't installed.
+ * How a character's lines are voiced. Cloning always happens on the TTS port:
+ *  - "breeze" — Breeze TTS 2: clone the gold clip (or the line's palette
+ *               reference) and perform the line's direction.
+ *  - "clone"  — Qwen3-TTS, where Breeze isn't installed: clones the voice;
+ *               the direction is ignored.
+ *  - "preset" — no reference clip: the TTS server's named speaker.
  *
- * Voice lock (RVC) is separate: it runs after either engine on calm lines
- * when the character has it on (see jobStore).
- *  - "preset"     — no reference clip: the TTS server's named speaker.
+ * Voice lock (RVC) is separate: it runs after either clone on calm lines when
+ * the character has it on (see jobStore).
  */
-export type DialogueEngine = "breeze" | "chatterbox" | "preset";
+export type DialogueEngine = "breeze" | "clone" | "preset";
 
 export function dialogueEngine(char: Character | undefined): DialogueEngine {
-  const va = char?.voice_assignment;
-  if (!va?.ref_audio_path) return "preset";
-  if (useModelStore.getState().health.tts?.engine === "breeze") return "breeze";
-  return (va.production_pipeline ?? "chatterbox").startsWith("chatterbox") ? "chatterbox" : "preset";
+  if (!clonesVoice(char)) return "preset";
+  return useModelStore.getState().health.tts?.engine === "breeze" ? "breeze" : "clone";
 }
 
 /** The direction Breeze performs for a line: the palette emotion's written
@@ -48,11 +46,10 @@ export function breezeDirection(char: Character | undefined, note: string | unde
     || (char?.voice_assignment.instruct_default ?? "").trim();
 }
 
-/** A character speaks in its cloned voice when it has a gold reference clip
- *  and a Chatterbox pipeline; otherwise Qwen CustomVoice's preset speaker. */
+/** A character speaks in its cloned voice when it has a gold reference clip;
+ *  otherwise in a preset speaker. */
 export function clonesVoice(char: Character | undefined): boolean {
-  const va = char?.voice_assignment;
-  return !!va?.ref_audio_path && (va.production_pipeline ?? "chatterbox").startsWith("chatterbox");
+  return !!char?.voice_assignment.ref_audio_path;
 }
 
 /**
@@ -115,9 +112,7 @@ export function useGenerateJob() {
     topP?: number;
     maxNewTokens?: number;
     rowIndex?: number;
-    /** Chatterbox only: 0–1 expressiveness (0.5 = like the reference). */
-    exaggeration?: number;
-    /** Chatterbox only: palette emotion (key, label, or a delivery note that
+    /** Cloned voices: palette emotion (key, label, or a delivery note that
      *  names one); its reference replaces the gold clip. */
     emotion?: string;
   }): Promise<SubmitResult> {
@@ -132,8 +127,8 @@ export function useGenerateJob() {
     const palette = engine !== "preset" ? paletteEntryFor(char, params.emotion) : undefined;
     const refPath = palette?.ref_audio_path ?? char?.voice_assignment.ref_audio_path ?? "";
     const absRef = (p: string) => (p.startsWith("/") ? p : `${pDir}/${projectId}/characters/${char!.id}/${p}`);
-    const direction = engine === "breeze" ? breezeDirection(char, params.emotion ?? params.instruct) : (params.emotion ?? params.instruct ?? "");
-    const jobId = char && engine === "breeze"
+    const direction = breezeDirection(char, params.emotion ?? params.instruct);
+    const jobId = char && engine !== "preset"
       ? await submitTtsVoiceClone({
           projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
           params: {
@@ -144,21 +139,7 @@ export function useGenerateJob() {
             seed: params.seed ?? Math.floor(Math.random() * 99999),
             temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
             output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
-            instruct: direction,
-          },
-        })
-      : char && engine === "chatterbox"
-      ? await submitChatterboxClone({
-          projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
-          params: {
-            text: params.text,
-            // Relative bundle paths live under the project's copy of the character.
-            ref_audio_path: refPath.startsWith("/") ? refPath : `${pDir}/${projectId}/characters/${char.id}/${refPath}`,
-            ref_transcript: (palette ? palette.ref_transcript : char.voice_assignment.ref_transcript) ?? "",
-            exaggeration: params.exaggeration ?? 0.5,
-            cfg_weight: 0.5,
-            seed: params.seed ?? Math.floor(Math.random() * 99999),
-            output_path: makeOutputPath(pDir, projectId, sceneSlug, `${stem}_${ts}.wav`),
+            instruct: direction,  // Breeze performs it; Qwen3-TTS ignores it
           },
         })
       : await submitTtsCustomVoice({

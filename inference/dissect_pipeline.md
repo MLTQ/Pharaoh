@@ -1,7 +1,7 @@
 # dissect_pipeline.py
 
 ## Purpose
-Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / music / effects stems, speaker turns with transcripts, and per-speaker reference clips clean enough for Chatterbox cloning (3–15 s, solo, low bleed).
+Take a finished audio drama apart into the pieces Pharaoh can reuse: dialogue / music / effects stems, speaker turns with transcripts, and per-speaker reference clips clean enough for voice cloning (3–15 s, solo, low bleed).
 
 ## Components
 

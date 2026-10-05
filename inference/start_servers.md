@@ -15,7 +15,7 @@ Starts Pharaoh's inference servers with the expected isolated Python interpreter
 - **Interacts with**: `setup.sh`, `PHARAOH_WOOSH_DIR`.
 
 ### Server launch
-- **Does**: Starts TTS, SFX, music, and whichever optional servers are installed (Post, Chatterbox, RVC, Dissect) in the background and waits for them.
+- **Does**: Starts TTS, SFX, music, and whichever optional servers are installed (Post, RVC, Dissect) in the background and waits for them.
 - **Interacts with**: Ports 18001–18003, and optional 18004–18007.
 
 ## Contracts

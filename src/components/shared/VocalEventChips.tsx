@@ -3,8 +3,8 @@
  *
  * Breeze performs these 15 events rather than reading them aloud (all 15
  * were verified in the vocal-event probe). They're inserted in brackets —
- * "[laughs]" — which Breeze maps to its own "(laughs)" form, Chatterbox reads
- * as a tag, and Fountain keeps as dialogue text (a parenthesis on its own
+ * "[laughs]" — which Breeze maps to its own "(laughs)" form and Fountain
+ * keeps as dialogue text (a parenthesis on its own
  * line would become a parenthetical).
  */
 

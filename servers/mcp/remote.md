@@ -25,7 +25,7 @@ the pending-downloads cache, and single-model-mode auto-unloading.
   (Pharaoh-e6yc).
 - `_auto_unload_others(active)` — when single-model mode is on (CLI flag or
   app config), best-effort `/unload` on the other heavy servers
-  (tts/music/chatterbox/rvc). Never raises.
+  (tts/music/rvc). Never raises.
 
 ## Rationale
 

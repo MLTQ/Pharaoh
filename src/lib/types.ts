@@ -2,8 +2,8 @@
 
 /**
  * A single emotional state entry in a character's vocal palette.
- * Each entry has its own Qwen3 VoiceDesign-generated reference clip used
- * as the conditioning signal for Chatterbox Turbo 0-shot cloning.
+ * Each entry has its own reference clip (a real line, or a designed take)
+ * that the TTS engine clones from, plus a written direction.
  */
 /**
  * A palette emotion as a blend: weights over emotion2vec's classes (angry,
@@ -57,7 +57,7 @@ export interface PaletteEntry {
  * blind test it made calm lines sound more like the character but flattened
  * whispers, sighs, laughs and anger — so by default only calm lines get it.
  *
- * Pipeline: Breeze (or Chatterbox) → RVC (calm lines) → AudioSR (if on) → final WAV
+ * Pipeline: Breeze (or Qwen3-TTS) → RVC (calm lines) → AudioSR (if on) → final WAV
  */
 export interface RvcConfig {
   /**
@@ -111,12 +111,13 @@ export interface VoiceAssignment {
    * New code should derive the UI badge from data shape (palette length,
    * presence of `rvc`, value of `production_pipeline`) rather than reading this.
    */
+  /** "Chatterbox" appears in projects saved before Chatterbox was removed. */
   model: "CustomVoice" | "VoiceDesign" | "Clone" | "FineTuned" | "Chatterbox";
   speaker: string | null;
   instruct_default: string | null;
   /**
    * "Gold" character reference — whichever of `ref_audio_sources` (or a
-   * concat-derived file) is currently used by Chatterbox for 0-shot cloning.
+   * concat-derived file) the TTS engine clones from.
    */
   ref_audio_path: string | null;
   /**
@@ -132,18 +133,18 @@ export interface VoiceAssignment {
    * `direction` is appended to this when calling /generate/voice_design.
    */
   base_voice_description: string;
-  /** Named emotional states for the Chatterbox Turbo palette workflow. */
+  /** Named emotional states: a written direction plus a reference clip each. */
   emotional_palette: PaletteEntry[];
   /**
-   * Legacy: which engine voiced cloned lines before Breeze. Breeze is used
-   * whenever it serves the TTS port; voice lock (RVC) is `rvc.enabled`, not
-   * "chatterbox+rvc" (kept readable for old projects, no longer routes).
+   * Legacy, ignored: older projects named the cloning engine here. Cloning
+   * always goes through the TTS port (Breeze, or Qwen3-TTS without it); voice
+   * lock is `rvc.enabled`.
    */
-  production_pipeline: "chatterbox" | "chatterbox+rvc";
+  production_pipeline?: string;
   /** Clean up every generated take with AudioSR (speech model). */
   audiosr?: boolean;
   /**
-   * Stage 4 voice pipeline: RVC model trained on the Chatterbox corpus.
+   * Optional voice lock: an RVC model trained on the character's real lines.
    * Undefined/null when RVC has not been configured for this character.
    * Present (even with model_path null) once the user opens Stage 4.
    *
@@ -162,8 +163,7 @@ export interface VoiceAssignment {
  * Each stage unlocks the next. Stages can be completed in order only:
  *   Voice (1) → Palette (2) → Corpus (3) → Model (4)
  *
- * Characters without a trained model still work — they use Chatterbox-only
- * generation. The pipeline is aspirational, not a gate.
+ * Characters without a trained model still work — voice lock is optional.
  */
 export type VoicePipelineStage = 1 | 2 | 3 | 4;
 
@@ -267,13 +267,11 @@ export interface AppConfig {
   sfx_url: string;
   music_url: string;
   post_url: string;
-  chatterbox_url: string;
   rvc_url: string;
   dissect_url: string;
   tts_public: boolean;
   sfx_public: boolean;
   music_public: boolean;
-  chatterbox_public: boolean;
   projects_dir: string;
   models_dir: string;
   woosh_dir: string;
@@ -295,7 +293,6 @@ export interface AllServerHealth {
   sfx: ServerHealth | null;
   music: ServerHealth | null;
   post: ServerHealth | null;
-  chatterbox: ServerHealth | null;
   rvc: ServerHealth | null;
   dissect: ServerHealth | null;
 }
@@ -361,7 +358,7 @@ export interface ScriptRow {
   fade_in_ms: string;
   fade_out_ms: string;
   reverb_send: string;
-  /** Palette emotion key for Chatterbox routing (e.g. "neutral", "tense"). Empty = use default. */
+  /** Palette emotion key (e.g. "neutral", "tense"); its reference and direction voice the line. Empty = the gold clip. */
   emotion: string;
   notes: string;
   gain_envelope: string;  // JSON-encoded EnvelopePoint[], empty string = no envelope

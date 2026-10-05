@@ -6,7 +6,7 @@ One detected speaker in a dissect import: stats, a sample line, candidate clips 
 ## Components
 
 ### Candidate rows
-- **Does**: Checkbox (keep as a reference source), play, gold radio (the clip Chatterbox clones from), transcript, and quality chips: duration, position, `bleed_db` (dialogue over music+effects; green ≥ 12 dB, "clean" at ≥ 40 dB — nothing underneath), and voice match % (TitaNet similarity to the speaker; green ≥ 80 %).
+- **Does**: Checkbox (keep as a reference source), play, gold radio (the clip the voice is cloned from), transcript, and quality chips: duration, position, `bleed_db` (dialogue over music+effects; green ≥ 12 dB, "clean" at ≥ 40 dB — nothing underneath), and voice match % (TitaNet similarity to the speaker; green ≥ 80 %).
 - **Rationale**: The chips explain the ranking so the user can override it, e.g. dropping a high-scoring clip that belongs to a different character the diarizer merged.
 
 ### Credits and chapters

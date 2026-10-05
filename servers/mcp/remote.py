@@ -16,7 +16,7 @@ START_HINT = "Start the inference servers first (./inference/start_servers.sh) o
 
 # ── Single model mode ─────────────────────────────────────────────────────────
 
-_HEAVY_SERVERS = {"tts", "music", "chatterbox", "rvc"}
+_HEAVY_SERVERS = {"tts", "music", "rvc"}
 
 
 def _auto_unload_others(active: str) -> None:

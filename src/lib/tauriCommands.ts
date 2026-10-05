@@ -174,23 +174,6 @@ export const submitTtsVoiceClone = (args: {
     cfg_scale?: number;
   };
 }): Promise<string> => invoke("submit_tts_voice_clone", args);
-
-/** Chatterbox Turbo zero-shot clone from a character's reference clip. */
-export const submitChatterboxClone = (args: {
-  projectId: string;
-  sceneSlug: string;
-  rowIndex: number;
-  params: {
-    text: string;
-    ref_audio_path: string;
-    ref_transcript?: string;
-    exaggeration: number;
-    cfg_weight: number;
-    seed: number;
-    output_path: string;
-  };
-}): Promise<string> => invoke("submit_chatterbox_clone", args);
-
 export const submitTtsVoiceDesign = (args: {
   projectId: string;
   sceneSlug: string;
@@ -558,20 +541,6 @@ export interface EmotionCorpusCount {
   count: number;
 }
 
-/** Handle for a running corpus build. */
-export interface BuildCorpusResult {
-  job_id: string;
-  total: number;
-}
-
-/** Progress of a corpus build started by buildCorpus(). */
-export interface CorpusJobStatus {
-  completed: number;
-  total: number;
-  done: boolean;
-  error: string | null;
-}
-
 /** The character's active RVC model plus the corpus it was trained from. */
 export interface RvcModelDetail {
   name: string;
@@ -594,27 +563,7 @@ export const getCorpusEmotionCounts = (args: {
     characterId: args.characterId,
   });
 
-/**
- * Queue a Chatterbox corpus build (stage 3).
- * Returns immediately; poll getCorpusJobStatus() with the returned job_id.
- * Requires at least one approved palette entry with reference audio.
- */
-export const buildCorpus = (args: {
-  projectId: string;
-  characterId: string;
-  targetCount?: number;
-}): Promise<BuildCorpusResult> =>
-  invoke("build_corpus", {
-    projectId: args.projectId,
-    characterId: args.characterId,
-    targetCount: args.targetCount ?? null,
-  });
-
-/** Poll a corpus build. */
-export const getCorpusJobStatus = (jobId: string): Promise<CorpusJobStatus> =>
-  invoke("get_corpus_job_status", { jobId });
-
-/** Delete every generated corpus WAV and sidecar. Returns the number removed. */
+/** Delete every corpus WAV and sidecar. Returns the number removed. */
 export const clearCorpus = (args: {
   projectId: string;
   characterId: string;
@@ -836,7 +785,7 @@ export interface CorpusImportResult {
  * Bulk-import real audio recordings into a library character's RVC corpus.
  * Each file is normalized to 48kHz mono 16-bit WAV. Files that fail to
  * convert are skipped (counted, not fatal). Use case: training RVC on real
- * actor recordings rather than Chatterbox synthesized output.
+ * actor recordings.
  */
 export const importAudioFilesIntoCorpus = (args: {
   libraryId: string;

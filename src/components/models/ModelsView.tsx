@@ -1,7 +1,6 @@
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
 import { invoke } from "../../lib/transport";
 import { useModelStore } from "../../store/modelStore";
-import { defaultServerUrls } from "../settings/settingsShared";
 import type { AppConfig } from "../../lib/types";
 
 const TTS_VARIANTS = [
@@ -62,57 +61,12 @@ export const ModelsView: React.FC = () => {
   const [wooshDir, setWooshDir] = useState("");
   const [busy, setBusy] = useState<Record<string, boolean>>({});
 
-  // ── Chatterbox state (managed via direct fetch — not wired into modelStore) ──
-  const [chatterboxUrl, setChatterboxUrl] = useState(defaultServerUrls().chatterbox);
-  const [chatterboxStatus, setChatterboxStatus] = useState<"unknown" | "online" | "offline">("unknown");
-  const [chatterboxLoaded, setChatterboxLoaded] = useState(false);
-  const [chatterboxVariant, setChatterboxVariant] = useState("");
-  const [chatterboxBusy, setChatterboxBusy] = useState(false);
-
   useEffect(() => {
     invoke<AppConfig>("get_app_config").then((cfg) => {
       setWooshDir(cfg.woosh_dir ?? "");
-      setChatterboxUrl(cfg.chatterbox_url ?? defaultServerUrls().chatterbox);
     }).catch(() => {});
   }, []);
 
-  const pollChatterbox = useCallback(async (url = chatterboxUrl) => {
-    try {
-      const res = await fetch(`${url}/health`, { signal: AbortSignal.timeout(3000) });
-      if (res.ok) {
-        const h = await res.json();
-        setChatterboxStatus("online");
-        setChatterboxLoaded(!!h.model_loaded);
-        setChatterboxVariant(h.model_variant ?? "");
-      } else {
-        setChatterboxStatus("offline");
-        setChatterboxLoaded(false);
-      }
-    } catch {
-      setChatterboxStatus("offline");
-      setChatterboxLoaded(false);
-    }
-  }, [chatterboxUrl]);
-
-  useEffect(() => { pollChatterbox(); }, [pollChatterbox]);
-
-  const doLoadChatterbox = async () => {
-    setChatterboxBusy(true);
-    try {
-      await fetch(`${chatterboxUrl}/load`, { method: "POST", signal: AbortSignal.timeout(30000) });
-    } catch { /* will show in health poll */ }
-    await pollChatterbox();
-    setChatterboxBusy(false);
-  };
-
-  const doUnloadChatterbox = async () => {
-    setChatterboxBusy(true);
-    try {
-      await fetch(`${chatterboxUrl}/unload`, { method: "POST", signal: AbortSignal.timeout(10000) });
-    } catch { /* ignore */ }
-    await pollChatterbox();
-    setChatterboxBusy(false);
-  };
 
   const doLoad = async (kind: CardKind, variant?: string) => {
     setBusy((b) => ({ ...b, [kind]: true }));
@@ -140,7 +94,7 @@ export const ModelsView: React.FC = () => {
         </div>
 
         <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 16 }}>
-          <button className="btn btn-sm" onClick={() => { pollHealth(); pollChatterbox(); }} style={{ fontSize: 10.5 }}>
+          <button className="btn btn-sm" onClick={() => { pollHealth(); }} style={{ fontSize: 10.5 }}>
             Refresh status
           </button>
         </div>
@@ -336,79 +290,6 @@ export const ModelsView: React.FC = () => {
           );
         })}
 
-        {/* ── Chatterbox Turbo ──────────────────────────────────────────── */}
-        <div style={{
-          border: "1px solid var(--line-1)", background: "var(--bg-1)",
-          borderRadius: 3, marginBottom: 14, overflow: "hidden",
-        }}>
-          {/* Header */}
-          <div style={{
-            borderBottom: "1px solid var(--line-1)", padding: "12px 16px",
-            display: "flex", alignItems: "center", gap: 10,
-          }}>
-            <span style={{
-              width: 8, height: 8, borderRadius: "50%",
-              background: STATUS_COLOR[chatterboxStatus] ?? "var(--fg-4)",
-              boxShadow: chatterboxStatus === "online" ? `0 0 5px ${STATUS_COLOR.online}` : "none",
-              flexShrink: 0,
-            }} />
-            <span style={{ fontWeight: 600, fontSize: 13 }}>Chatterbox Turbo</span>
-            <span style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, color: "var(--fg-3)", marginLeft: 2 }}>:18005</span>
-            <span style={{ flex: 1 }} />
-            <span style={{
-              fontFamily: "var(--font-mono)", fontSize: 9.5,
-              color: STATUS_COLOR[chatterboxStatus] ?? "var(--fg-4)",
-              letterSpacing: "0.06em", textTransform: "uppercase",
-            }}>{chatterboxStatus}</span>
-          </div>
-
-          {/* Body */}
-          <div style={{ padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
-            <div style={{ flex: 1 }}>
-              <div style={{
-                fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.07em",
-                color: "var(--fg-4)", textTransform: "uppercase", marginBottom: 3,
-              }}>Status</div>
-              <div style={{ fontSize: 12, color: chatterboxLoaded ? "var(--st-rendered)" : "var(--fg-3)" }}>
-                {chatterboxLoaded
-                  ? `Loaded${chatterboxVariant ? ` · ${chatterboxVariant}` : ""}`
-                  : "Not loaded"}
-              </div>
-            </div>
-
-            <div style={{ fontSize: 11, color: "var(--fg-4)", lineHeight: 1.5 }}>
-              0-shot voice cloning · inline paralinguistic tags ([sigh], [chuckle]…) · 0.5B params
-            </div>
-
-            <div style={{ display: "flex", gap: 8 }}>
-              <button
-                className="btn"
-                disabled={chatterboxBusy || chatterboxStatus === "offline"}
-                onClick={doLoadChatterbox}
-                style={{
-                  borderColor: "var(--tts)", color: "var(--tts)",
-                  background: "color-mix(in oklch, var(--tts) 10%, transparent)",
-                }}
-              >
-                {chatterboxBusy ? "Loading…" : chatterboxLoaded ? "Reload" : "Load"}
-              </button>
-              {chatterboxLoaded && (
-                <button className="btn" disabled={chatterboxBusy} onClick={doUnloadChatterbox}>
-                  Unload
-                </button>
-              )}
-            </div>
-
-            {chatterboxStatus === "offline" && (
-              <div style={{ fontSize: 11, color: "var(--fg-4)", fontStyle: "italic" }}>
-                Server offline — start it with:{" "}
-                <code style={{ fontFamily: "var(--font-mono)", fontSize: 10.5, fontStyle: "normal" }}>
-                  inference/.venv-chatterbox/bin/python inference/chatterbox_server.py
-                </code>
-              </div>
-            )}
-          </div>
-        </div>
       </div>
     </div>
   );

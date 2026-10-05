@@ -1,15 +1,12 @@
 //! RVC (Retrieval-based Voice Conversion) commands.
 //!
-//! This module provides the Tauri command surface for the RVC voice-conversion
-//! pipeline. The pipeline works as follows:
+//! The Tauri command surface for the optional voice lock:
 //!
-//! 1. Qwen3 VoiceDesign generates palette reference takes.
-//! 2. Chatterbox generates a corpus of 50-100 WAVs with paralinguistic tags.
-//! 3. The RVC training job consumes that corpus and produces a `.pth` model
-//!    file plus an optional `.index` file stored in
-//!    `characters/{character_id}/rvc/`.
-//! 4. At production time: Chatterbox clones the voice → RVC converts it →
-//!    final WAV.
+//! 1. The corpus is the character's real lines (from a dissected recording
+//!    or imported audio), in `characters/{id}/rvc_corpus/`.
+//! 2. RVC trains on it, producing `rvc/{name}.pth` + `.index`.
+//! 3. At production time the TTS engine (Breeze) clones the line, and calm
+//!    lines pass through RVC (`submit_voice_lock`).
 //!
 //! All heavy work runs inside the Python RVC server (default port 18006).
 //! Commands here are thin HTTP proxies that match the pattern in
@@ -43,7 +40,7 @@ pub struct RvcModelInfo {
 /// Parameters for a single RVC voice-conversion job.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RvcConvertParams {
-    /// Absolute path to the source audio file (Chatterbox output).
+    /// Absolute path to the source audio file (a TTS take).
     pub input_path: String,
     /// Absolute path where the converted WAV should be written.
     pub output_path: String,

@@ -38,7 +38,6 @@ gruve-kit.zip
 
 # Remaining inference venvs (the tts/music/rvc ones are listed above)
 inference/.venv-audiosr/
-inference/.venv-chatterbox/
 inference/.venv-applio/
 
 # Cargo output at the repo root (src-tauri/target is listed above)

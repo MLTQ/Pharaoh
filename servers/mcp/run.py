@@ -15,7 +15,7 @@ modules, each of which registers its tools/resources on import:
   remote.py          HTTP glue to the inference servers (no MCP surface)
   resources.py       pharaoh:// MCP resources
   tools_project.py   project / scene / character / script CRUD
-  tools_generate.py  TTS / Chatterbox / SFX / music generation
+  tools_generate.py  TTS / SFX / music generation
   tools_voice.py     emotional palette + RVC voice pipeline
   tools_jobs.py      generation job polling
   tools_qa.py        asset QA + take management

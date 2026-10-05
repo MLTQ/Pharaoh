@@ -493,7 +493,7 @@ pub(super) async fn script_import(
                 ref_transcript: None,
                 base_voice_description: String::new(),
                 emotional_palette: vec![],
-                production_pipeline: "chatterbox".to_string(),
+                production_pipeline: String::new(),
                 rvc: None,
                 rvc_model_path: None,
                 rvc_index_path: None,

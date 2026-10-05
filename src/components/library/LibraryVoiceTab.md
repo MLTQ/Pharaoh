@@ -11,7 +11,7 @@ Stage-1 "Voice" tab of the library character editor: description + base voice de
   - `handleUploadCharacterReference` — `+ Upload…` adds N candidate files (each copied to `design/` individually via `importAudioIntoLibraryBundle`); first upload becomes the gold if none is set.
   - `handleConcatCharacterSources` — `Concatenate all → gold` creates a derived combined WAV (`concatAudioIntoLibraryBundle`) and sets it as the gold; individual sources stay in the list.
   - `handlePickCharacterGold` / `handleRemoveCharacterSource` — radio-dot gold pick and source removal (removing the gold promotes the next source); both auto-save.
-  - `handleClone` — "Speak with this voice": submits the line to Chatterbox Turbo (`submitChatterboxClone`) with the gold reference (resolved from the bundle-relative path) and an expressiveness slider; takes list on `LIBRARY_CLONE_ROW` of the design slug, apart from Voice Design takes.
+  - `handleClone` — "Speak with this voice": clones the line on the TTS port (`submitTtsVoiceClone`) from the gold reference (resolved from the bundle-relative path), with the direction field as `instruct`; takes list on `LIBRARY_CLONE_ROW` of the design slug, apart from Voice Design takes.
   - `handleSaveDesignAsReference` — promotes a design take to gold + adds it to the sources list (dedup) + records the test line as `ref_transcript`.
 - **Props**: `character` (non-null), `dirty`, `saving`, `patch`, `setCharacter`, `setDirty`, `setSaving`, `setError` (detail-panel banner), plus lifted UI state: `voiceDesignTestLine`, `generatingDesign`, `designGenError` (+ setters).
 - **Interacts with**: `useJobStore` (jobs / addJob / setQaStatus), `useProjectStore` (projectsDir), `tauriCommands::saveLibraryCharacter` / `submitTtsVoiceDesign` / `importAudioIntoLibraryBundle` / `concatAudioIntoLibraryBundle`, [SourceRow](./SourceRow.md), `TakeList`/`TakeRow`/`RunningBadge`/`EmptyTakes` from shared, [libraryShared](./libraryShared.md).
@@ -23,4 +23,4 @@ Stage-1 "Voice" tab of the library character editor: description + base voice de
 |-----------|---------|------------------|
 | `LibraryView` | Failures surface via `setDesignGenError` (inline) or `setError` (banner) — never thrown | Throwing would leave `saving` stuck |
 | Job store | Design jobs tagged `scene_slug = libraryDesignSlug(id)`, `row_index = LIBRARY_DESIGN_ROW` | Changing the slug orphans existing takes in the list |
-- "Speak with this voice" uses Breeze with a direction field when the TTS server runs Breeze (Chatterbox + expressiveness otherwise). "Clean up every take with AudioSR" sets `voice_assignment.audiosr`.
+- "Speak with this voice" uses Breeze with a direction field when the TTS server runs Breeze (no direction field under Qwen3-TTS, which can't perform one). "Clean up every take with AudioSR" sets `voice_assignment.audiosr`.

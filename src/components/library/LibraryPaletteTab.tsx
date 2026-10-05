@@ -19,7 +19,6 @@ import { TakeList, TakeRow, RunningBadge, EmptyTakes } from "../shared/TakeList"
 import {
   saveLibraryCharacter,
   submitTtsVoiceDesign,
-  submitChatterboxClone,
   submitTtsVoiceClone,
   importAudioIntoLibraryBundle,
   dissectClip,
@@ -30,7 +29,7 @@ import { RecordingClips } from "./RecordingClips";
 import { useJobStore } from "../../store/jobStore";
 import { useProjectStore } from "../../store/projectStore";
 import type { Character, PaletteEntry, QaJobStatus } from "../../lib/types";
-import { clonesVoice, dialogueEngine } from "../../hooks/useGenerateJob";
+import { clonesVoice } from "../../hooks/useGenerateJob";
 import {
   LIBRARY_PROJECT_ID,
   LIBRARY_PALETTE_ROW,
@@ -154,8 +153,8 @@ export const LibraryPaletteTab: React.FC<{
     // Generation reads the saved character, so pending edits are saved first.
     const character = await ensureSaved();
     if (!character?.library_id || !projectsDir) return;
-    // A cloned voice (gold reference + Chatterbox): clone the gold, with the
-    // emotion carried by the line's words and the expressiveness setting.
+    // A cloned voice (gold reference): clone the gold and perform the
+    // emotion's direction (Breeze; Qwen3-TTS clones the voice only).
     if (clonesVoice(character)) {
       const base = BASELINE_EMOTIONS.find((b) => b.emotion === entry.emotion);
       const seed = Math.floor(Math.random() * 9999);
@@ -165,24 +164,14 @@ export const LibraryPaletteTab: React.FC<{
       try {
         const text = paletteTestLine.trim() || base?.line || DEFAULT_TEST_LINE;
         const ref = libraryBundlePath(projectsDir, character.library_id, character.voice_assignment.ref_audio_path!);
-        // Breeze performs the emotion's written direction; Chatterbox can only
-        // lean on the words and its expressiveness setting.
-        const jobId = dialogueEngine(character) === "breeze"
-          ? await submitTtsVoiceClone({
-              projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_PALETTE_ROW,
-              params: {
-                text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
-                language: "en", icl_mode: false, seed, temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
-                output_path: outputPath, instruct: entry.direction.trim() || base?.direction || entry.label,
-              },
-            })
-          : await submitChatterboxClone({
-              projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_PALETTE_ROW,
-              params: {
-                text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
-                exaggeration: base?.exaggeration ?? 0.5, cfg_weight: 0.5, seed, output_path: outputPath,
-              },
-            });
+        const jobId = await submitTtsVoiceClone({
+          projectId: LIBRARY_PROJECT_ID, sceneSlug: slug, rowIndex: LIBRARY_PALETTE_ROW,
+          params: {
+            text, ref_audio_path: ref, ref_transcript: character.voice_assignment.ref_transcript ?? "",
+            language: "en", icl_mode: false, seed, temperature: 0.7, top_p: 0.9, max_new_tokens: 2048,
+            output_path: outputPath, instruct: entry.direction.trim() || base?.direction || entry.label,
+          },
+        });
         addJob({
           id: jobId, model: "tts", description: `Library palette · ${character.name} · ${entry.label} (clone)`,
           status: "pending", progress: 0, eta: "…", started_at: new Date().toISOString(), scene_id: null,

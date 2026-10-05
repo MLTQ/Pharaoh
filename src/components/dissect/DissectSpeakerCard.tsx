@@ -179,7 +179,7 @@ export const DissectSpeakerCard: React.FC<{
                   type="radio" name={`gold-${speaker.id}`} checked={gold === c.id}
                   disabled={!on || !!assignedTo}
                   onChange={() => setGold(c.id)}
-                  title="Gold: the clip Chatterbox clones from"
+                  title="Gold: the clip the voice is cloned from"
                 />
                 <span style={{
                   fontSize: 11.5, color: on ? "var(--fg-1)" : "var(--fg-3)",

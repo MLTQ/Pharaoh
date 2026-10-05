@@ -13,20 +13,22 @@ Pharaoh is a unified desktop application for producing AI-generated audio dramas
 The name reflects the central metaphor: the user or AI agent commands a pyramid
 to be built — the audio drama is the monument.
 
-The app integrates four open-source generative models:
-- **Chatterbox Turbo** (Resemble AI 0.5B) — primary dialogue model; 0-shot voice cloning from a reference WAV, inline paralinguistic tags (`[sigh]`, `[chuckle]`, etc.)
-- **Qwen3-TTS** — palette reference synthesis (VoiceDesign) and legacy voice modes (CustomVoice, Clone)
-- **Woosh (Sony AI)** — sound effects (text-to-audio, video-to-audio)
+The app integrates these open-weight generative models:
+- **Breeze TTS 2** (3B) — primary dialogue model: clones a reference clip and performs a written direction ("furious, voice rising") and vocal events (`[laughs]`, `[sighs]`…); Whisper checks each take
+- **Qwen3-TTS** — voice design (VoiceDesign), preset speakers (CustomVoice), and cloning where Breeze isn't installed
+- **MOSS-SoundEffect v2** (1.3B) — sound effects and beds up to 30 s
+- **Woosh (Sony AI)** — fallback sound effects, and video-to-audio
 - **YuE2** (m-a-p, 3B) — music on NVIDIA hosts: plans an editable ABC score, then performs it; instrumental by default
 - **ACE-Step v1** (3.5B) — music on Macs, and repaint/cover everywhere
 
 **Character voice workflow (current):**
 1. Author 1–5 named *emotional states* per character (e.g. `neutral`, `sardonic`, `dread`) in the Character Designer.
-2. Generate Qwen3 VoiceDesign reference takes for each state — audition and **approve** the best one as the palette reference.
+2. Give each state a reference clip — a real line from a dissected recording, or an approved Qwen3 VoiceDesign take — and a written direction.
 3. In the script, set the `emotion` column on each DIALOGUE row to select the matching palette state.
-4. Chatterbox Turbo 0-shot clones the approved reference take for every production line, preserving voice identity across all takes while emotional colouring varies per beat.
+4. Breeze clones that state's reference for every production line and performs its direction plus the row's own note.
+5. Optionally, voice lock: an RVC model trained on the character's real lines, applied to calm lines.
 
-This keeps voice identity stable across all takes (Chatterbox always clones the same reference) while letting performance vary per emotional beat.
+This keeps voice identity stable across all takes (the same references are always cloned) while letting performance vary per emotional beat.
 
 These are organized around a "pyramidal story structure" that mirrors the natural
 hierarchy of dramatic production:
@@ -69,13 +71,13 @@ Pharaoh/
 │
 ├── inference/                  # Python inference servers (FastAPI)
 │   ├── _common.py              # shared job store, path remap, /upload, /files
-│   ├── tts_server.py           # 18001 — Qwen3-TTS
-│   ├── sfx_server.py           # 18002 — Woosh + AudioLDM
+│   ├── breeze_server.py        # 18001 — Breeze TTS 2 (clone + direction)
+│   ├── tts_server.py           # 18001 — Qwen3-TTS (when Breeze isn't installed)
+│   ├── sfx_server.py           # 18002 — MOSS-SoundEffect (moss_sfx_worker.py) / Woosh / AudioLDM
 │   ├── yue2_music_server.py    # 18003 — YuE2 (NVIDIA); repaint/cover via ace_step_worker.py
 │   ├── music_server.py         # 18003 — ACE-Step (when YuE2 isn't installed)
 │   ├── yue2_score.py  yue2_abc/  ace_step_tasks.py  ace_step_worker.py
 │   ├── post_server.py          # 18004 — AudioSR
-│   ├── chatterbox_server.py    # 18005 — Chatterbox clone
 │   ├── rvc_server.py           # 18006 — RVC convert/train (Applio workers)
 │   ├── dissect_server.py       # 18007 — voices from existing recordings
 │   ├── dissect_pipeline.py     #         separate → diarize → transcribe → pick clips
@@ -152,7 +154,7 @@ rationale (the modular-docs pattern).
       "name": "Mira",
       "description": "string",
       "voice_assignment": {
-        "model": "Chatterbox | CustomVoice | VoiceDesign | Clone | FineTuned",
+        "model": "Clone | CustomVoice | VoiceDesign | FineTuned",
         "speaker": null,
         "instruct_default": "tired, edge of tears",
         "ref_audio_path": null,
@@ -238,7 +240,7 @@ spatial_azimuth,spatial_elevation,spatial_path,spatial_space
 - `loop`: `true` for beds and continuous ambience tracks
 - `pan`: L/R amplitude pan, clamped to `-1.0`–`1.0` by the render graph
 - `reverb_send`: 0.0–1.0 wet send amount
-- `emotion`: palette emotion key (e.g. `neutral`, `sardonic`); selects which reference take Chatterbox clones; empty = first palette entry
+- `emotion`: palette emotion key (e.g. `neutral`, `sardonic`); selects which reference is cloned and adds its direction; empty = the gold reference
 - `notes`: free text, and the home of the `id:r-xxx` tag that lets the Fountain editor keep row identity across edits. The token `mix:as-is` routes a row around the template mix (no ducking, bus trims or dialogue high-pass) — used for material lifted from a finished mix, whose balance is already baked in
 - `gain_envelope`: `ms:db` breakpoints for the per-clip gain lane, empty = flat
 - `spatial_azimuth` / `spatial_elevation`: degrees; azimuth 0 = front, 90 = right, 180 = behind. Empty = not spatialized (the clip uses `pan` instead)
@@ -296,11 +298,10 @@ Model weights load once; subsequent generations pay only inference cost.
 | Server      | Default port | Models |
 |-------------|--------------|--------|
 | MCP         | 18000        | none — agent control plane, proxies to the rest |
-| TTS         | 18001        | Qwen3-TTS CustomVoice / VoiceDesign / VoiceClone |
-| SFX         | 18002        | Woosh (short foley), AudioLDM (long ambience) |
+| TTS         | 18001        | Breeze TTS 2 when installed (NVIDIA), else Qwen3-TTS CustomVoice / VoiceDesign / VoiceClone |
+| SFX         | 18002        | MOSS-SoundEffect v2 when installed (NVIDIA), else Woosh; AudioLDM by name |
 | Music       | 18003        | YuE2 when installed (NVIDIA), else ACE-Step v1 |
 | Post        | 18004        | AudioSR upscale |
-| Chatterbox  | 18005        | Chatterbox clone |
 | RVC         | 18006        | Applio convert + train |
 | Dissect     | 18007        | BandIt Plus (DnR) + Nemotron-3-Diarization + TitaNet + Parakeet TDT v3 |
 
@@ -356,15 +357,10 @@ update_script_row     { project_id, scene_slug, row_index, updates }
 
 ── Generation ────────────────────────────────────────────────────────────────
 generate_tts          { project_id, scene_slug, row_index, output_path, ... }
-                      Auto-routes to Chatterbox when character model=="Chatterbox"
-                      and row has a non-empty emotion field. No extra params needed.
-                      Falls back to Qwen3 VoiceDesign/Clone/CustomVoice otherwise.
-                      → job_id
-
-generate_chatterbox   { project_id, scene_slug, row_index, output_path,
-                        ref_audio_path?, emotion?, exaggeration?, cfg_weight?, seed? }
-                      Direct Chatterbox Turbo call. ref_audio_path auto-resolves
-                      from emotional palette if omitted.
+                      A character with a gold reference is cloned on the TTS
+                      port (/generate/voice_clone): the row emotion's palette
+                      reference and direction when it names one. No extra params
+                      needed. Otherwise VoiceDesign or a CustomVoice preset.
                       → job_id
 
 generate_sfx          { project_id, scene_slug, row_index, output_path, ... } → job_id
@@ -381,7 +377,6 @@ generate_palette_take { project_id, character_id, emotion, direction,
 
 approve_palette_take  { project_id, character_id, emotion, audio_path }
                       Lock a palette take as the reference for this emotion.
-                      Sets voice_assignment.model = "Chatterbox" if not already set.
 
 list_character_palette { project_id, character_id }
                       → all palette entries with qa_status and ref_audio_path
@@ -413,7 +408,7 @@ approve_palette_take(project_id, "CHAR_MIRA", "neutral", "/path/neutral_7.wav")
 
 # 3. Generate production lines — routing is automatic
 generate_tts(project_id, "s01_the_office", row_index=3, output_path="mira_01.wav")
-# → Chatterbox clones neutral_7.wav; no explicit ref_audio_path needed
+# → Breeze clones neutral_7.wav and performs its direction; no explicit ref_audio_path needed
 ```
 
 **Claude Desktop configuration** (`~/Library/Application Support/Claude/claude_desktop_config.json`):
@@ -486,37 +481,29 @@ GET  /languages
 - Can enter infinite generation loops (known upstream issue) — set `max_new_tokens` conservatively, expose seed control
 - Output sample rate: 24kHz — normalize to 48kHz before composition
 
-### Chatterbox server — port 18005
+### Breeze server — port 18001
 
-Wraps Chatterbox Turbo (Resemble AI, 0.5B). Primary dialogue synthesis engine.
-Lives at `inference/chatterbox_server.py`. Isolated venv: `inference/.venv-chatterbox`.
+Breeze TTS 2 (3B, 24 kHz, English/Chinese; research / non-commercial weights)
+serves the TTS port when installed, as a drop-in for the Qwen3-TTS server's
+endpoints. Lives at `inference/breeze_server.py`; venv `inference/.venv-breeze`.
 
 ```
-POST /generate/clone
-     body: { text, ref_audio_path, ref_transcript?, exaggeration?, cfg_weight?,
-             temperature?, seed?, output_path, job_id? }
-
-POST /load / POST /unload
-GET  /health
-GET  /jobs/{job_id}
+POST /generate/voice_clone   { text, ref_audio_path, ref_transcript?, instruct?, seed?, cfg_scale?, output_path }
+POST /generate/voice_design  { text, voice_description, ... }
+POST /generate/custom_voice  { text, speaker, instruct?, ... }   (presets designed once)
+GET  /health                 → engine: "breeze"
 ```
 
-**Key parameters:**
-- `text`: dialogue text, may include inline paralinguistic tags: `[sigh]`, `[chuckle]`, `[laugh]`, `[gasp]`, etc.
-- `ref_audio_path`: the approved palette `.wav` — sets the vocal identity to clone
-- `exaggeration`: 0–1; how strongly to colour the performance toward the reference take's style (default 0.5)
-- `cfg_weight`: classifier-free guidance strength (default 0.5)
-- `ref_transcript`: optional; Chatterbox Turbo doesn't require it
+- `instruct` is the direction Breeze performs; vocal events in the text
+  (`[laughs]`, `[sighs]`…) are performed, not read.
+- Whisper checks the reference transcript (corrects it if wrong) and each
+  take, retaking up to three times when a take strays from the script.
+- The job result carries the take check (`wer`, `heard`), recorded in the
+  sidecar's `qa_notes`.
+- VRAM ~12 GB with the Whisper checker; doesn't fit an 8 GB card.
 
-**Important:** `ref_audio_path` must be a **clean, isolated voice sample** (no music, SFX, or reverb). Use Qwen3 VoiceDesign palette takes for this, not scene audio. The palette workflow exists specifically to produce clean reference material.
-
-**Sidecar:** written to `{output}.meta.json` with `model="chatterbox-turbo"`, `parent=ref_audio_path`. The `parent` field is the lineage link back to the palette take used.
-
-**Known gotchas:**
-- Venv is isolated from TTS venv (different torch pin). Never install into the same env.
-- Cloning quality degrades sharply on references shorter than 3 seconds or longer than 15 seconds.
-- On first load, downloads ~1GB of weights from HuggingFace. Subsequent starts are instant.
-- VRAM: ~3GB at 0.5B.
+Where Breeze isn't installed, `tts_server.py` (Qwen3-TTS) takes the same
+requests; its clone ignores `instruct`.
 
 ### SFX server — port 18002
 
@@ -708,7 +695,7 @@ reason instead of polling forever.
 | `commands/audio_spatial.rs` | HRTF/binaural prerender, room IR catalog |
 | `commands/audio_enhance.rs` | AudioSR upscale proxy |
 | `commands/inference.rs` | Server health, model load/unload, generation job submit + poll |
-| `commands/corpus.rs` | Chatterbox corpus build for RVC training (stage 3) |
+| `commands/corpus.rs` | Voice-lock corpus counts and clearing |
 | `commands/rvc.rs` | RVC convert/train proxies, corpus and model status (stage 4) |
 | `commands/character.rs` | Character library: save, import, export, corpus import |
 | `commands/audiobook.rs` | Episode → chaptered `.m4b` (AAC, one chapter per scene, project tags, iTunes audiobook `stik`, remembered cover art); chapter math shared with `render_episode` |
@@ -1022,7 +1009,8 @@ All composition and rendering operates at 48kHz / 24-bit.
 ### VRAM budget guidance (approximate)
 | Model            | VRAM (small)    | VRAM (large)  |
 |------------------|-----------------|---------------|
-| Chatterbox Turbo | ~3GB (0.5B)     | —             |
+| Breeze TTS 2     | ~12GB (3B, with Whisper) | —     |
+| MOSS-SoundEffect | ~9GB peak (staged loading) | — |
 | Dissect (all four models) | ~5.5GB  | —             |
 | Qwen3-TTS        | ~4GB (0.6B)     | ~6GB (1.7B)   |
 | Woosh            | ~2GB (DFlow)    | ~4GB (Flow)   |

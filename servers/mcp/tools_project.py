@@ -259,7 +259,7 @@ def add_character(
     project_id: str,
     name: str,
     description: str = "",
-    voice_model: str = "Chatterbox",
+    voice_model: str = "Clone",
     speaker: str = "",
     base_voice_description: str = "",
 ) -> str:
@@ -267,13 +267,13 @@ def add_character(
     Add a character to an existing project.
 
     voice_model options:
-      "Chatterbox"  — palette-guided zero-shot clone (recommended)
+      "Clone"       — clone a reference clip on the TTS port (recommended)
       "VoiceDesign" — Qwen3-TTS text-described voice
       "Clone"       — ref-audio clone
       "FineTuned"   — trained model
 
     base_voice_description: Qwen3-TTS VoiceDesign prompt that anchors this
-    character's vocal identity. Required for Chatterbox/VoiceDesign workflows.
+    character's vocal identity. Required for cloned and VoiceDesign voices.
 
     Returns: {"ok": true, "character_id": "...", "name": "..."}
     """
@@ -573,7 +573,7 @@ def update_character(
     Update a character's metadata or voice_assignment fields.
     Only supply fields you want to change — empty string means "no change".
 
-    voice_model: "Chatterbox" | "VoiceDesign" | "Clone" | "FineTuned"
+    voice_model: "Clone" | "VoiceDesign" | "CustomVoice" | "FineTuned"
     base_voice_description: Qwen3-TTS VoiceDesign prompt for this character.
     instruct_default: Default generation instruction appended to TTS prompts.
     """

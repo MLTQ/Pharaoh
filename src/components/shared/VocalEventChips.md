@@ -13,5 +13,5 @@ One-click vocal events for a line of dialogue, inserted at the caret.
 - **Does**: Pure helper: the text with `[tag]` spaced into place, and where the caret goes.
 
 ## Notes
-- Brackets, not parentheses: Breeze maps `[x]` to its `(x)` events, Chatterbox reads brackets as tags, and Fountain would turn a parenthesis on its own line into a parenthetical.
+- Brackets, not parentheses: Breeze maps `[x]` to its `(x)` events, and Fountain would turn a parenthesis on its own line into a parenthetical.
 - Tagged lines count as expressive, so voice lock leaves them alone.

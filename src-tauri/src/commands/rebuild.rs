@@ -710,7 +710,7 @@ fn new_project_character(id: &str, name: &str, description: &str) -> Character {
         name: name.to_string(),
         description: description.to_string(),
         voice_assignment: VoiceAssignment {
-            model: "Chatterbox".into(),
+            model: "Clone".into(),
             speaker: None,
             instruct_default: None,
             ref_audio_path: None,
@@ -718,7 +718,7 @@ fn new_project_character(id: &str, name: &str, description: &str) -> Character {
             ref_transcript: None,
             base_voice_description: String::new(),
             emotional_palette: vec![],
-            production_pipeline: "chatterbox".into(),
+            production_pipeline: String::new(),
             rvc: None,
             rvc_model_path: None,
             rvc_index_path: None,

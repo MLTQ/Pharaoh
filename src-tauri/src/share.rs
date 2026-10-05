@@ -554,9 +554,6 @@ async fn dispatch(
             s_id(a, "projectId").map_err(bad)?,
             s_id(a, "characterId").map_err(bad)?,
         ).await),
-        "get_corpus_job_status" => ok(corpus::get_corpus_job_status(
-            s(a, "jobId").map_err(bad)?,
-        ).await),
         "update_scene" => ok(project::update_scene(
             app,
             s_id(a, "projectId").map_err(bad)?,

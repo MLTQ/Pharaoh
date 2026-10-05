@@ -34,7 +34,7 @@ One-shot setup script for Pharaoh's local inference environment. It creates isol
 - **Rationale**: Nemotron-3-Diarization needs NeMo newer than the 3.0.0 wheel, which in turn needs torch ≥ 2.7 — incompatible with the torch 2.6 pins in the other envs.
 
 ### Section arguments
-- **Does**: `./inference/setup.sh <section…>` runs only the named sections (`core breeze yue2 chatterbox rvc audioldm audiosr dissect applio`) and switches named optional ones on; no arguments runs everything as before. `--help` prints the header.
+- **Does**: `./inference/setup.sh <section…>` runs only the named sections (`core breeze moss yue2 rvc audioldm audiosr dissect applio`) and switches named optional ones on; no arguments runs everything as before. `--help` prints the header.
 - **Rationale**: Installing one optional server used to re-sync every core env. Naming `dissect` still honours GPU auto-detection so it can't half-install CUDA wheels on a Mac.
 
 ## Contracts

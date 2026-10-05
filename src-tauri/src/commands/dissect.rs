@@ -1036,7 +1036,7 @@ fn new_character(library_id: &str, name: &str, source_name: &str, speaker_id: &s
         name: name.to_string(),
         description: format!("Voice imported from {} ({}).", source_name, speaker_id),
         voice_assignment: VoiceAssignment {
-            model: "Chatterbox".into(),
+            model: "Clone".into(),
             speaker: None,
             instruct_default: None,
             ref_audio_path: None,
@@ -1044,7 +1044,7 @@ fn new_character(library_id: &str, name: &str, source_name: &str, speaker_id: &s
             ref_transcript: None,
             base_voice_description: String::new(),
             emotional_palette: vec![],
-            production_pipeline: "chatterbox".into(),
+            production_pipeline: String::new(),
             rvc: None,
             rvc_model_path: None,
             rvc_index_path: None,

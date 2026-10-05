@@ -24,15 +24,15 @@ FastMCP instance as an import side effect), and run the chosen transport.
 | remote.py | remote.md | HTTP glue to the inference servers (18001–18006) |
 | resources.py | resources.md | 6 `pharaoh://` read-only resources |
 | tools_project.py | tools_project.md | project/scene/character/script CRUD (17 tools) |
-| tools_generate.py | tools_generate.md | TTS/Chatterbox/SFX/music generation (4 tools) |
-| tools_voice.py | tools_voice.md | palette + RVC voice pipeline (9 tools) |
+| tools_generate.py | tools_generate.md | TTS/SFX/music generation (3 tools) |
+| tools_voice.py | tools_voice.md | palette + voice-lock (RVC) tools (8 tools) |
 | tools_jobs.py | tools_jobs.md | job polling (2 tools) |
 | tools_qa.py | tools_qa.md | asset QA + take management (6 tools) |
 | tools_audio.py | tools_audio.md | ffmpeg post-processing + AudioSR upscale (5 tools) |
 | tools_servers.py | tools_servers.md | model load/unload/health/config (4 tools) |
 | tools_compose.py | tools_compose.md | scene composition + final render (2 tools) |
 
-49 tools + 6 resources total. Tool names, signatures, and docstrings are a
+47 tools + 6 resources total. Tool names, signatures, and docstrings are a
 stable contract — agents and Claude Desktop configs depend on them.
 
 ## Transport modes

@@ -12,7 +12,7 @@ other module imports the same resolved values instead of re-parsing argv.
 - Args are parsed **at import time** with `parse_known_args`, so unknown flags
   are tolerated and `--help` works from any entry point that imports config.
 - Exposes: `args` (Namespace), `PROJECTS_DIR` (Path, `~`/env expanded),
-  `SERVER_URLS` (dict keyed `tts|sfx|music|post|chatterbox|rvc`), and the
+  `SERVER_URLS` (dict keyed `tts|sfx|music|post|rvc`), and the
   shared `log` logger (`pharaoh-mcp`).
 - `_cfg()` reads the Tauri app's persisted AppConfig (config.json under the
   platform config dir, bundle id `ai.aureum.pharaoh`); returns `{}` when

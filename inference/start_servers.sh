@@ -15,12 +15,11 @@
 #   SFX        : ~/Code/Woosh/.venv/bin/python3            (PHARAOH_WOOSH_DIR)
 #                optional AudioLDM runner: inference/.venv-audioldm/bin/python3
 #   Post       : inference/.venv-audiosr/bin/python3       (optional AudioSR)
-#   Chatterbox : inference/.venv-chatterbox/bin/python3    (PHARAOH_CHATTERBOX_PYTHON)
 #   RVC        : inference/.venv-rvc/bin/python3           (PHARAOH_RVC_PYTHON)
 #   Dissect    : inference/.venv-dissect/bin/python3       (PHARAOH_DISSECT_PYTHON)
 #
-# These envs MUST be separate — qwen-tts, ace-step, Woosh, AudioLDM,
-# chatterbox-tts, and rvc-python all pin or expect incompatible stacks.
+# These envs MUST be separate — Breeze, qwen-tts, ace-step, Woosh, AudioLDM,
+# MOSS and rvc-python all pin or expect incompatible stacks.
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -37,7 +36,6 @@ export PHARAOH_AUDIOLDM_PYTHON="${PHARAOH_AUDIOLDM_PYTHON:-${SCRIPT_DIR}/.venv-a
 TTS_PYTHON="${PHARAOH_TTS_PYTHON:-${SCRIPT_DIR}/.venv-tts/bin/python3}"
 MUSIC_PYTHON="${PHARAOH_MUSIC_PYTHON:-${SCRIPT_DIR}/.venv-music/bin/python3}"
 POST_PYTHON="${PHARAOH_POST_PYTHON:-${SCRIPT_DIR}/.venv-audiosr/bin/python3}"
-CHATTERBOX_PYTHON="${PHARAOH_CHATTERBOX_PYTHON:-${SCRIPT_DIR}/.venv-chatterbox/bin/python3}"
 RVC_PYTHON="${PHARAOH_RVC_PYTHON:-${SCRIPT_DIR}/.venv-rvc/bin/python3}"
 DISSECT_PYTHON="${PHARAOH_DISSECT_PYTHON:-${SCRIPT_DIR}/.venv-dissect/bin/python3}"
 BREEZE_PYTHON="${PHARAOH_BREEZE_PYTHON:-${SCRIPT_DIR}/.venv-breeze/bin/python3}"
@@ -98,11 +96,6 @@ if [ -x "${POST_PYTHON}" ]; then
 else
     echo "  Post       : not installed (PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh)"
 fi
-if [ -x "${CHATTERBOX_PYTHON}" ]; then
-    echo "  Chatterbox : ${CHATTERBOX_PYTHON}"
-else
-    echo "  Chatterbox : not installed (PHARAOH_INSTALL_CHATTERBOX=1 ./inference/setup.sh)"
-fi
 if [ -x "${RVC_PYTHON}" ]; then
     echo "  RVC        : ${RVC_PYTHON}"
 else
@@ -131,9 +124,6 @@ fi
 if [ -x "${POST_PYTHON}" ]; then
     "${POST_PYTHON}" post_server.py &
 fi
-if [ -x "${CHATTERBOX_PYTHON}" ]; then
-    "${CHATTERBOX_PYTHON}" chatterbox_server.py &
-fi
 if [ -x "${RVC_PYTHON}" ]; then
     "${RVC_PYTHON}" rvc_server.py &
 fi
@@ -146,9 +136,6 @@ echo "  SFX        → http://localhost:18002/health"
 echo "  Music      → http://localhost:18003/health"
 if [ -x "${POST_PYTHON}" ]; then
     echo "  Post       → http://localhost:18004/health"
-fi
-if [ -x "${CHATTERBOX_PYTHON}" ]; then
-    echo "  Chatterbox → http://localhost:18005/health"
 fi
 if [ -x "${RVC_PYTHON}" ]; then
     echo "  RVC        → http://localhost:18006/health"
