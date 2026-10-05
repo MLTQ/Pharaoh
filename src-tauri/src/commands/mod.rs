@@ -17,6 +17,7 @@ pub mod script;
 pub mod settings;
 pub mod setup;
 pub mod sidecar;
+pub mod takes;
 pub mod rebuild;
 pub mod recording;
 pub mod rvc;

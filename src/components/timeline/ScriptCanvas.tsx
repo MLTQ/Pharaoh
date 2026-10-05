@@ -4,6 +4,8 @@ import { useJobStore } from "../../store/jobStore";
 import { useAudioStore } from "../../store/audioStore";
 import type { ScriptRow, TrackType, Character, ViewId } from "../../lib/types";
 import { VocalEventChips } from "../shared/VocalEventChips";
+import { CompareTakes } from "../shared/CompareTakes";
+import { useProjectStore } from "../../store/projectStore";
 
 // ── Constants ──────────────────────────────────────────────────────────────
 
@@ -98,6 +100,8 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
   const [editingPrompt, setEditingPrompt] = useState(false);
   const [promptDraft, setPromptDraft] = useState(row.prompt);
   const editRef = useRef<HTMLTextAreaElement>(null);
+  const [comparing, setComparing] = useState(false);
+  const realProjectId = useProjectStore((s) => s.realProjectId);
 
   const status = rowStatus(row, rowIndex, sceneSlug, jobs);
   const isDirection = row.type === "DIRECTION";
@@ -156,6 +160,33 @@ const ScriptCard: React.FC<ScriptCardProps> = ({
         )}
 
         <span style={{ flex: 1 }} />
+
+        {/* Compare this line's takes */}
+        {!isDirection && row.file && realProjectId && sceneSlug && (
+          <button
+            onClick={() => setComparing(true)}
+            title="Compare every take of this line, blind, and rate them"
+            style={{
+              fontFamily: "var(--font-mono)", fontSize: 8.5, letterSpacing: "0.05em",
+              color: "var(--fg-3)", background: "transparent",
+              border: "1px solid var(--line-2)", borderRadius: 2, padding: "0 5px", cursor: "pointer", flexShrink: 0,
+            }}
+          >
+            compare
+          </button>
+        )}
+        {comparing && realProjectId && sceneSlug && (
+          <CompareTakes
+            projectId={realProjectId}
+            sceneSlug={sceneSlug}
+            rowIndex={rowIndex}
+            line={row.prompt}
+            who={row.character || row.track}
+            direction={[row.emotion, row.instruct].filter(Boolean).join(" · ")}
+            onUse={(path) => onUpdate({ file: path })}
+            onClose={() => setComparing(false)}
+          />
+        )}
 
         {/* Status dot */}
         {!isDirection && (

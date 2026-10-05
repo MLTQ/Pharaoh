@@ -1011,3 +1011,28 @@ export interface LayoutReport {
  */
 export const layoutSceneRows = (args: { projectId: string; sceneSlug: string; replace?: boolean }): Promise<LayoutReport> =>
   invoke("layout_scene_rows", { projectId: args.projectId, sceneSlug: args.sceneSlug, replace: args.replace ?? false });
+
+// ── Takes of a line ──────────────────────────────────────────────────────────
+
+/** One take of a script line: a generation plus the versions made from it. */
+export interface RowTake {
+  key: string;
+  /** The version that would be placed (newest in the group). */
+  path: string;
+  versions: string[];
+  model: string;
+  seed: number | null;
+  instruct: string | null;
+  qa_notes: string;
+  generated_at: string | null;
+  rating: number | null;
+  in_use: boolean;
+}
+
+/** Every take of a row on disk (older sessions included). */
+export const rowTakes = (args: { projectId: string; sceneSlug: string; rowIndex: number }): Promise<RowTake[]> =>
+  invoke("row_takes", args);
+
+/** Rate a take 1–5 (null clears). Stored in the scene's take_ratings.json. */
+export const rateTake = (args: { projectId: string; sceneSlug: string; key: string; rating: number | null }): Promise<void> =>
+  invoke("rate_take", args);
