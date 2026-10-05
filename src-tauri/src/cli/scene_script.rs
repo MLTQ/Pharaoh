@@ -443,12 +443,98 @@ pub(super) async fn script_import(
     let flags = parse_flags(&filtered)?;
     let prefix = flag_string(&flags, "prefix", "");
     let character_prefix = flag_string(&flags, "character_prefix", "CHAR");
+    let start_index: Option<u32> = flags
+        .get("start_index")
+        .map(|v| v.parse().map_err(|_| Error::Other("invalid --start-index value".into())))
+        .transpose()?;
 
     let path = Path::new(fountain_path);
     let text = std::fs::read_to_string(path)
         .map_err(|e| Error::Other(format!("cannot read {}: {}", fountain_path, e)))?;
 
-    let doc = crate::fountain::parse_document(&text);
+    let summary = import_fountain(config, project_id, &text, fountain_path, &prefix, &character_prefix, start_index, dry_run, false)?;
+    print_json(&summary)
+}
+
+/// `pharaoh script from-prose <file> [--project <id>] [--out <file.fountain>]
+/// [--import true] [--narrator <name>] [--intros false] [--heuristic true]
+/// [--model <name>]`
+///
+/// Prose chapter → Fountain. With `--project`, speakers are matched to the
+/// project's cast; with `--import true` the scenes are added to it. Claude
+/// plans speakers, scenes and cues when ANTHROPIC_API_KEY is set (or the
+/// project's `llm_config.api_key_env`); otherwise dialogue tags and
+/// turn-taking decide.
+pub(super) async fn script_from_prose(
+    config: &crate::models::AppConfig,
+    prose_path: &str,
+    rest: &[String],
+) -> Result<()> {
+    let flags = parse_flags(rest)?;
+    let text = std::fs::read_to_string(prose_path)
+        .map_err(|e| Error::Other(format!("cannot read {}: {}", prose_path, e)))?;
+    let project = flag_opt(&flags, "project").map(|id| load_project(config, &id)).transpose()?;
+    let cast = project
+        .as_ref()
+        .map(|p| {
+            p.characters
+                .iter()
+                .map(|c| crate::commands::prose_script::CastHint { name: c.name.clone(), description: c.description.clone() })
+                .collect()
+        })
+        .unwrap_or_default();
+    let key_env = flag_opt(&flags, "api_key_env")
+        .or_else(|| project.as_ref().map(|p| p.llm_config.api_key_env.clone()).filter(|k| !k.is_empty()));
+    let args = crate::commands::prose_script::ProseToScriptArgs {
+        text,
+        cast,
+        narrator: flag_opt(&flags, "narrator"),
+        intros: Some(flag_parse(&flags, "intros", true)?),
+        heuristic: flag_parse(&flags, "heuristic", false)?,
+        model: flag_opt(&flags, "model"),
+        api_key_env: key_env,
+    };
+    let result = crate::commands::prose_script::prose_to_script_impl(args).await?;
+    let out = flag_opt(&flags, "out").unwrap_or_else(|| {
+        Path::new(prose_path).with_extension("fountain").to_string_lossy().into_owned()
+    });
+    std::fs::write(&out, &result.fountain)?;
+    let imported = if flag_parse(&flags, "import", false)? {
+        let project_id = flag_opt(&flags, "project")
+            .ok_or_else(|| Error::Other("--import needs --project <id>".into()))?;
+        Some(import_fountain(config, &project_id, &result.fountain, &out, "", "CHAR", None, false, true)?)
+    } else {
+        None
+    };
+    print_json(&json!({
+        "fountain_file": out,
+        "mode": result.mode,
+        "model": result.model,
+        "note": result.note,
+        "stats": result.stats,
+        "new_characters": result.new_characters,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "imported": imported,
+    }))
+}
+
+/// The body of `script import`: Fountain text → scenes, rows and new
+/// characters in `project_id` (or, with `dry_run`, what would be added).
+/// Shared with the GUI's "Script from prose".
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn import_fountain(
+    config: &crate::models::AppConfig,
+    project_id: &str,
+    text: &str,
+    fountain_path: &str,
+    prefix: &str,
+    character_prefix: &str,
+    start_index: Option<u32>,
+    dry_run: bool,
+    title_case_new: bool,
+) -> Result<serde_json::Value> {
+    let doc = crate::fountain::parse_document(text);
 
     if doc.scenes.is_empty() {
         return Err(Error::Other(
@@ -482,7 +568,7 @@ pub(super) async fn script_import(
         name_to_id.insert(key.clone(), id.clone());
         new_characters.push(crate::models::Character {
             id: id.clone(),
-            name: name.clone(),
+            name: if title_case_new { title_case(name) } else { name.clone() },
             description: String::new(),
             voice_assignment: VoiceAssignment {
                 model: "VoiceDesign".to_string(),
@@ -517,7 +603,7 @@ pub(super) async fn script_import(
     } else {
         Storyboard { scenes: vec![] }
     };
-    let start_index: u32 = flag_parse(&flags, "start_index", storyboard.scenes.len() as u32)?;
+    let start_index: u32 = start_index.unwrap_or(storyboard.scenes.len() as u32);
 
     // Build the planned scene + row payloads first; only commit if !dry_run
     let mut planned: Vec<(Scene, Vec<ScriptRow>)> = Vec::new();
@@ -590,7 +676,7 @@ pub(super) async fn script_import(
                 "by_type": count_by_type(rows),
             })).collect::<Vec<_>>(),
         });
-        return print_json(&summary);
+        return Ok(summary);
     }
 
     // ── Commit: characters → project, scenes → storyboard, rows → script.csv
@@ -618,7 +704,28 @@ pub(super) async fn script_import(
             "by_type": count_by_type(rows),
         })).collect::<Vec<_>>(),
     });
-    print_json(&summary)
+    Ok(summary)
+}
+
+/// "WREN ALDER" → "Wren Alder" for characters named from prose, whose
+/// cues are capitalised only because Fountain needs it. Mixed-case names and
+/// suffixes in parentheses are left alone.
+fn title_case(name: &str) -> String {
+    if name.chars().any(|c| c.is_lowercase()) {
+        return name.to_string();
+    }
+    name.split(' ')
+        .map(|w| {
+            let mut out = String::new();
+            let mut start = true;
+            for c in w.chars() {
+                out.extend(if start { c.to_uppercase().collect::<Vec<_>>() } else { c.to_lowercase().collect() });
+                start = !c.is_alphanumeric() && c != '\'';
+            }
+            out
+        })
+        .collect::<Vec<_>>()
+        .join(" ")
 }
 
 fn sanitize_slug(s: &str) -> String {

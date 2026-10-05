@@ -298,7 +298,9 @@ pub fn parse_document(text: &str) -> ParsedDocument {
                 if next.is_empty() {
                     break;
                 }
-                if is_character_cue(next) || match_cue(next).is_some() || is_scene_heading(next) {
+                // The first line after a cue is always dialogue, so a shouted
+                // all-caps line ("NO!") isn't mistaken for the next cue.
+                if (!dialogue_text.is_empty() && is_character_cue(next)) || match_cue(next).is_some() || is_scene_heading(next) {
                     break;
                 }
                 if is_parenthetical(next) {
@@ -463,6 +465,13 @@ pub fn blocks_to_rows(
 #[cfg(test)]
 mod title_page_tests {
     use super::*;
+
+    #[test]
+    fn an_all_caps_first_line_is_dialogue_not_a_cue() {
+        let doc = parse_document("INT. HALL - DAY\n\nHARRY\nNO!\n\nRON\nWhat?\n");
+        let lines: Vec<_> = doc.scenes[0].blocks.iter().map(|b| (b.character.as_str(), b.text.as_str())).collect();
+        assert_eq!(lines, vec![("HARRY", "NO!"), ("RON", "What?")]);
+    }
 
     #[test]
     fn cues_find_characters_whose_names_end_in_a_parenthetical() {

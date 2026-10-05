@@ -124,8 +124,10 @@ export function parseFountain(text: string): FountainBlock[] {
         const { line: nextLine } = extractId(rawLines[i]);
         const nextTrim = nextLine.trim();
         if (!nextTrim) break;
-        // A new character cue or cue prefix or scene heading ends the block
-        if (isCharacterCue(nextTrim) || matchCue(nextTrim) || isSceneHeading(nextTrim)) break;
+        // A new character cue or cue prefix or scene heading ends the block.
+        // The first line after a cue is always dialogue, so a shouted all-caps
+        // line ("NO!") isn't mistaken for the next cue.
+        if ((dialogueText && isCharacterCue(nextTrim)) || matchCue(nextTrim) || isSceneHeading(nextTrim)) break;
         const parenMatch = nextTrim.match(PARENTHETICAL_RE);
         if (parenMatch) {
           parenthetical = parenthetical ? `${parenthetical}; ${parenMatch[1]}` : parenMatch[1];

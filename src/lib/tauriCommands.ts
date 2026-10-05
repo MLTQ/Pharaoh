@@ -1027,3 +1027,59 @@ export interface CastImportReport {
  *  project at once. Single characters also land in the Library, linked. */
 export const importCastFiles = (args: { projectId: string; filePaths: string[] }): Promise<CastImportReport> =>
   invoke("import_cast_files", args);
+
+// ── Prose → script ──────────────────────────────────────────────────────────
+
+export interface ProseScriptStats {
+  scenes: number;
+  narration_lines: number;
+  dialogue_lines: number;
+  intros_added: number;
+  tags_named: number;
+  cues: number;
+  speakers: string[];
+  unknown: number;
+}
+
+export interface ProseScriptResult {
+  fountain: string;
+  stats: ProseScriptStats;
+  /** "claude" or "heuristic". */
+  mode: string;
+  model: string | null;
+  input_tokens: number;
+  output_tokens: number;
+  /** Speakers not in the cast; importing creates them. */
+  new_characters: string[];
+  /** Why Claude wasn't used, if it was asked for. */
+  note: string | null;
+}
+
+/** A prose chapter as a Fountain script: narration, dialogue, cues, and the
+ *  narrator naming each voice after its first line in a scene. */
+export const proseToScript = (args: {
+  text: string;
+  cast: { name: string; description: string }[];
+  narrator?: string;
+  intros?: boolean;
+  heuristic?: boolean;
+  model?: string;
+  apiKeyEnv?: string;
+}): Promise<ProseScriptResult> =>
+  invoke("prose_to_script", {
+    args: {
+      text: args.text,
+      cast: args.cast,
+      narrator: args.narrator ?? null,
+      intros: args.intros ?? true,
+      heuristic: args.heuristic ?? false,
+      model: args.model ?? null,
+      api_key_env: args.apiKeyEnv ?? null,
+    },
+  });
+
+/** Add a Fountain script's scenes (and new speakers) to a project. */
+export const importScriptText = (args: { projectId: string; fountain: string; dryRun?: boolean }): Promise<{
+  scenes_added?: { id: string; slug: string; title: string; rows: number }[];
+  characters_added?: { id: string; name: string }[];
+}> => invoke("import_script_text", { projectId: args.projectId, fountain: args.fountain, dryRun: args.dryRun ?? false });

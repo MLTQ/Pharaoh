@@ -24,6 +24,7 @@ operation — round-trip semantics aren't needed.
 ## What it shares with `fountain.ts`
 
 - Same character-cue rule (ALL CAPS, optional `(V.O.)`/`(O.S.)` suffix).
+- The first line after a cue is always dialogue, even in capitals (`HARRY` / `NO!`).
 - Same `SFX:` / `BED:` / `MUSIC:` audio-drama extension.
 - Parenthetical lines → `Block.parenthetical`, which lands in `ScriptRow.instruct`.
 - Stable `id:r-xxxxxx` token written into `ScriptRow.notes` so future round-trips

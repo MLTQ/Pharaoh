@@ -12,6 +12,7 @@ pub mod emotions;
 pub mod layout;
 pub mod inference;
 pub mod llm;
+pub mod prose_script;
 pub mod setup_check;
 pub mod project;
 pub mod script;

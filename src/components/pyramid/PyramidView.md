@@ -13,3 +13,4 @@ The project's front page: the story bible at the apex, scene plates in tier II (
 - The story-shape projection keeps the one-row canvas; only plates stack.
 - Tier labels follow the top course so they stay beside the pyramid on wide canvases.
 - Acts: when scenes have an `act` (Fountain `# Act One` sections on import, `pharaoh scene update --act`, or the new-scene form), each act gets its own course (wrapped at ten plates) with a label above it; clicking the label renames the act for all its scenes. The outline never narrows going down.
+- "From prose…" on the new-scene form opens `ProseScriptDialog`: a prose chapter becomes scenes (narration, dialogue, cues).

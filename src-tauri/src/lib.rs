@@ -4,6 +4,7 @@ mod commands;
 mod env_path;
 mod error;
 mod fountain;
+mod prose;
 mod models;
 mod share;
 
@@ -95,6 +96,8 @@ pub fn run() {
             // LLM
             commands::llm::draft_scene,
             commands::llm::storyboard_review,
+            commands::prose_script::prose_to_script,
+            commands::prose_script::import_script_text,
             // Setup integrity
             commands::setup_check::check_setup,
             // Project archive

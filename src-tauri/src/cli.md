@@ -12,7 +12,7 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 | `cli/mod.rs` | `run` dispatcher + `usage()` text | routes every argv pattern into a submodule |
 | `cli/helpers.rs` | shared plumbing: `print_json`, flag parsing, `load_project`/`save_project`/`load_storyboard`, `find_scene`/`scene_not_found`, `submit_job`/`poll_job`, `cli_wav_info`, `random_seed` | none directly |
 | `cli/project.rs` | project CRUD + status + archive | `project list/status/create/update/archive` |
-| `cli/scene_script.rs` | storyboard scene CRUD, script.csv/fountain authoring, row patching, spatialize, Fountain import | `scene list/get/create/update`, `script read/write/fountain-read/fountain-write/update-row/spatialize/import` |
+| `cli/scene_script.rs` | storyboard scene CRUD, script.csv/fountain authoring, row patching, spatialize, Fountain import | `scene list/get/create/update`, `script read/write/fountain-read/fountain-write/update-row/spatialize/import/from-prose` |
 | `cli/character.rs` | character CRUD, voice assignment, voice probes | `character list/create/update/delete/voice-set/voice-design-test/voice-clone-test` |
 | `cli/server_setup.rs` | server health/config, model load/unload, setup inspection | `server health/config/config-set`, `model load/unload`, `setup status/hardware` |
 | `cli/generate.rs` | direct generation to caller paths; shared TTS submit/finalize helpers used by `character.rs` | `generate tts-custom/tts-design/tts-clone/sfx/music` |
@@ -32,7 +32,7 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 - **Interacts with**: `Project` and `Storyboard` models in `models.rs`.
 
 ### Script Commands (`cli/scene_script.rs`)
-- **Does**: Reads, writes, and patches scene `script.csv` rows; persists and compiles per-scene `script.fountain` prose used by the GUI editor; sets spatial placement; imports whole Fountain screenplays.
+- **Does**: Reads, writes, and patches scene `script.csv` rows; persists and compiles per-scene `script.fountain` prose used by the GUI editor; sets spatial placement; imports whole Fountain screenplays (`import_fountain`, shared with the GUI's `import_script_text`); converts prose chapters into Fountain (`script from-prose`, via `commands/prose_script.rs`).
 - **Interacts with**: `read_script_rows`, `write_script_rows`, `update_script_row_fields` in `app_support.rs`, `parse_document` / `blocks_to_rows` in `fountain.rs`, `audio_spatial.rs` space manifest.
 
 ### Character Commands (`cli/character.rs`)

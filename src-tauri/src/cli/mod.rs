@@ -15,7 +15,7 @@ mod generate_scene;
 mod helpers;
 mod llm;
 mod project;
-mod scene_script;
+pub(crate) mod scene_script;
 mod server_setup;
 
 use crate::app_support::{default_config_path, ensure_app_dirs, load_or_default_app_config};
@@ -90,6 +90,9 @@ pub async fn run(args: Vec<String>) -> Result<()> {
                 .parse::<usize>()
                 .map_err(|_| Error::Other(format!("invalid row index: {}", row_index)))?;
             scene_script::script_spatialize(&config, project_id, scene_slug, row_index, rest).await
+        }
+        [group, action, prose_path, rest @ ..] if group == "script" && action == "from-prose" => {
+            scene_script::script_from_prose(&config, prose_path, rest).await
         }
         [group, action, project_id, fountain_path, rest @ ..]
             if group == "script" && action == "import" =>
@@ -324,6 +327,7 @@ fn usage() -> &'static str {
   pharaoh script spatialize <project_id> <scene_slug> <row_index> [--azimuth <deg>] [--elevation <deg>] [--path <json>] [--space <slug>] [--wet <0-1>] [--clear]
   pharaoh script layout <project_id> <scene_slug> [--replace true] [--gap-ms 350] [--lead-in-ms 1500]
   pharaoh script import <project_id> <fountain_file> [--dry-run] [--prefix <slug-prefix>] [--start-index <n>] [--character-prefix CHAR_]
+  pharaoh script from-prose <prose.txt|.md> [--project <id>] [--out <file.fountain>] [--import true] [--narrator <name>] [--intros false] [--heuristic true] [--model <name>]
   pharaoh character list <project_id>
   pharaoh character create <project_id> --name <name> [--description <text>]
   pharaoh character update <project_id> <character_id> [--name <name>] [--description <text>]

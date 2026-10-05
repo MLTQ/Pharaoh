@@ -6,6 +6,7 @@ import { useJobStore } from "../../store/jobStore";
 import { createScene, readScript, readRenderMeta } from "../../lib/tauriCommands";
 import { rowsToPips, emptyPips, type ScenePips } from "../../lib/scenePips";
 import { StoryShapeView } from "./StoryShapeView";
+import { ProseScriptDialog } from "./ProseScriptDialog";
 import { pyramidGeometry, actRows } from "../../lib/pyramidLayout";
 
 interface PyramidViewProps {
@@ -46,6 +47,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
   const [actDraft, setActDraft] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [formBusy, setFormBusy] = useState(false);
+  const [proseOpen, setProseOpen] = useState(false);
   // Tier II projection: scene plates, or the authored tension curve over the
   // same scenes. Same data, different view — not a separate document.
   const [tierMode, setTierMode] = useState<"plates" | "shape">("plates");
@@ -252,6 +254,8 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
     <div className="pyramid">
       <div className="grain" />
 
+      {proseOpen && <ProseScriptDialog onClose={() => setProseOpen(false)} />}
+
       {/* Inline new-scene form (above pyramid canvas) */}
       {showForm && (
         <div style={{
@@ -326,6 +330,7 @@ export const PyramidView: React.FC<PyramidViewProps> = ({
               />
             </div>
             <div style={{ display: "flex", gap: 8, alignItems: "center", paddingBottom: 1 }}>
+              <button className="btn" onClick={() => { setShowForm(false); setProseOpen(true); }} disabled={formBusy || !realProjectId} title="Make scenes from a prose chapter: narration, dialogue and sound cues">From prose…</button>
               <button className="btn" onClick={handleCancelForm} disabled={formBusy}>Cancel</button>
               <button className="btn btn-primary" onClick={handleCreate} disabled={formBusy}>
                 {formBusy ? "Creating…" : "Create"}
