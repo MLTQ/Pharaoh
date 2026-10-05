@@ -473,6 +473,20 @@ cargo check --manifest-path src-tauri/Cargo.toml
 npm run tauri build
 ```
 
+On Arch and Arch-based distributions, the npm Tauri command automatically
+disables linuxdeploy's obsolete `strip` step, which cannot read modern RELR
+sections in system libraries. Cargo still strips the Pharaoh release binary.
+The same workaround applies when repackaging an existing release build:
+
+```bash
+npm run tauri bundle -- --bundles appimage
+```
+
+Release outputs are in `src-tauri/target/release/bundle/`; the standalone
+executable is `src-tauri/target/release/pharaoh`. AppImages built on Arch require
+a compatible host glibc. Use the Ubuntu CI build for distribution to older Linux
+systems.
+
 ## Known Limitations
 
 - Fully remote deployments still assume shared filesystem paths between GUI/CLI and inference host. Upload/download transport is not implemented yet.
