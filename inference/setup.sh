@@ -9,6 +9,8 @@
 #                                repaint/cover everywhere
 #   inference/.venv-yue2       → YuE2 music (Python 3.12, Linux + NVIDIA; replaces
 #                                ACE-Step for new music where it can run)
+#   inference/.venv-moss       → MOSS-SoundEffect v2: sound effects and beds
+#                                (Python 3.12, Linux + NVIDIA; Woosh is the fallback)
 #   inference/.venv-audioldm   → optional upstream AudioLDM runner
 #   inference/.venv-audiosr    → optional AudioSR upscaler
 #   inference/.venv-rvc        → rvc-python for voice conversion (Python 3.9)
@@ -20,11 +22,14 @@
 # Usage:
 #   ./inference/setup.sh                 core envs + any optional ones enabled below
 #   ./inference/setup.sh dissect         ONLY the named sections (forces them on);
-#   ./inference/setup.sh core dissect    sections: core breeze yue2 chatterbox rvc
-#                                        audioldm audiosr dissect applio
+#   ./inference/setup.sh core dissect    sections: core breeze moss yue2 chatterbox
+#                                        rvc audioldm audiosr dissect applio
 #
 # Breeze defaults to "auto" like dissect (PHARAOH_INSTALL_BREEZE=0/1); its
 # weights (~7 GB) go to PHARAOH_BREEZE_HOME (~/pharaoh-models/breeze).
+#
+# MOSS-SoundEffect v2 defaults to "auto" too (PHARAOH_INSTALL_MOSS=0/1); its
+# weights (~10 GB, Apache 2.0) go to the Hugging Face cache.
 #
 # YuE2 defaults to "auto" too (PHARAOH_INSTALL_YUE2=0/1); its weights (~7.3 GB)
 # go to the Hugging Face cache.
@@ -63,6 +68,10 @@ BREEZE_HOME="${PHARAOH_BREEZE_HOME:-$HOME/pharaoh-models/breeze}"
 BREEZE_REPO="${PHARAOH_BREEZE_REPO:-${BREEZE_HOME}/breeze-tts}"
 BREEZE_MODEL_DIR="${PHARAOH_BREEZE_MODEL_DIR:-${BREEZE_HOME}/breeze-tts-2}"
 BREEZE_COMMIT="58ec70c"
+MOSS_VENV="${SCRIPT_DIR}/.venv-moss"
+INSTALL_MOSS="${PHARAOH_INSTALL_MOSS:-auto}"
+MOSS_REPO="${PHARAOH_MOSS_REPO:-$HOME/pharaoh-models/moss/MOSS-TTS}"
+MOSS_COMMIT="934d6826b084c46a0d033402174d5f8ac4ed2519"
 INSTALL_DISSECT="${PHARAOH_INSTALL_DISSECT:-auto}"
 DISSECT_PREFETCH="${PHARAOH_DISSECT_PREFETCH:-1}"
 DISSECT_MODEL_DIR="${PHARAOH_DISSECT_MODEL_DIR:-$HOME/pharaoh-models/dissect}"
@@ -76,7 +85,7 @@ INSTALL_APPLIO="${PHARAOH_INSTALL_APPLIO:-0}"
 # ── Sections ─────────────────────────────────────────────────────────────────
 # With no arguments every section runs (optional ones per their flags). Naming
 # sections runs only those and switches the named optional ones on.
-KNOWN_SECTIONS="core breeze yue2 chatterbox rvc audioldm audiosr dissect applio"
+KNOWN_SECTIONS="core breeze moss yue2 chatterbox rvc audioldm audiosr dissect applio"
 SECTIONS=" "
 for arg in "$@"; do
     case "${arg}" in
@@ -85,6 +94,7 @@ for arg in "$@"; do
             exit 0 ;;
         core) ;;
         breeze) INSTALL_BREEZE="${PHARAOH_INSTALL_BREEZE:-auto}" ;;
+        moss) INSTALL_MOSS="${PHARAOH_INSTALL_MOSS:-auto}" ;;
         yue2) INSTALL_YUE2="${PHARAOH_INSTALL_YUE2:-auto}" ;;
         chatterbox) INSTALL_CHATTERBOX=1 ;;
         rvc) INSTALL_RVC=1 ;;
@@ -237,6 +247,37 @@ else
     [ "${INSTALL_BREEZE}" = "0" ] && hint "Breeze skipped (PHARAOH_INSTALL_BREEZE=1 ./inference/setup.sh breeze to force)"
 fi
 fi  # breeze
+
+# ── MOSS-SoundEffect v2 (sound effects) ──────────────────────────────────────
+if only moss; then
+step "MOSS-SoundEffect v2 (.venv-moss)"
+if [ "${INSTALL_MOSS}" = "auto" ]; then
+    if [ "$(uname -s)" = "Linux" ] && command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi -L >/dev/null 2>&1; then
+        INSTALL_MOSS=1; ok "NVIDIA GPU found — installing MOSS-SoundEffect (PHARAOH_INSTALL_MOSS=0 to skip)"
+    else
+        INSTALL_MOSS=0; hint "MOSS-SoundEffect needs an NVIDIA GPU (~9 GB peak); Woosh stays the SFX engine here."
+    fi
+fi
+if [ "${INSTALL_MOSS}" = "1" ]; then
+    mkdir -p "$(dirname "${MOSS_REPO}")"
+    if [ ! -d "${MOSS_REPO}/moss_soundeffect_v2" ]; then
+        git clone -q https://github.com/OpenMOSS/MOSS-TTS.git "${MOSS_REPO}"
+        git -C "${MOSS_REPO}" checkout -q "${MOSS_COMMIT}" || warn "couldn't pin MOSS-TTS to ${MOSS_COMMIT}; using its default branch"
+        ok "MOSS-TTS code in ${MOSS_REPO}"
+    else
+        ok "Reusing MOSS-TTS code in ${MOSS_REPO}"
+    fi
+    [ -d "${MOSS_VENV}" ] || uv venv -q --python 3.12 "${MOSS_VENV}"
+    uv pip install --python "${MOSS_VENV}/bin/python" --extra-index-url https://download.pytorch.org/whl/cu128 \
+        --index-strategy unsafe-best-match -e "${MOSS_REPO}/moss_soundeffect_v2[torch-cu128]" soundfile
+    ok "MOSS deps synced"
+    "${MOSS_VENV}/bin/hf" download OpenMOSS-Team/MOSS-SoundEffect-v2.0 >/dev/null \
+        && ok "MOSS-SoundEffect v2.0 weights in the Hugging Face cache (Apache 2.0)" \
+        || warn "MOSS weights download failed; the SFX server falls back to Woosh"
+else
+    [ "${INSTALL_MOSS}" = "0" ] && hint "MOSS skipped (PHARAOH_INSTALL_MOSS=1 ./inference/setup.sh moss to force)"
+fi
+fi  # moss
 
 # ── Optional Chatterbox Turbo ────────────────────────────────────────────────
 if only chatterbox; then

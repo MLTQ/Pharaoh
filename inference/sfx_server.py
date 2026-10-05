@@ -80,6 +80,15 @@ AUDIOLDM_PYTHON = Path(
     os.environ.get("PHARAOH_AUDIOLDM_PYTHON", Path(__file__).parent / ".venv-audioldm/bin/python3")
 ).expanduser()
 AUDIOLDM_ENGINE = os.environ.get("PHARAOH_AUDIOLDM_ENGINE", "native").lower()
+# MOSS-SoundEffect v2: the default engine where installed (won the 2026-10
+# blind test against Woosh and Stable Audio 3). Runs as a persistent worker in
+# its own venv; see moss_sfx_worker.py.
+MOSS_PYTHON = Path(
+    os.environ.get("PHARAOH_MOSS_PYTHON", Path(__file__).parent / ".venv-moss/bin/python3")
+).expanduser()
+MOSS_WORKER = Path(__file__).parent / "moss_sfx_worker.py"
+MOSS_MAX_S = 30.0
+MOSS_REPLY = "@@MOSS "
 _native_audioldm_cuda_available: bool | None = None
 
 SAMPLE_RATE   = 48000
@@ -104,6 +113,83 @@ _audioldm_device = None
 _audioldm_load_lock = asyncio.Lock()
 
 OOM_MARKER = "SFX_OOM"  # FE matches this prefix to surface a memory toast
+
+# ── MOSS worker state ────────────────────────────────────────────────────────
+
+_moss_proc: "asyncio.subprocess.Process | None" = None
+_moss_lock = asyncio.Lock()      # one job at a time through the worker
+_moss_start_lock = asyncio.Lock()
+_moss_error: str | None = None   # why the worker last failed to start
+_moss_stderr_tail: list[str] = []
+
+
+def _moss_installed() -> bool:
+    return MOSS_PYTHON.exists() and MOSS_WORKER.exists()
+
+
+async def _moss_drain_stderr(stream) -> None:
+    while True:
+        line = await stream.readline()
+        if not line:
+            return
+        text = line.decode(errors="replace").rstrip()
+        _moss_stderr_tail.append(text)
+        del _moss_stderr_tail[:-40]
+        log.debug("moss: %s", text)
+
+
+async def _moss_read_reply(timeout: float) -> dict:
+    assert _moss_proc and _moss_proc.stdout
+    deadline = asyncio.get_running_loop().time() + timeout
+    while True:
+        left = deadline - asyncio.get_running_loop().time()
+        if left <= 0:
+            raise TimeoutError("MOSS worker didn't answer in time")
+        line = await asyncio.wait_for(_moss_proc.stdout.readline(), timeout=left)
+        if not line:
+            tail = "\n".join(_moss_stderr_tail[-8:])
+            raise RuntimeError(f"MOSS worker exited: {tail}")
+        text = line.decode(errors="replace")
+        if text.startswith(MOSS_REPLY):
+            return json.loads(text[len(MOSS_REPLY):])
+
+
+async def _ensure_moss() -> str | None:
+    """Start the MOSS worker if it isn't running; returns an error or None."""
+    global _moss_proc, _moss_error
+    async with _moss_start_lock:
+        if _moss_proc and _moss_proc.returncode is None:
+            return None
+        if not _moss_installed():
+            return f"MOSS isn't installed (no {MOSS_PYTHON}); run ./inference/setup.sh moss"
+        _moss_stderr_tail.clear()
+        _moss_proc = await asyncio.create_subprocess_exec(
+            str(MOSS_PYTHON), str(MOSS_WORKER),
+            stdin=asyncio.subprocess.PIPE, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+            env={**os.environ, "TORCHDYNAMO_DISABLE": "1", "PYTORCH_CUDA_ALLOC_CONF": "expandable_segments:True"},
+            limit=1 << 20,
+        )
+        asyncio.create_task(_moss_drain_stderr(_moss_proc.stderr))
+        try:
+            ready = await _moss_read_reply(timeout=900)
+            log.info("MOSS worker ready in %ss", ready.get("load_s"))
+            _moss_error = None
+            return None
+        except Exception as exc:
+            _moss_error = str(exc)
+            await _stop_moss()
+            return _moss_error
+
+
+async def _stop_moss() -> None:
+    global _moss_proc
+    if _moss_proc and _moss_proc.returncode is None:
+        try:
+            _moss_proc.stdin.close()
+            await asyncio.wait_for(_moss_proc.wait(), timeout=10)
+        except Exception:
+            _moss_proc.kill()
+    _moss_proc = None
 
 
 def _woosh_status() -> dict:
@@ -199,8 +285,10 @@ async def _ensure_model() -> str | None:
 class T2AParams(BaseModel):
     prompt: str
     duration_seconds: float = 3.0
-    model_variant: str = "Woosh-DFlow"
-    backend: str = "woosh"
+    # "auto": MOSS where installed, else Woosh. Name one ("Woosh-DFlow",
+    # "MOSS-SFX-v2", "AudioLDM-…") to pick it.
+    model_variant: str = "auto"
+    backend: str = ""
     steps: int = 4
     seed: int = 0
     cfg_scale: float = 4.5
@@ -483,11 +571,61 @@ def _select_audioldm_candidate(audios) -> object:
     return max(candidates, key=score)
 
 
+def _is_moss_request(params: dict) -> bool:
+    backend = str(params.get("backend", "")).lower()
+    variant = str(params.get("model_variant", "")).lower()
+    if backend == "moss" or variant.startswith("moss"):
+        return True
+    # "auto" (and requests that name no engine) prefer MOSS where it's installed.
+    return backend in ("", "auto") and variant in ("", "auto") and _moss_installed()
+
+
 async def _run_sfx(job_id: str, params: dict) -> None:
     if _is_audioldm_request(params):
         await _run_audioldm_sfx(job_id, params)
+    elif _is_moss_request(params):
+        await _run_moss_sfx(job_id, params)
     else:
         await _run_woosh_sfx(job_id, params)
+
+
+async def _run_moss_sfx(job_id: str, params: dict) -> None:
+    jobs.update(job_id, status="running", progress=0.02, message="Starting MOSS")
+    err = await _ensure_moss()
+    if err:
+        jobs.update(job_id, status="failed", error=err)
+        return
+    out_path = remap_path(params.get("output_path")) or server_output_path(job_id)
+    duration = min(float(params.get("duration_seconds", 3.0)), MOSS_MAX_S)
+    # Woosh's default of 4 steps is far too few for MOSS (trained for 100).
+    steps = int(params.get("steps") or 100)
+    steps = 100 if steps < 20 else steps
+    req = {
+        "id": job_id, "prompt": params["prompt"], "seconds": duration, "steps": steps,
+        "cfg_scale": float(params.get("moss_cfg_scale") or 4.0), "seed": int(params.get("seed", 0)),
+        "negative_prompt": params.get("negative_prompt", ""), "output_path": out_path,
+    }
+    try:
+        async with _moss_lock:
+            jobs.update(job_id, progress=0.1, message="Generating")
+            _moss_proc.stdin.write((json.dumps(req) + "\n").encode())
+            await _moss_proc.stdin.drain()
+            res = await _moss_read_reply(timeout=600)
+        if not res.get("ok"):
+            jobs.update(job_id, status="failed", error=res.get("error", "MOSS failed"))
+            return
+        _write_sidecar(out_path, {
+            "model": "moss-soundeffect-v2", "model_variant": "MOSS-SFX-v2",
+            "prompt": params.get("prompt", ""), "seed": req["seed"],
+            "duration_target_ms": int(float(params.get("duration_seconds", 3.0)) * 1000),
+            "duration_actual_ms": res.get("duration_ms"), "sample_rate": res.get("sample_rate", SAMPLE_RATE),
+        })
+        jobs.update(job_id, status="complete", progress=1.0, output_path=out_path,
+                    result={"engine": "moss", "seconds": duration, "steps": steps})
+    except Exception as exc:
+        log.exception("MOSS inference failed")
+        await _stop_moss()  # a wedged worker is restarted on the next job
+        jobs.update(job_id, status="failed", error=f"{OOM_MARKER}: {exc}" if "out of memory" in str(exc).lower() else str(exc))
 
 
 async def _run_woosh_sfx(job_id: str, params: dict) -> None:
@@ -783,10 +921,16 @@ async def health() -> dict:
     except Exception:
         cuda_available = False
         cuda_device_name = None
+    moss_ok = _moss_installed()
     return {
         "status": "ok",
-        "model_loaded": _model_loaded or _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]),
-        "model_variant": MODEL_VARIANT,
+        "model_loaded": _model_loaded or _audioldm_pipe is not None or (AUDIOLDM_ENGINE == "native" and als["ok"]) or moss_ok,
+        "model_variant": "MOSS-SFX-v2" if moss_ok else MODEL_VARIANT,
+        "engine": "moss" if moss_ok else "woosh",
+        "moss_ready": moss_ok,
+        "moss_loaded": bool(_moss_proc and _moss_proc.returncode is None),
+        "moss_error": _moss_error,
+        "moss_max_seconds": MOSS_MAX_S,
         "device": _device,                     # actual device woosh model is on (null if not loaded)
         "cuda_available": cuda_available,       # whether this venv's torch has CUDA
         "cuda_device": cuda_device_name,        # e.g. "NVIDIA RTX 4090"
@@ -890,6 +1034,7 @@ async def load(params: Optional[LoadParams] = None) -> dict:
 @app.post("/unload")
 async def unload() -> dict:
     global _model_loaded, _ldm, _audioldm_pipe, _audioldm_loaded_model_id
+    await _stop_moss()
     _model_loaded = False
     _ldm = None
     _audioldm_pipe = None

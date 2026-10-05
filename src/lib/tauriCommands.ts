@@ -215,7 +215,7 @@ export const submitSfxT2a = (args: {
     prompt: string;
     duration_seconds: number;
     model_variant: string;
-    backend?: "woosh" | "audioldm";
+    backend?: "moss" | "woosh" | "audioldm";
     steps: number;
     seed: number;
     cfg_scale?: number;

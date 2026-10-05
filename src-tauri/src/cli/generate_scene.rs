@@ -456,6 +456,20 @@ async fn tts_engine(http: &reqwest::Client, tts_url: &str) -> String {
         .clone()
 }
 
+/// The SFX server's default engine ("moss" or "woosh"), checked once per run.
+async fn sfx_engine(http: &reqwest::Client, sfx_url: &str) -> String {
+    static ENGINE: tokio::sync::OnceCell<String> = tokio::sync::OnceCell::const_new();
+    ENGINE
+        .get_or_init(|| async {
+            match http.get(format!("{}/health", sfx_url)).timeout(std::time::Duration::from_secs(10)).send().await {
+                Ok(r) => r.json::<serde_json::Value>().await.ok().and_then(|h| h["engine"].as_str().map(str::to_string)).unwrap_or_default(),
+                Err(_) => String::new(),
+            }
+        })
+        .await
+        .clone()
+}
+
 /// Whether the SFX server reports AudioLDM usable (checked once per run).
 async fn audioldm_ready(http: &reqwest::Client, sfx_url: &str) -> bool {
     static READY: tokio::sync::OnceCell<bool> = tokio::sync::OnceCell::const_new();
@@ -490,8 +504,26 @@ async fn generate_sfx(
         .parse::<f32>()
         .ok()
         .map(|ms| (ms / 1000.0).max(0.5))
-        .unwrap_or(3.0);
-    // Beds and long effects prefer AudioLDM — when the server says it's usable.
+        .unwrap_or(if row.track_type == "BED" { 30.0 } else { 3.0 });
+    // MOSS-SoundEffect, where the server has it, does effects and beds (to
+    // 30 s; beds loop under the scene).
+    if sfx_engine(&http, &config.sfx_url).await == "moss" {
+        let params = SfxT2ARequest {
+            prompt: row.prompt.clone(),
+            duration_seconds: duration_seconds.min(30.0),
+            model_variant: "MOSS-SFX-v2".into(),
+            backend: Some("moss".into()),
+            steps: 100,
+            seed: random_seed(),
+            cfg_scale: None,
+            guidance_scale: None,
+            negative_prompt: None,
+            num_waveforms_per_prompt: None,
+            output_path: output_path.clone(),
+        };
+        return run_sfx(config, projects_dir, project_id, scene_slug, row_index, params, "moss-soundeffect-v2", http).await;
+    }
+    // Otherwise beds and long effects prefer AudioLDM — when the server says it's usable.
     let wants_audioldm = row.track_type == "BED" || duration_seconds > 5.0;
     let use_audioldm = wants_audioldm && audioldm_ready(&http, &config.sfx_url).await;
     if wants_audioldm && !use_audioldm {
@@ -520,7 +552,21 @@ async fn generate_sfx(
         num_waveforms_per_prompt: use_audioldm.then_some(1),
         output_path: output_path.clone(),
     };
+    let model = format!("woosh-{}", params.model_variant.to_lowercase());
+    run_sfx(config, projects_dir, project_id, scene_slug, row_index, params, &model, http).await
+}
 
+#[allow(clippy::too_many_arguments)]
+async fn run_sfx(
+    config: &crate::models::AppConfig,
+    projects_dir: &Path,
+    project_id: &str,
+    scene_slug: &str,
+    row_index: usize,
+    params: SfxT2ARequest,
+    model: &str,
+    http: reqwest::Client,
+) -> Result<GeneratedRowResult> {
     let job_id = submit_job(
         &http,
         format!("{}/generate/t2a", config.sfx_url),
@@ -543,7 +589,7 @@ async fn generate_sfx(
         row_index,
         &output_path,
         SidecarMeta {
-            model: format!("woosh-{}", params.model_variant.to_lowercase()),
+            model: model.to_string(),
             model_variant: Some(params.model_variant.clone()),
             prompt: params.prompt.clone(),
             instruct: None,

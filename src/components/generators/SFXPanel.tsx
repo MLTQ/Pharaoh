@@ -1,10 +1,11 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { Icon, PeaksWave, Wave } from "../shared/atoms";
 import { PlayButton } from "../shared/PlayButton";
 import { RichDirector, SceneRouter } from "./RichDirector";
 import { useGenerateJob } from "../../hooks/useGenerateJob";
 import { deriveSlug, useProjectStore } from "../../store/projectStore";
 import { useJobStore } from "../../store/jobStore";
+import { useModelStore } from "../../store/modelStore";
 import { listGeneratedAudioAssets } from "../../lib/tauriCommands";
 import { routeAudioToScene } from "../../lib/assetRouting";
 import { usePeaksStore } from "../../store/peaksStore";
@@ -12,6 +13,12 @@ import { useRegenerateStore } from "../../store/regenerateStore";
 import type { GeneratedAudioAsset, Job, MockScene } from "../../lib/types";
 
 const AUDIO_LDM_NEGATIVE = "speech, talking, music, melody, low quality, distorted, clipped, noisy artifacts";
+
+type Backend = "moss" | "woosh" | "audioldm";
+
+const MOSS_VARIANTS = [
+  { id: "MOSS-SFX-v2", label: "MOSS-SoundEffect v2.0" },
+];
 
 const WOOOSH_VARIANTS = [
   { id: "Woosh-DFlow", label: "Woosh-DFlow" },
@@ -212,9 +219,12 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
   const [scene, setScene] = useState(defaultScene);
   const [value, setValue] = useState("");
   const [duration, setDuration] = useState(3.0);
-  const [backend, setBackend] = useState<"woosh" | "audioldm">("woosh");
-  const [modelVariant, setModelVariant] = useState("Woosh-DFlow");
-  const [steps, setSteps] = useState(4);
+  // MOSS is the default where the SFX server has it (it won the blind test).
+  const mossAvailable = useModelStore((s) => s.health.sfx?.engine === "moss");
+  const [backend, setBackend] = useState<Backend>(mossAvailable ? "moss" : "woosh");
+  const [modelVariant, setModelVariant] = useState(mossAvailable ? "MOSS-SFX-v2" : "Woosh-DFlow");
+  const [steps, setSteps] = useState(mossAvailable ? 100 : 4);
+  const backendTouched = useRef(false);
   const [seed, setSeed] = useState(nowSeed());
   const [cfgScale, setCfgScale] = useState(4.5);
   const [guidanceScale, setGuidanceScale] = useState(2.5);
@@ -261,6 +271,13 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
     setScene(defaultScene);
   }, [defaultScene]);
 
+  // Health arrives after first render: switch to MOSS once it's known to be
+  // there, unless the user already picked a backend.
+  useEffect(() => {
+    if (mossAvailable && !backendTouched.current && backend === "woosh") chooseBackend("moss");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [mossAvailable]);
+
   // Pickup point for "regenerate with same params" — see TTSPanel for shape.
   const regenerateRequest = useRegenerateStore((s) => s.pending);
   const clearRegenerate = useRegenerateStore((s) => s.clearPending);
@@ -274,7 +291,8 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
     if (meta.model_variant) {
       setModelVariant(meta.model_variant);
       const lower = meta.model_variant.toLowerCase();
-      if (lower.startsWith("woosh"))    setBackend("woosh");
+      if (lower.startsWith("moss"))     setBackend("moss");
+      else if (lower.startsWith("woosh")) setBackend("woosh");
       else if (lower.startsWith("audioldm")) setBackend("audioldm");
     }
     clearRegenerate();
@@ -297,7 +315,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
           const model = asset.model.toLowerCase();
           return asset.kind === "sfx"
             && asset.scene_slug === sceneSlug
-            && (model.startsWith("woosh") || model.startsWith("audioldm"));
+            && (model.startsWith("moss") || model.startsWith("woosh") || model.startsWith("audioldm"));
         }));
       })
       .catch(() => {});
@@ -318,9 +336,13 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
     setActiveScene(next);
   };
 
-  const chooseBackend = (next: "woosh" | "audioldm") => {
+  const chooseBackend = (next: Backend) => {
     setBackend(next);
-    if (next === "audioldm") {
+    if (next === "moss") {
+      setDuration(Math.min(Math.max(duration, 0.5), 30));
+      setSteps(100);
+      setModelVariant("MOSS-SFX-v2");
+    } else if (next === "audioldm") {
       setDuration(Math.max(duration, 10));
       setSteps(200);
       setModelVariant("AudioLDM-M-Full");
@@ -390,10 +412,12 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
       <div className="panel-main">
         <div className="panel-header">
           <div className="panel-header-left">
-            <span className="eyebrow sfx">sfx-v3 · {backend === "audioldm" ? "audioldm soundscape" : "woosh foley"}</span>
+            <span className="eyebrow sfx">sfx-v3 · {backend === "moss" ? "moss-soundeffect v2" : backend === "audioldm" ? "audioldm soundscape" : "woosh foley"}</span>
             <span className="ttl">Sound Design</span>
             <span className="desc">
-              Use Woosh for short, sharp foley. Use AudioLDM for long ambiences and minute-scale soundscapes.
+              {backend === "moss"
+                ? <>MOSS-SoundEffect handles effects and beds up to 30 s (beds loop under a scene). Describe the sound plainly: the source, the space, the distance.</>
+                : <>Use Woosh for short, sharp foley. Use AudioLDM for long ambiences and minute-scale soundscapes.</>}
             </span>
           </div>
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 4 }}>
@@ -430,9 +454,10 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
           <div className="field">
             <div className="field-label">
               <span>Backend</span>
-              <span className="hint">{backend === "audioldm" ? "long ambience" : "short foley"}</span>
+              <span className="hint">{backend === "moss" ? "effects + beds" : backend === "audioldm" ? "long ambience" : "short foley"}</span>
             </div>
-            <select className="input" value={backend} onChange={(e) => chooseBackend(e.target.value as "woosh" | "audioldm")}>
+            <select className="input" value={backend} onChange={(e) => { backendTouched.current = true; chooseBackend(e.target.value as Backend); }}>
+              {mossAvailable && <option value="moss">MOSS-SoundEffect · effects &amp; beds (default)</option>}
               <option value="woosh">Woosh · short foley</option>
               <option value="audioldm">AudioLDM · long soundscape</option>
             </select>
@@ -443,7 +468,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
               <span className="hint">{backend === "audioldm" ? "checkpoint" : "flow model"}</span>
             </div>
             <select className="input" value={modelVariant} onChange={(e) => setModelVariant(e.target.value)}>
-              {(backend === "audioldm" ? AUDIOLDM_VARIANTS : WOOOSH_VARIANTS).map((variant) => (
+              {(backend === "moss" ? MOSS_VARIANTS : backend === "audioldm" ? AUDIOLDM_VARIANTS : WOOOSH_VARIANTS).map((variant) => (
                 <option key={variant.id} value={variant.id}>{variant.label}</option>
               ))}
             </select>
@@ -451,8 +476,8 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
         </div>
 
         <div className="field-row" style={{ marginTop: 12 }}>
-          <NumberControl label="Duration" hint={backend === "woosh" ? "best under 5s" : "supports long beds"} min={backend === "audioldm" ? 5 : 0.5} max={backend === "audioldm" ? 300 : 8} step={0.5} value={duration} onChange={(next) => setDuration(next || 1)} />
-          <NumberControl label="Steps" hint={backend === "audioldm" ? "DDIM steps" : "Euler steps"} min={1} max={backend === "audioldm" ? 400 : 16} step={1} value={steps} onChange={(next) => setSteps(Math.max(1, Math.floor(next || 1)))} />
+          <NumberControl label="Duration" hint={backend === "woosh" ? "best under 5s" : backend === "moss" ? "up to 30 s" : "supports long beds"} min={backend === "audioldm" ? 5 : 0.5} max={backend === "audioldm" ? 300 : backend === "moss" ? 30 : 8} step={0.5} value={duration} onChange={(next) => setDuration(next || 1)} />
+          <NumberControl label="Steps" hint={backend === "audioldm" ? "DDIM steps" : backend === "moss" ? "flow steps (100 trained)" : "Euler steps"} min={backend === "moss" ? 20 : 1} max={backend === "audioldm" ? 400 : backend === "moss" ? 200 : 16} step={1} value={steps} onChange={(next) => setSteps(Math.max(1, Math.floor(next || 1)))} />
           <div className="field">
             <div className="field-label">
               <span>Seed</span>
@@ -466,7 +491,7 @@ export const SFXPanel: React.FC<SFXPanelProps> = ({ scenes, defaultScene }) => {
         </div>
 
         <div className="field-row" style={{ marginTop: 12 }}>
-          {backend === "woosh" ? (
+          {backend === "moss" ? null : backend === "woosh" ? (
             <NumberControl label="CFG scale" hint="prompt strength" min={0} max={12} step={0.1} value={cfgScale} onChange={(next) => setCfgScale(next || 0)} />
           ) : (
             <>

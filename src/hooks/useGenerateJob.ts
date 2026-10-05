@@ -207,7 +207,7 @@ export function useGenerateJob() {
   async function submitSfx(params: {
     prompt: string;
     durationSeconds?: number;
-    backend?: "woosh" | "audioldm";
+    backend?: "moss" | "woosh" | "audioldm";
     modelVariant?: string;
     steps?: number;
     seed?: number;
@@ -219,10 +219,13 @@ export function useGenerateJob() {
   }): Promise<SubmitResult> {
     const { projectId, pDir, sceneSlug } = resolveContext();
     const ts = Date.now();
-    const durationSeconds = params.durationSeconds ?? 3.0;
-    const backend = params.backend ?? (durationSeconds > 5 ? "audioldm" : "woosh");
+    // MOSS-SoundEffect does effects and beds (to 30 s) where the SFX server has
+    // it; otherwise Woosh for short foley and AudioLDM for long beds.
+    const moss = useModelStore.getState().health.sfx?.engine === "moss";
+    const backend = params.backend ?? (moss ? "moss" : (params.durationSeconds ?? 3.0) > 5 ? "audioldm" : "woosh");
+    const durationSeconds = backend === "moss" ? Math.min(params.durationSeconds ?? 3.0, 30) : params.durationSeconds ?? 3.0;
     const modelVariant = params.modelVariant
-      ?? (backend === "audioldm" ? "AudioLDM-M-Full" : "Woosh-DFlow");
+      ?? (backend === "moss" ? "MOSS-SFX-v2" : backend === "audioldm" ? "AudioLDM-M-Full" : "Woosh-DFlow");
 
     const jobId = await submitSfxT2a({
       projectId, sceneSlug, rowIndex: params.rowIndex ?? 0,
@@ -231,7 +234,7 @@ export function useGenerateJob() {
         duration_seconds: durationSeconds,
         model_variant: modelVariant,
         backend,
-        steps: params.steps ?? (backend === "audioldm" ? 200 : 4),
+        steps: params.steps ?? (backend === "moss" ? 100 : backend === "audioldm" ? 200 : 4),
         seed: params.seed ?? Math.floor(Math.random() * 99999),
         cfg_scale: params.cfgScale ?? (backend === "woosh" ? 4.5 : undefined),
         guidance_scale: params.guidanceScale ?? (backend === "audioldm" ? 2.5 : undefined),
