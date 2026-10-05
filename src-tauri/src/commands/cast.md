@@ -14,6 +14,9 @@ Cast housekeeping: merge characters, pair unnamed rebuild voices with named ones
 ### `export_cast_pack` / `import_cast_pack`
 - **Does**: A pack is a zip with `cast.json` and one folder per character (character.json with bundle-relative paths, plus the bundle: references, palette, voice-lock model; the RVC corpus only on request; audio stored uncompressed). Import gives each a fresh id, makes paths absolute, keeps the Library link only if that entry exists locally, and renames clashing names "Name (2)".
 
+### `import_cast_files(project_id, file_paths)`
+- **Does**: Imports a mix of packs and single `.pharaoh-character` files at once, returning what was added and which files failed (one bad file doesn't stop the rest). A character file exported from this machine's Library links that entry; otherwise it becomes a new Library entry and is linked.
+
 ## Contracts
 
 | Dependent | Expects | Breaking changes |

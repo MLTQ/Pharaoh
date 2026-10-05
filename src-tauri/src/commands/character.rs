@@ -783,6 +783,19 @@ pub fn import_audio_files_into_corpus(
 
 // ── Cross-machine export/import ─────────────────────────────────────────────
 
+/// The Library entry a `.pharaoh-character` file was exported from, when that
+/// entry exists on this machine (so importing it again can link, not fork).
+pub fn local_origin_of_character_file(projects_dir: &Path, file_path: &str) -> Option<String> {
+    let mut zip = zip::ZipArchive::new(std::fs::File::open(file_path).ok()?).ok()?;
+    let mut raw = String::new();
+    zip.by_name(EXPORT_MANIFEST_FILE).ok()?.read_to_string(&mut raw).ok()?;
+    let m: ExportManifest = serde_json::from_str(&raw).ok()?;
+    library_character_dir(projects_dir, &m.original_library_id)
+        .join(LIBRARY_BUNDLE_FILE)
+        .exists()
+        .then_some(m.original_library_id)
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 struct ExportManifest {
     pharaoh_character_export_version: u32,

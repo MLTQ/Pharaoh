@@ -136,6 +136,7 @@ pub fn run() {
             commands::cast::merge_characters,
             commands::cast::export_cast_pack,
             commands::cast::import_cast_pack,
+            commands::cast::import_cast_files,
             commands::takes::rate_take,
             commands::emotions::dissect_tag_emotions,
             commands::emotions::dissect_emotion_status,

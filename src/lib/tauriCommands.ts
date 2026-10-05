@@ -1068,3 +1068,13 @@ export const exportCastPack = (args: { projectId: string; characterIds: string[]
 /** Add a .pharaoh-cast pack's characters to a project (clashing names get "(2)"). */
 export const importCastPack = (args: { projectId: string; filePath: string }): Promise<import("./types").Character[]> =>
   invoke("import_cast_pack", args);
+
+export interface CastImportReport {
+  added: { id: string; name: string; file: string }[];
+  failed: { file: string; error: string }[];
+}
+
+/** Import several .pharaoh-cast packs and/or .pharaoh-character files into a
+ *  project at once. Single characters also land in the Library, linked. */
+export const importCastFiles = (args: { projectId: string; filePaths: string[] }): Promise<CastImportReport> =>
+  invoke("import_cast_files", args);

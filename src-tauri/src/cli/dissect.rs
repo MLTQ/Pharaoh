@@ -12,7 +12,7 @@ use crate::commands::dissect::{
 use crate::error::{Error, Result};
 use crate::models::AppConfig;
 
-use super::helpers::{flag_opt, flag_parse, parse_flags, print_json};
+use super::helpers::{flag_opt, flag_parse, load_project, parse_flags, print_json};
 
 fn projects_dir(config: &AppConfig) -> PathBuf {
     PathBuf::from(&config.projects_dir)
@@ -333,12 +333,15 @@ pub(super) fn cast_merge(config: &AppConfig, project_id: &str, rest: &[String]) 
 pub(super) fn cast_export(config: &AppConfig, project_id: &str, rest: &[String]) -> Result<()> {
     let flags = parse_flags(rest)?;
     let out = flag_opt(&flags, "output").ok_or_else(|| Error::Other("--output <file.pharaoh-cast> is required".into()))?;
-    let ids: Vec<String> = flag_opt(&flags, "characters").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    let mut ids: Vec<String> = flag_opt(&flags, "characters").unwrap_or_default().split(',').map(|s| s.trim().to_string()).filter(|s| !s.is_empty()).collect();
+    // No --characters: the whole cast.
+    if ids.is_empty() {
+        ids = load_project(config, project_id)?.characters.into_iter().map(|c| c.id).collect();
+    }
     let corpus = matches!(flag_opt(&flags, "include_corpus").as_deref(), Some("true" | "yes" | "1"));
     print_json(&crate::commands::cast::export_cast_pack_to(&projects_dir(config), project_id, &ids, std::path::Path::new(&out), corpus)?)
 }
 
-pub(super) fn cast_import(config: &AppConfig, project_id: &str, file: &str) -> Result<()> {
-    let added = crate::commands::cast::import_cast_pack_into(&projects_dir(config), project_id, std::path::Path::new(file))?;
-    print_json(&added.iter().map(|c| serde_json::json!({"id": c.id, "name": c.name})).collect::<Vec<_>>())
+pub(super) fn cast_import(config: &AppConfig, project_id: &str, files: &[String]) -> Result<()> {
+    print_json(&crate::commands::cast::import_cast_files_into(&projects_dir(config), project_id, files))
 }

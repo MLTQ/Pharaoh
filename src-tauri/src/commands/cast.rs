@@ -388,6 +388,87 @@ pub fn import_cast_pack(app: AppHandle, project_id: String, file_path: String) -
     import_cast_pack_into(&app_projects_dir(&app)?, &project_id, Path::new(&file_path))
 }
 
+/// One file's worth of an import.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportedCharacter {
+    pub id: String,
+    pub name: String,
+    pub file: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ImportFailure {
+    pub file: String,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CastImportReport {
+    pub added: Vec<ImportedCharacter>,
+    pub failed: Vec<ImportFailure>,
+}
+
+/// Whether a zip is a cast pack (cast.json) rather than a single character.
+fn is_cast_pack(path: &Path) -> bool {
+    std::fs::File::open(path)
+        .ok()
+        .and_then(|f| zip::ZipArchive::new(f).ok())
+        .is_some_and(|mut z| z.by_name(PACK_FILE).is_ok())
+}
+
+/// Import any mix of `.pharaoh-cast` packs and single `.pharaoh-character`
+/// files into a project. A single character is linked to its Library entry —
+/// the one it was exported from when that's on this machine, otherwise a new
+/// Library entry made from the file. One bad file doesn't
+/// stop the rest; it's reported in `failed`.
+pub fn import_cast_files_into(projects_dir: &Path, project_id: &str, files: &[String]) -> CastImportReport {
+    let mut report = CastImportReport { added: vec![], failed: vec![] };
+    for file in files {
+        let path = Path::new(file);
+        let name = path.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_else(|| file.clone());
+        let result: Result<Vec<Character>> = if is_cast_pack(path) {
+            import_cast_pack_into(projects_dir, project_id, path)
+        } else {
+            (|| {
+                use crate::commands::character as ch;
+                // Exported from this machine's Library: link that entry rather
+                // than forking a duplicate into the Library.
+                let (library_id, name) = match ch::local_origin_of_character_file(projects_dir, file) {
+                    Some(lib) => {
+                        let c: Character = read_json(&library_character_dir(projects_dir, &lib).join("character.json"))?;
+                        (lib, c.name)
+                    }
+                    None => {
+                        let summary = ch::import_library_file(projects_dir, file.clone())?;
+                        (summary.library_id, summary.name)
+                    }
+                };
+                let project: Project = read_json(&project_dir(projects_dir, project_id).join("project.json"))?;
+                let taken: HashSet<String> = project.characters.iter().map(|c| c.name.to_lowercase()).collect();
+                let mut unique = name.clone();
+                let mut k = 2;
+                while taken.contains(&unique.to_lowercase()) {
+                    unique = format!("{} ({})", name, k);
+                    k += 1;
+                }
+                let new_name = (unique != name).then_some(unique);
+                Ok(vec![ch::import_into_project(projects_dir, project_id, &library_id, new_name)?])
+            })()
+        };
+        match result {
+            Ok(chars) => report.added.extend(chars.into_iter().map(|c| ImportedCharacter { id: c.id, name: c.name, file: name.clone() })),
+            Err(e) => report.failed.push(ImportFailure { file: name, error: e.to_string() }),
+        }
+    }
+    report
+}
+
+/// Import several cast packs and/or character files at once.
+#[tauri::command]
+pub fn import_cast_files(app: AppHandle, project_id: String, file_paths: Vec<String>) -> Result<CastImportReport> {
+    Ok(import_cast_files_into(&app_projects_dir(&app)?, &project_id, &file_paths))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

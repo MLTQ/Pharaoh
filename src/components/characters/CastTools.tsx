@@ -4,8 +4,9 @@
  *  - CastMatchBanner: unnamed rebuild voices ("Speaker 9") that are the same
  *    dissected speaker as a named character, merged in one click.
  *  - MergeIntoControl: move one character's lines onto another and drop it.
- *  - CastPackButtons: export chosen characters as a .pharaoh-cast pack, or
- *    import one into this project.
+ *  - CastPackButtons: Export cast (every character, one .pharaoh-cast pack),
+ *    "…" to pick some, and Import cast (any number of packs and
+ *    .pharaoh-character files at once).
  *
  * All three write project files, then reload the project from disk.
  */
@@ -14,7 +15,7 @@ import React, { useCallback, useEffect, useState } from "react";
 import { createPortal } from "react-dom";
 import type { Character } from "../../lib/types";
 import {
-  castMatches, exportCastPack, importCastPack, mergeCharacters, type CastMatch,
+  castMatches, exportCastPack, importCastFiles, mergeCharacters, type CastMatch,
 } from "../../lib/tauriCommands";
 import { reportError } from "../../lib/errors";
 import { useToastStore } from "../../store/toastStore";
@@ -140,14 +141,15 @@ export const CastPackButtons: React.FC<{ projectId: string; projectTitle: string
   const [corpus, setCorpus] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  const doExport = async () => {
+  // ids: the characters to write (the whole cast for "Export cast").
+  const doExport = async (ids: string[], withCorpus: boolean) => {
     const { save } = await import("@tauri-apps/plugin-dialog");
     const safe = projectTitle.toLowerCase().replace(/[^a-z0-9]+/g, "_").replace(/^_|_$/g, "") || "cast";
     const target = await save({ title: "Export cast pack", defaultPath: `${safe}.pharaoh-cast`, filters: [{ name: "Pharaoh cast pack", extensions: ["pharaoh-cast"] }] });
     if (!target) return;
     setBusy(true);
     try {
-      const r = await exportCastPack({ projectId, characterIds: [...picked], outputPath: target, includeCorpus: corpus });
+      const r = await exportCastPack({ projectId, characterIds: ids, outputPath: target, includeCorpus: withCorpus });
       toast(`Exported ${r.characters.length} characters`, `${(r.bytes / 1e6).toFixed(1)} MB · ${target}`);
       setPicking(false);
     } catch (e) {
@@ -157,14 +159,27 @@ export const CastPackButtons: React.FC<{ projectId: string; projectTitle: string
     }
   };
 
+  // Any number of cast packs and single-character files in one go.
   const doImport = async () => {
     const { open } = await import("@tauri-apps/plugin-dialog");
-    const file = await open({ title: "Import cast pack", multiple: false, filters: [{ name: "Pharaoh cast pack", extensions: ["pharaoh-cast"] }] });
-    if (!file || Array.isArray(file)) return;
+    const picked = await open({
+      title: "Import cast",
+      multiple: true,
+      filters: [{ name: "Pharaoh cast or character", extensions: ["pharaoh-cast", "pharaoh-character"] }],
+    });
+    const files = picked == null ? [] : Array.isArray(picked) ? picked : [picked];
+    if (files.length === 0) return;
     setBusy(true);
     try {
-      const added = await importCastPack({ projectId, filePath: file });
-      toast(`Imported ${added.length} characters`, added.map((c) => c.name).join(", "));
+      const r = await importCastFiles({ projectId, filePaths: files });
+      if (r.added.length) toast(`Imported ${r.added.length} characters`, r.added.map((c) => c.name).join(", "));
+      if (r.failed.length) {
+        useToastStore.getState().push({
+          kind: "warn",
+          title: `${r.failed.length} of ${files.length} files didn't import`,
+          body: r.failed.map((f) => `${f.file}: ${f.error}`).join("\n"),
+        });
+      }
       await onChanged();
     } catch (e) {
       reportError("Import failed", e);
@@ -176,13 +191,14 @@ export const CastPackButtons: React.FC<{ projectId: string; projectTitle: string
   return (
     <>
       <div style={{ display: "flex", gap: 4, padding: "6px 10px 6px 14px", borderBottom: "1px solid var(--line-1)" }}>
-        <button className="btn btn-sm" style={{ flex: 1, fontSize: 10 }} disabled={busy} onClick={doImport} title="Add the characters in a .pharaoh-cast pack to this project">Import pack</button>
-        <button className="btn btn-sm" style={{ flex: 1, fontSize: 10 }} disabled={busy || characters.length === 0} onClick={() => { setPicked(new Set(characters.map((c) => c.id))); setPicking(true); }} title="Save chosen characters as a .pharaoh-cast pack for other projects">Export pack</button>
+        <button className="btn btn-sm" style={{ flex: 1, fontSize: 10 }} disabled={busy} onClick={doImport} title="Add characters from one or more .pharaoh-cast packs or .pharaoh-character files">Import cast</button>
+        <button className="btn btn-sm" style={{ flex: 1, fontSize: 10 }} disabled={busy || characters.length === 0} onClick={() => doExport(characters.map((c) => c.id), false)} title={`Save all ${characters.length} characters as one .pharaoh-cast pack`}>{busy ? "Working…" : "Export cast"}</button>
+        <button className="btn btn-sm" style={{ fontSize: 10, padding: "0 6px" }} disabled={busy || characters.length === 0} onClick={() => { setPicked(new Set(characters.map((c) => c.id))); setPicking(true); }} title="Export some characters…" aria-label="Export some characters">…</button>
       </div>
       {picking && createPortal(
         <div onClick={() => setPicking(false)} style={{ position: "fixed", inset: 0, zIndex: 100, background: "color-mix(in oklch, black 55%, transparent)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16 }}>
           <div role="dialog" aria-label="Export cast pack" onClick={(e) => e.stopPropagation()} style={{ width: "min(460px, 100%)", maxHeight: "80vh", display: "flex", flexDirection: "column", background: "var(--bg-1)", border: "1px solid var(--line-2)", borderRadius: 4, padding: 16 }}>
-            <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-4)", marginBottom: 8 }}>Export cast pack</div>
+            <div style={{ fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.12em", textTransform: "uppercase", color: "var(--fg-4)", marginBottom: 8 }}>Export some characters</div>
             <div style={{ fontSize: 11.5, color: "var(--fg-3)", marginBottom: 8 }}>Each character goes with its voice references, palette and voice-lock model, ready to import into another project.</div>
             <div style={{ display: "flex", gap: 6, marginBottom: 6 }}>
               <button className="btn btn-sm" onClick={() => setPicked(new Set(characters.map((c) => c.id)))}>All</button>
@@ -203,7 +219,7 @@ export const CastPackButtons: React.FC<{ projectId: string; projectTitle: string
             </label>
             <div style={{ display: "flex", justifyContent: "flex-end", gap: 6 }}>
               <button className="btn btn-sm" onClick={() => setPicking(false)}>Cancel</button>
-              <button className="btn btn-sm btn-primary" disabled={busy || picked.size === 0} onClick={doExport}>{busy ? "Exporting…" : `Export ${picked.size}`}</button>
+              <button className="btn btn-sm btn-primary" disabled={busy || picked.size === 0} onClick={() => doExport([...picked], corpus)}>{busy ? "Exporting…" : `Export ${picked.size}`}</button>
             </div>
           </div>
         </div>,

@@ -12,4 +12,4 @@ Cast & Voices housekeeping UI over [cast.rs](../../../src-tauri/src/commands/cas
 - **Does**: "Merge into…" in the character header: moves the character's lines onto the chosen one (with a confirm) and removes it.
 
 ### `CastPackButtons`
-- **Does**: **Import pack** / **Export pack** under the cast list header. Export opens a checklist (All / None / Named only, optional training corpus) and a save dialog; import adds a pack's characters to the project.
+- **Does**: Under the cast list header: **Import cast** (pick any number of `.pharaoh-cast` packs and `.pharaoh-character` files; a file that fails is reported and the rest still import), **Export cast** (every character, one pack, straight to a save dialog) and **…** (choose some: All / None / Named only, optional training corpus).
