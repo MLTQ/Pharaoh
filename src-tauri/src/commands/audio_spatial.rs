@@ -391,8 +391,11 @@ fn spatial_segment(
         // contains a colon — sofa files almost never have weird filenames,
         // but escape the colon anyway for safety on Windows.
         let path_str = sofa.to_string_lossy().replace(':', "\\:");
+        // ffmpeg 9.x renamed the sofalizer option `azimuth` to `rotation`;
+        // `rotation` accepts -360..360 and our `az` is already reduced to
+        // 0..360 (rem_euclid), so the value passes through unchanged.
         return format!(
-            "[{}]sofalizer=sofa={}:type=freq:radius=1:azimuth={:.2}:elevation={:.2}[{}]",
+            "[{}]sofalizer=sofa={}:type=freq:radius=1:rotation={:.2}:elevation={:.2}[{}]",
             in_label, path_str, az, el, out_label
         );
     }
