@@ -12,6 +12,15 @@ The app is meant to be fully operable both by humans in the Tauri GUI and by age
 
 <p align="center"><em>Pyramid view: the story bible at the apex, scenes and their assets below, episode timeline at the base.</em></p>
 
+## Audio Drama Agent Skill
+
+Pharaoh includes a portable [audio drama production skill](skills/pharaoh-audio-drama/README.md)
+for agents: prose-to-Fountain adaptation, casting, explicit acting direction,
+retakes, sound placement, performance review, and delivery. Start with its
+[SKILL.md](skills/pharaoh-audio-drama/SKILL.md), or copy the complete folder into
+your agent's skill directory. It uses your configured Pharaoh installation;
+voices, models, source material, and inference services are not bundled with it.
+
 ## What It Is
 
 Pharaoh is a Tauri 2 desktop app (React + TypeScript frontend, Rust backend) connected to local or remote Python inference servers. The servers are usually on a Linux GPU box; the app and CLI upload inputs and download results themselves, so the two machines don't need a shared disk.
