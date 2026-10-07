@@ -37,15 +37,15 @@ export const MODELS = [
     description: "Voice synthesis — Breeze TTS 2 (design, clone, direction) when installed with ./inference/setup.sh breeze; otherwise Qwen3-TTS, 24 kHz · 5 variants",
     port: 18001,
     variants: TTS_VARIANTS,
-    install: "pip install qwen-tts soundfile",
+    install: "./inference/setup.sh breeze",
   },
   {
     kind: "sfx" as const,
-    label: "Woosh + AudioLDM",
-    description: "Sound design — short foley + long soundscapes",
+    label: "SFX — MOSS-SoundEffect v2 (Woosh, AudioLDM)",
+    description: "Sound design — effects and beds up to 30 s with MOSS on NVIDIA; Woosh and AudioLDM on Macs or by choice",
     port: 18002,
     variants: null as null,
-    install: null as null, // determined at runtime by hardware detection
+    install: "./inference/setup.sh moss",
   },
   {
     kind: "music" as const,
@@ -53,7 +53,7 @@ export const MODELS = [
     description: "Music generation — YuE2 on NVIDIA (instrumental by default), ACE-Step elsewhere and for repaint/cover",
     port: 18003,
     variants: null as null,
-    install: "./inference/setup.sh",
+    install: "./inference/setup.sh yue2",
   },
   {
     kind: "post" as const,
@@ -75,8 +75,12 @@ export const MODELS = [
 
 export type ModelKind = "tts" | "sfx" | "music" | "post" | "dissect";
 
-/** SFX server health extended with Woosh/AudioLDM readiness flags. */
+/** SFX server health extended with MOSS/Woosh/AudioLDM readiness flags. */
 export type SfxServerHealth = ServerHealth & {
+  /** "moss" when MOSS-SoundEffect serves the port, else "woosh". */
+  engine?: string;
+  moss_ready?: boolean;
+  moss_error?: string;
   woosh_ready?: boolean;
   woosh_error?: string;
   woosh_dir?: string;

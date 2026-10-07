@@ -14,6 +14,41 @@ import {
 import { SfxDownloads, WooshInstall } from "./SfxPanels";
 import { WooshSetupPanel, ServerSetupPanel } from "./SetupPanels";
 
+const note: React.CSSProperties = { fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 };
+const summary: React.CSSProperties = { cursor: "pointer", fontSize: 10.5, color: "var(--fg-2)", marginBottom: 6 };
+
+/** The core section (Qwen3-TTS + ACE-Step envs). */
+function SectionInstallCore({ local, accent }: { local: boolean; accent: string }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {local && <ServerSetupPanel profile="core" buttonLabel="Install core envs" detail="Runs setup.sh core on this machine" accent={accent} />}
+      <CopyableCommand command="./inference/setup.sh core" />
+      <CopyableCommand command="hf download ACE-Step/ACE-Step-v1-3.5B --local-dir ~/pharaoh-models/music" />
+    </div>
+  );
+}
+
+/** One setup.sh section: a button that runs it here (local server), or a
+ *  note that it belongs on the remote host — and the command either way. */
+function SectionInstall({ profile, label, local, accent }: {
+  profile: "breeze" | "moss" | "yue2" | "dissect" | "audiosr";
+  label: string;
+  local: boolean;
+  accent: string;
+}) {
+  const command = profile === "audiosr" ? "PHARAOH_INSTALL_AUDIOSR=1 ./inference/setup.sh" : `./inference/setup.sh ${profile}`;
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      {local ? (
+        <ServerSetupPanel profile={profile} buttonLabel={label} detail={`Runs ${command} on this machine`} accent={accent} />
+      ) : (
+        <div style={{ fontSize: 10.5, color: "var(--fg-4)" }}>This server is remote — run this on that host, then restart start_servers.sh:</div>
+      )}
+      <CopyableCommand command={command} />
+    </div>
+  );
+}
+
 export interface ModelServerCardsProps {
   hw: HardwareProfile | null;
   splitServers: boolean;
@@ -51,6 +86,9 @@ export function ModelServerCards({
         const status = statusMap[m.kind];
         const h = healthMap[m.kind];
         const accent = KIND_COLOR[m.kind];
+        const local = /127\.0\.0\.1|localhost|\[::1\]/.test(effectiveUrl(m.kind));
+        // Woosh/AudioLDM setup only matters when MOSS isn't serving SFX.
+        const mossServes = sfxHealth?.engine === "moss";
 
         return (
           <div
@@ -153,8 +191,17 @@ export function ModelServerCards({
                 </div>
               )}
 
-              {/* Woosh directory (SFX only) */}
+              {/* MOSS status (SFX only) */}
+              {m.kind === "sfx" && sfxHealth && (
+                <div style={{ fontFamily: "var(--font-mono)", fontSize: 10, lineHeight: 1.5, color: mossServes ? "var(--st-rendered)" : "var(--fg-4)" }}>
+                  {mossServes ? "✓ MOSS-SoundEffect v2 serves effects and beds" : `MOSS-SoundEffect not active${sfxHealth.moss_error ? ` — ${sfxHealth.moss_error}` : ""}; Woosh serves SFX`}
+                </div>
+              )}
+
+              {/* Woosh directory (SFX only) — an alternative engine, folded away when MOSS serves */}
               {m.kind === "sfx" && (
+                <details open={!mossServes}>
+                  <summary style={summary}>Woosh and AudioLDM (alternatives; the Mac engines)</summary>
                 <div>
                   <Label>Woosh directory</Label>
                   <div style={{ display: "flex", gap: 6, alignItems: "stretch" }}>
@@ -207,14 +254,14 @@ export function ModelServerCards({
                     </div>
                   )}
                 </div>
-              )}
-
-              {/* One-click setup (SFX only, shown when checkpoints missing) */}
-              {m.kind === "sfx" && !sfxHealth?.woosh_ready && (
-                <div>
-                  <Label>Automated setup</Label>
-                  <WooshSetupPanel wooshDir={wooshDir} hw={hw} />
-                </div>
+                  {/* One-click Woosh setup (shown when checkpoints missing) */}
+                  {!sfxHealth?.woosh_ready && (
+                    <div style={{ marginTop: 10 }}>
+                      <Label>Woosh setup</Label>
+                      <WooshSetupPanel wooshDir={wooshDir} hw={hw} />
+                    </div>
+                  )}
+                </details>
               )}
 
               {/* Active variant (TTS only) */}
@@ -233,6 +280,14 @@ export function ModelServerCards({
               <div>
                 <Label>Model downloads</Label>
                 {m.kind === "tts" ? (
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={note}>
+                      <code>setup.sh breeze</code> fetches Breeze TTS 2's code and weights into
+                      {" "}<code>~/pharaoh-models/breeze</code> (Linux + NVIDIA, ~12 GB VRAM; research / non-commercial licence).
+                      Breeze clones voices, performs each line's direction and vocal events, and checks takes with Whisper.
+                    </div>
+                    <details>
+                      <summary style={summary}>Qwen3-TTS (fallback on Macs; clones without direction)</summary>
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                     <div style={{
                       fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6,
@@ -262,9 +317,22 @@ export function ModelServerCards({
                         <CopyableCommand command={`hf download ${v.hf_id} --local-dir ~/pharaoh-models/tts/${v.subdir}`} />
                       </div>
                     ))}
+                    <CopyableCommand command="./inference/setup.sh core" />
+                  </div>
+                    </details>
                   </div>
                 ) : m.kind === "sfx" ? (
-                  <SfxDownloads />
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <div style={note}>
+                      <code>setup.sh moss</code> installs MOSS-SoundEffect v2 (Apache 2.0) into its own env with the
+                      code in <code>~/pharaoh-models/moss</code>; the weights download from Hugging Face during setup.
+                      ~9 GB VRAM at peak, so it runs beside Breeze on a 24 GB card.
+                    </div>
+                    <details>
+                      <summary style={summary}>Woosh and AudioLDM checkpoints</summary>
+                      <SfxDownloads />
+                    </details>
+                  </div>
                 ) : m.kind === "post" ? (
                   <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
                     AudioSR runs through the Post server so upscaling can live on the remote ML host.
@@ -291,6 +359,9 @@ export function ModelServerCards({
                 <Label>Install</Label>
                 {m.kind === "sfx" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                    <SectionInstall profile="moss" label="Install MOSS-SoundEffect" local={local} accent={accent} />
+                    <details>
+                      <summary style={summary}>Woosh and AudioLDM</summary>
                     <WooshInstall hw={hw} />
                     <div>
                       <div style={{ fontSize: 10.5, color: "var(--fg-2)", marginBottom: 4 }}>
@@ -306,62 +377,28 @@ export function ModelServerCards({
                       <div style={{ height: 6 }} />
                       <CopyableCommand command="PHARAOH_INSTALL_AUDIOLDM=1 ./inference/setup.sh" />
                     </div>
+                    </details>
                   </div>
                 ) : m.kind === "tts" ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <ServerSetupPanel
-                      profile="core"
-                      wooshDir={wooshDir}
-                      buttonLabel="Install speech server deps"
-                      detail="Runs setup.sh for TTS and Music virtualenvs"
-                      accent={accent}
-                    />
-                    <CopyableCommand command={m.install!} />
-                  </div>
+                  <SectionInstall profile="breeze" label="Install Breeze TTS 2" local={local} accent={accent} />
                 ) : m.kind === "music" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <ServerSetupPanel
-                      profile="core"
-                      wooshDir={wooshDir}
-                      buttonLabel="Install music server deps"
-                      detail="Runs setup.sh for TTS and Music virtualenvs"
-                      accent={accent}
-                    />
-                    <CopyableCommand command={m.install!} />
+                    <SectionInstall profile="yue2" label="Install YuE2" local={local} accent={accent} />
+                    <details>
+                      <summary style={summary}>ACE-Step (Macs, and repaint/cover everywhere)</summary>
+                      <SectionInstallCore local={local} accent={accent} />
+                    </details>
                   </div>
                 ) : m.kind === "dissect" ? (
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <div style={{ fontSize: 10.5, color: "var(--fg-3)", lineHeight: 1.6 }}>
+                    <div style={note}>
                       Linux + NVIDIA only (NeMo from source, Python 3.12, CUDA 12.8). Sets up the env, the
-                      separator and ~2.5 GB of model weights, then verifies them. Restart
-                      {" "}<code>start_servers.sh</code> afterwards; open port 18007 if the host has a firewall.
+                      separator and ~2.5 GB of model weights, then verifies them. Open port 18007 if the host has a firewall.
                     </div>
-                    {/127\.0\.0\.1|localhost|\[::1\]/.test(effectiveUrl(m.kind)) ? (
-                      <ServerSetupPanel
-                        profile="dissect"
-                        wooshDir={wooshDir}
-                        buttonLabel="Install dissect"
-                        detail="Runs setup.sh dissect on this machine"
-                        accent={accent}
-                      />
-                    ) : (
-                      <div style={{ fontSize: 10.5, color: "var(--fg-4)" }}>
-                        The dissect server is remote — run this on that host:
-                      </div>
-                    )}
-                    <CopyableCommand command="./inference/setup.sh dissect" />
+                    <SectionInstall profile="dissect" label="Install dissect" local={local} accent={accent} />
                   </div>
                 ) : m.kind === "post" ? (
-                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                    <ServerSetupPanel
-                      profile="audiosr"
-                      wooshDir={wooshDir}
-                      buttonLabel="Install AudioSR deps"
-                      detail="Runs setup.sh with PHARAOH_INSTALL_AUDIOSR=1"
-                      accent={accent}
-                    />
-                    <CopyableCommand command={m.install!} />
-                  </div>
+                  <SectionInstall profile="audiosr" label="Install AudioSR" local={local} accent={accent} />
                 ) : null}
               </div>
             </div>

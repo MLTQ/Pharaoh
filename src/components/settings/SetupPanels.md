@@ -11,7 +11,7 @@ One-click automated setup runners: the Woosh clone+checkpoint downloader and the
 - **Rationale**: Invoke rejections are rendered inline in the step list (not toasted) so the failure appears in the same progress UI the user is watching.
 
 ### `ServerSetupPanel`
-- **Does**: Runs a `setup.sh` profile (`core` | `audioldm` | `audiosr` | `all`) via `setup_inference_servers` and tails the last 8 `inference_setup` events as a compact live log.
+- **Does**: Runs a `setup.sh` profile (`core` | `audioldm` | `audiosr` | `all` | `dissect` | `breeze` | `moss` | `yue2` | `rvc` — the named ones run just that setup.sh section) via `setup_inference_servers` and tails the last 8 `inference_setup` events as a compact live log.
 - **Interacts with**: `inference_setup` Tauri events emitted by `setup.rs`; rendered by `ModelServerCards.tsx` for every model kind.
 - **Rationale**: Keeps model-server dependency installs operable from Settings while retaining copyable commands for remote hosts.
 
