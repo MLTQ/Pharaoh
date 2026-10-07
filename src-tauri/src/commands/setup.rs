@@ -222,11 +222,14 @@ pub async fn setup_woosh(app: AppHandle, dest_dir: String) -> Result<()> {
 /// Run `inference/setup.sh` from Settings.
 ///
 /// `profile` selects optional environments:
-/// - `core`: TTS + Music server dependencies.
+/// - `core`: only the core section (Qwen3-TTS, ACE-Step, Woosh SFX envs).
 /// - `audioldm`: Core + optional AudioLDM SFX+ dependencies.
 /// - `audiosr`: Core + optional AudioSR Post dependencies.
 /// - `all`: Core + both optional dependency stacks.
 /// - `dissect`: only the dissect env, separator and NeMo weights (GPU host).
+/// - `breeze` / `moss` / `yue2` / `rvc`: only that setup.sh section — Breeze
+///   TTS 2, MOSS-SoundEffect, YuE2, the RVC voice lock (the first three need
+///   Linux + NVIDIA; setup.sh explains the skip elsewhere).
 #[tauri::command]
 pub async fn setup_inference_servers(
     app: AppHandle,
@@ -255,7 +258,9 @@ pub async fn setup_inference_servers(
         .stderr(std::process::Stdio::piped());
 
     match profile.as_str() {
-        "core" => {}
+        "core" => {
+            command.arg("core");
+        }
         "audioldm" => {
             command.env("PHARAOH_INSTALL_AUDIOLDM", "1");
         }
@@ -268,8 +273,8 @@ pub async fn setup_inference_servers(
         }
         // Only the dissect section; setup.sh itself checks for Linux + NVIDIA
         // and explains the skip on other machines.
-        "dissect" => {
-            command.arg("dissect");
+        "dissect" | "breeze" | "moss" | "yue2" | "rvc" => {
+            command.arg(profile.as_str());
         }
         other => {
             let msg = format!("unknown setup profile: {}", other);

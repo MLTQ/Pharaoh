@@ -133,7 +133,7 @@ export function ServerSetupPanel({
   detail,
   accent,
 }: {
-  profile: "core" | "audioldm" | "audiosr" | "all" | "dissect";
+  profile: "core" | "audioldm" | "audiosr" | "all" | "dissect" | "breeze" | "moss" | "yue2" | "rvc";
   wooshDir?: string;
   buttonLabel: string;
   detail: string;

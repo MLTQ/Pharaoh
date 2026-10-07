@@ -14,7 +14,7 @@ Shared types, constants, and tiny presentational components for the Settings pan
 - **Interacts with**: `ModelServerCards.tsx` renders one card per `MODELS` entry.
 
 ### `SfxServerHealth`
-- **Does**: `ServerHealth` extended with Woosh/AudioLDM readiness flags reported by the SFX server.
+- **Does**: `ServerHealth` extended with the SFX server's `engine` ("moss" | "woosh") and MOSS/Woosh/AudioLDM readiness flags.
 - **Interacts with**: Cast in `SettingsView.tsx`, consumed by `ModelServerCards.tsx`.
 
 ### `CopyableCommand` / `Code` / `Label`

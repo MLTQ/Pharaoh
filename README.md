@@ -42,6 +42,7 @@ The server and model choices come from blind listening tests (`docs/voice-pipeli
 **Writing**
 - Pyramid project view: story bible, scenes as plates (stacked in rows that widen downward for long projects, or one row per act), episode timeline. Projects persist under `~/pharaoh-projects`.
 - Fountain scene editor with audio-drama cues (`SFX:`, `BED:`, `MUSIC:`), `# Act` sections, one-click vocal-event chips (`[laughs]`, `[sighs]`, `[whispers]`…), and live compilation to script rows.
+- Prose to script: turn a prose chapter into scenes — narration, each speaker's lines, scene breaks and sound cues — without rewriting a word. The narrator names each voice after its first line in a scene ("Said Hagrid.") unless the prose already does. Claude plans it when `ANTHROPIC_API_KEY` is set; otherwise dialogue tags, action beats and turn-taking decide.
 - LLM scene drafting/revision (Anthropic) when `ANTHROPIC_API_KEY` is set.
 
 **Voices**
@@ -76,7 +77,9 @@ The server and model choices come from blind listening tests (`docs/voice-pipeli
 | uv | recent | `brew install uv` or `curl -LsSf https://astral.sh/uv/install.sh \| sh` |
 | ffmpeg | recent | `brew install ffmpeg`; render, import, clip processing, resample, normalize |
 | SoX | recent | `brew install sox`; Qwen3-TTS reference preprocessing |
+| git, curl | any | setup.sh clones Breeze/MOSS/Woosh and fetches weights |
 | Xcode CLT | macOS | `xcode-select --install` |
+| NVIDIA driver + CUDA 12.x | Linux GPU host | for Breeze, MOSS, YuE2, Dissect; on Linux use your package manager for the tools above |
 
 The main engines (Breeze, MOSS-SoundEffect, YuE2, Dissect) need Linux with an NVIDIA GPU; a 24 GB card runs Breeze (~12 GB) and MOSS (~9 GB peak) side by side. On a Mac, setup falls back to Qwen3-TTS, Woosh and ACE-Step.
 
@@ -116,7 +119,7 @@ If the servers are on another machine, set their URLs in Settings (or `pharaoh s
 | SFX+ | `inference/.venv-audioldm` | AudioLDM | `setup.sh audioldm` |
 | RVC / Applio | `inference/.venv-rvc`, `.venv-applio` | Voice lock | `setup.sh rvc applio` |
 
-Weights for Breeze, MOSS and YuE2 download during setup; the others download on first use or from the commands on the app's Models page. Breeze's weights are under a research / non-commercial licence; MOSS-SoundEffect is Apache 2.0.
+Weights for Breeze, MOSS and YuE2 download during setup; the others download on first use. The app's Models page (Settings) shows each server's engine and the setup command for it — a one-click install when the server is on this machine. Breeze's weights are under a research / non-commercial licence; MOSS-SoundEffect is Apache 2.0.
 
 Woosh checkout (fallback SFX):
 
@@ -155,7 +158,7 @@ Useful overrides:
 
 1. Click the folder icon in the left rail; create, open, or **Rebuild from a recording**.
 2. Build the cast in Cast & Voices (from the Library, a cast pack, or a rebuild) and give voices in the Character Library a gold reference and palette.
-3. Create scenes in the Pyramid view (optionally in acts) or import a Fountain script.
+3. Create scenes in the Pyramid view (optionally in acts), import a Fountain script, or make them from a prose chapter (**Add scene → From prose…**).
 4. Write in Write mode; generate dialogue, effects and music; compare takes and put the best on each row.
 5. **Lay out** the scene, adjust in Mix mode, and render. Join scenes into the episode and export.
 
@@ -272,7 +275,7 @@ pharaoh --help
 
 **From an installed app**: run the executable inside the bundle, e.g. `ls /Applications/Pharaoh.app/Contents/MacOS/` and call it with a command. On Linux, the AppImage takes the same arguments.
 
-After changing CLI code, run `cargo build` again — `cargo test` doesn't rebuild the binary.
+After changing CLI code, run `cargo build` again — `cargo test` doesn't rebuild the binary. A checkout can hold both `target/debug/pharaoh` and `target/release/pharaoh`; use whichever was built last (`ls -l src-tauri/target/*/pharaoh`), since an old one simply doesn't know newer commands.
 
 A first session:
 
@@ -280,6 +283,7 @@ A first session:
 pharaoh server health all                         # are the servers up, which engines?
 pharaoh project list                              # project ids
 pharaoh scene list <project_id>
+pharaoh script from-prose chapter.md --project <project_id> --import true   # or write scenes yourself:
 pharaoh script fountain-write <project_id> <scene_slug> scene.fountain
 pharaoh generate all scene <project_id> <scene_slug>
 pharaoh script layout <project_id> <scene_slug>
@@ -290,7 +294,7 @@ Long jobs (generation, dissect, rebuilds) wait for their results and print them;
 
 ## Agent Interface (MCP)
 
-`servers/mcp/run.py` is an MCP server with 49 tools and 6 read-only `pharaoh://` resources, so MCP clients can drive Pharaoh without the GUI. For Claude Code or Claude Desktop, point the client at it over stdio:
+`servers/mcp/run.py` is an MCP server with 47 tools and 6 read-only `pharaoh://` resources, so MCP clients can drive Pharaoh without the GUI. For Claude Code or Claude Desktop, point the client at it over stdio:
 
 ```json
 {
@@ -310,7 +314,7 @@ Long jobs (generation, dissect, rebuilds) wait for their results and print them;
 
 Install its dependencies with `pip install -r servers/mcp/requirements.txt`. It can also run as a service: `python servers/mcp/run.py --transport sse --port 18000`.
 
-The MCP server is a separate Python implementation and doesn't yet cover dissect, the Library, cast tools, layout or voice lock; [docs/mcp.md](docs/mcp.md) lists its tools and has a CLI-vs-MCP comparison.
+The MCP server is a separate Python implementation and doesn't yet cover dissect, the Library, cast tools, layout, prose to script or the voice-lock pipeline; [docs/mcp.md](docs/mcp.md) lists its tools and has a CLI-vs-MCP comparison.
 
 ## Architecture Overview
 
@@ -333,6 +337,7 @@ src/
 src-tauri/src/
   cli/                    Headless command surface
   fountain                Fountain parser (acts, cue matching)
+  prose                   Prose → Fountain (segments, attribution, voice intros)
   commands/
     project script        Project/storyboard/script CRUD
     inference             Job submission and sidecar finalization
@@ -341,7 +346,8 @@ src-tauri/src/
     rebuild layout        Recording → project; scene layout
     rvc takes             Voice lock; take listing and ratings
     audio_engine          ffmpeg import/process/render
-    llm audio sidecar settings
+    prose_script          Claude's plan for prose → script
+    llm audio sidecar settings setup
 
 inference/
   breeze_server.py        18001 Breeze TTS 2 (tts_server.py: Qwen3-TTS)
@@ -384,7 +390,7 @@ Release outputs are in `src-tauri/target/release/bundle/`; the standalone execut
 - MOSS-SoundEffect clips top out at 30 s (beds loop under the scene); MOSS output is mono.
 - The MCP server lags the CLI (see [docs/mcp.md](docs/mcp.md)); its scene render uses its own mixer.
 - AudioSR can take several minutes on long clips and downloads checkpoints on first use.
-- The LLM scene drafter is Anthropic-only; `project.json.llm_config.provider` is reserved for others.
+- The LLM features (scene drafter, prose to script) are Anthropic-only; `project.json.llm_config.provider` is reserved for others. Without a key, prose to script attributes from dialogue tags only and adds no sound cues.
 - Fountain support is practical, not complete: dual dialogue, transitions, centered text, explicit scene numbers and full title-page metadata aren't implemented.
 - Windows is untested; Tauri supports it, but ffmpeg discovery, paths and model runtimes may need work.
 
