@@ -292,6 +292,107 @@ export interface CastMember {
   library_id: string | null;
 }
 
+export interface SeriesSet {
+  id: string;
+  name: string;
+  /** Fountain heading, e.g. "INT. FOOD COURT - NIGHT". */
+  heading: string;
+  description: string;
+  /** Bed prompt, used when bed_sound has no recording. */
+  bed: string;
+  bed_sound: string | null;
+}
+
+export interface FormulaBeat {
+  name: string;
+  description: string;
+}
+
+export interface GoldenScene {
+  title: string;
+  note: string;
+  fountain: string;
+}
+
+export interface SeriesStyle {
+  /** "none" | "cold_open" | "full" */
+  narrator: string;
+  narrator_name: string;
+  rating: string;
+  house_style: string;
+  banned: string[];
+  golden: GoldenScene[];
+}
+
+export type SoundCueKind = "theme" | "stinger" | "bumper" | "bed" | "sfx" | "music";
+
+export interface SoundCue {
+  id: string;
+  kind: SoundCueKind | string;
+  label: string;
+  prompt: string;
+  duration_seconds: number;
+  /** Approved take (absolute path), or null. */
+  file: string | null;
+  usage: string;
+}
+
+export interface SoundTake {
+  path: string;
+  duration_ms: number | null;
+  modified: number;
+}
+
+export interface CanonEntry {
+  episode_id: string;
+  episode_title: string;
+  summary: string;
+  facts: string[];
+  gags: string[];
+  threads: string[];
+  created_at: string | null;
+}
+
+export interface EpisodePitch {
+  title: string;
+  logline: string;
+}
+
+export interface PlannedScene {
+  heading: string;
+  set_id: string;
+  act: string;
+  summary: string;
+  characters: string[];
+  beats: string[];
+}
+
+export interface EpisodeGuest {
+  name: string;
+  description: string;
+  voice: string;
+}
+
+export interface EpisodePlan {
+  title: string;
+  logline: string;
+  synopsis: string;
+  scenes: PlannedScene[];
+  guests: EpisodeGuest[];
+  callbacks: string[];
+}
+
+export interface WriteEpisodeResult {
+  project: Project;
+  plan: EpisodePlan;
+  fountain: string;
+  scenes: number;
+  sound_cues_bound: number;
+  new_characters: string[];
+  input_tokens: number;
+  output_tokens: number;
+}
+
 export interface Series {
   id: string;
   title: string;
@@ -304,6 +405,12 @@ export interface Series {
   continuity: string;
   episode_minutes: number;
   cast: CastMember[];
+  sets: SeriesSet[];
+  /** Beat structure, in order. Empty = the format's classic shape. */
+  formula: FormulaBeat[];
+  style: SeriesStyle;
+  /** Recurring audio; scripts place one with `MUSIC: #id`. */
+  sounds: SoundCue[];
   created_at: string | null;
   updated_at: string | null;
 }

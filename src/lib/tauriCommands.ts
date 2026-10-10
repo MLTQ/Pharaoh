@@ -4,6 +4,11 @@ import { invoke } from "./transport";
 import type {
   Project,
   Series,
+  CanonEntry,
+  SoundTake,
+  EpisodePitch,
+  EpisodePlan,
+  WriteEpisodeResult,
   EmotionRecipe,
   Scene,
   ScriptRow,
@@ -73,6 +78,44 @@ export const createSeriesEpisode = (args: {
   title?: string;
   logline?: string;
 }): Promise<Project> => invoke("create_series_episode", args);
+
+export const listSeriesCanon = (seriesId: string): Promise<CanonEntry[]> =>
+  invoke("list_series_canon", { seriesId });
+
+export const saveSeriesCanon = (seriesId: string, canon: CanonEntry[]): Promise<CanonEntry[]> =>
+  invoke("save_series_canon", { seriesId, canon });
+
+/** Creates and returns the folder a sound cue's takes are written to. */
+export const prepareSeriesSoundDir = (seriesId: string, cueId: string): Promise<string> =>
+  invoke("prepare_series_sound_dir", { seriesId, cueId });
+
+export const listSeriesSoundTakes = (seriesId: string, cueId: string): Promise<SoundTake[]> =>
+  invoke("list_series_sound_takes", { seriesId, cueId });
+
+/** The bible as the writer sees it (Markdown). */
+export const seriesBriefText = (seriesId: string): Promise<string> =>
+  invoke("series_brief_text", { seriesId });
+
+/** Claude drafts the bible (cast, sets, formula, style, sound cues) from a
+ *  description of the show; fields already written are kept. */
+export const draftSeriesBible = (seriesId: string, pitch: string): Promise<Series> =>
+  invoke("draft_series_bible", { seriesId, pitch });
+
+export const pitchEpisodes = (seriesId: string, hint?: string): Promise<EpisodePitch[]> =>
+  invoke("pitch_episodes", { seriesId, hint });
+
+export const planEpisode = (seriesId: string, premise: string): Promise<EpisodePlan> =>
+  invoke("plan_episode", { seriesId, premise });
+
+/** Plan (unless given) → write → punch up → import. Emits `episode-writer`
+ *  events ({series_id, stage, message}) while it runs. */
+export const writeEpisode = (args: {
+  series_id: string;
+  premise: string;
+  plan?: EpisodePlan | null;
+  episode_id?: string | null;
+  punch_up?: boolean;
+}): Promise<WriteEpisodeResult> => invoke("write_episode", { args });
 
 // ── Scenes ───────────────────────────────────────────────────────────────────
 

@@ -128,3 +128,36 @@ export const SERIES_FORMATS: { id: string; label: string }[] = [
 export function formatLabel(id: string): string {
   return SERIES_FORMATS.find((f) => f.id === id)?.label ?? id;
 }
+
+/** Starting formulas by format; loaded into the Bible on request. */
+export const FORMULA_PRESETS: Record<string, { name: string; description: string }[]> = {
+  sitcom: [
+    { name: "Cold open", description: "A self-contained bit that sets the episode's theme; ends on a button." },
+    { name: "Act One", description: "Set up the A plot (the scheme or problem) and the B plot." },
+    { name: "Act Two", description: "Complications. The A plot escalates; the B plot gets in the way." },
+    { name: "Act Three", description: "The plots collide; everything goes wrong at once; a resolution that resets the status quo." },
+    { name: "Tag", description: "A short closing beat with a callback." },
+  ],
+  monster_of_the_week: [
+    { name: "Cold open", description: "A victim meets the thing. We hear it, barely." },
+    { name: "The case", description: "The team learns what happened; banter; someone has a theory." },
+    { name: "Investigation", description: "Following the pattern; a witness or a clue; the lore starts to surface." },
+    { name: "First encounter", description: "It goes badly. Someone is hurt or wrong." },
+    { name: "The turn", description: "The rule or weakness is found, at a cost." },
+    { name: "Confrontation", description: "The plan, the fight, the clever reversal." },
+    { name: "Coda", description: "Quiet banter afterwards; one character beat; one thread left hanging." },
+  ],
+  commedia: [
+    { name: "Prologue", description: "A servant tells the audience the situation." },
+    { name: "The obstacle", description: "The lovers want to marry; the old man forbids it for money or vanity." },
+    { name: "The scheme", description: "The servants hatch a plan; disguises and mistaken identities." },
+    { name: "Lazzi", description: "The plan falls apart in comic set pieces." },
+    { name: "Unmasking", description: "Identities revealed; the old man outwitted; the lovers united." },
+  ],
+  anthology: [
+    { name: "Hook", description: "An ordinary person in an ordinary place; one thing is wrong." },
+    { name: "Rising", description: "The wrongness grows; the rules of this story emerge." },
+    { name: "Twist", description: "The rule turns back on the protagonist." },
+    { name: "Ending", description: "A final image or line that recontextualises everything." },
+  ],
+};

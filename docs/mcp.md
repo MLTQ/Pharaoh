@@ -53,7 +53,7 @@ Requires Python ≥ 3.10 with `servers/mcp/requirements.txt` (or `uv run
 | `pharaoh://projects/{project_id}/scenes/{scene_slug}/assets` | A scene's generated audio. |
 | `pharaoh://projects/{project_id}/pipeline` | Per-character voice pipeline status. |
 
-## Tools (47)
+## Tools (50)
 
 | Area | Tools |
 |---|---|
@@ -65,6 +65,7 @@ Requires Python ≥ 3.10 with `servers/mcp/requirements.txt` (or `uv run
 | Post | `import_audio`, `process_clip`, `normalize_audio`, `resample_audio`, `upscale_audio` |
 | Servers | `server_health`, `get_server_config`, `load_model`, `unload_model` |
 | Composition | `compose_scene`, `render_final` |
+| Series | `list_series`, `get_series_brief`, `import_series_episode` (write the episode yourself from the brief, then land it: cast voices, `#tag` sound cues, canon; runs the `pharaoh` CLI) |
 
 Each tool module has a companion doc in `servers/mcp/` (`tools_project.md`,
 `tools_generate.md`, …) with argument details; `run.md` is the module map.
@@ -88,5 +89,6 @@ CLI lacks.
 | Cast merge / matching / packs | ✓ | — |
 | Palette takes: generate / approve | — | ✓ |
 | Voice-lock (RVC) train / convert | — (app Model tab) | ✓ only when the RVC server shares this disk (Pharaoh-dvc1) |
+| Series: bible, pitch, beat sheet, write with Claude's API | ✓ `series …`, `episode new` | brief + land a script the client wrote (`import_series_episode`) |
 | Read-only resources | — | ✓ |
 | Remote inference servers | ✓ uploads/downloads | ✓ uploads/downloads (except RVC) |

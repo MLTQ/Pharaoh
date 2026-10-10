@@ -22,6 +22,7 @@ modules, each of which registers its tools/resources on import:
   tools_audio.py     ffmpeg post-processing + AudioSR upscale
   tools_servers.py   inference-server model management
   tools_compose.py   scene composition + final render
+  tools_series.py    series bibles + landing episodes written by the client
 
 Transport modes:
   stdio  — for Claude Desktop / direct agent integration (default)
@@ -54,6 +55,7 @@ import tools_qa        # noqa: E402,F401
 import tools_audio     # noqa: E402,F401
 import tools_servers   # noqa: E402,F401
 import tools_compose   # noqa: E402,F401
+import tools_series    # noqa: E402,F401
 
 
 def main() -> None:

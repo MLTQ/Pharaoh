@@ -57,6 +57,23 @@ training corpora — so the Mac and the GPU box don't need a shared disk.
 | `script spatialize <project> <slug> <row> [--azimuth] [--elevation] [--path <json>] [--space <slug>] [--wet] [--clear]` | Binaural placement. |
 | `script layout <project> <slug> [--replace true] [--gap-ms 350] [--lead-in-ms 1500]` | Place generated rows on the timeline in script order: lines with a short gap, effects where cued, beds under the whole scene (looped), music from its cue. Rows already placed keep their place unless `--replace true`. |
 
+### Series and episodes
+
+A series is a show bible (cast, sets, formula, style, sound package, canon) above its episodes; an episode is an ordinary project with `series_id` set. `<series>` is an id or (part of) the title.
+
+| Command | What it does |
+|---|---|
+| `series list` | Every series with its cast and episode count. |
+| `series create --title <t> [--format sitcom\|monster_of_the_week\|commedia\|anthology] [--logline] [--pitch <text>]` | New series. `--pitch` describes the show and Claude drafts the bible: cast with engines and relationships, sets, formula, style, sound cues. |
+| `series show <series>` | The bible, its episodes and canon as JSON. |
+| `series brief <series>` | The bible as the writer sees it (Markdown). |
+| `episode pitch <series> [--hint <text>]` | Three loglines that avoid the canon. |
+| `episode plan <series> --premise <text>` | A beat sheet (JSON): scenes with headings, sets, acts, beats; guests with voice descriptions; callbacks. |
+| `episode new <series> [--premise] [--plan <beats.json>] [--episode <project>] [--punch-up false] [--model]` | Make an episode: pitch (if no premise) → beat sheet → script → writers' room pass → a new episode project with the cast's library voices, `#tag` sound cues bound to the show's recordings, and a canon entry. Progress on stderr, result JSON on stdout. Needs `ANTHROPIC_API_KEY`. |
+| `episode import <series> <script.fountain\|-> [--title] [--logline] [--synopsis] [--canon <json>] [--episode <project>]` | Land a script written elsewhere (by an agent, by hand) the same way, without calling Claude. `--canon` is `{"summary", "facts", "gags", "threads"}`. |
+
+In scripts, a sound-package tag after a cue (`MUSIC: #theme`, `BED: #hum`) plays the series' approved take, copied into the scene losslessly; a tag with no take is generated from the cue's prompt.
+
 ### Characters, the Library, and casts
 
 | Command | What it does |
@@ -140,6 +157,12 @@ pharaoh script fountain-write <project> 00_the_bell scene.fountain
 pharaoh generate all scene <project> 00_the_bell
 pharaoh script layout <project> 00_the_bell
 pharaoh compose render scene <project> 00_the_bell
+```
+
+**Make an episode of a series**
+```bash
+pharaoh episode new "night shift" --premise "The carousel starts taking requests."
+pharaoh project status <project_id>            # then generate, layout, render as usual
 ```
 
 **Move a cast to another project**

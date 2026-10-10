@@ -1,5 +1,6 @@
 import React, { useState } from "react";
-import { createSeries } from "../../lib/tauriCommands";
+import { createSeries, draftSeriesBible } from "../../lib/tauriCommands";
+import { errorMessage } from "../../lib/errors";
 import { SERIES_FORMATS, formatLabel } from "../../lib/archetypes";
 import { useSeriesStore } from "../../store/seriesStore";
 import type { Project, Series } from "../../lib/types";
@@ -11,18 +12,27 @@ const NewSeriesForm: React.FC<{ onCreated: (s: Series) => void; onCancel: () => 
   const [title, setTitle] = useState("");
   const [logline, setLogline] = useState("");
   const [format, setFormat] = useState("sitcom");
-  const [busy, setBusy] = useState(false);
+  const [pitch, setPitch] = useState("");
+  const [busy, setBusy] = useState<"" | "create" | "draft">("");
   const [err, setErr] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!title.trim()) { setErr("Title is required."); return; }
-    setBusy(true); setErr(null);
+    setBusy("create"); setErr(null);
+    let created: Series | null = null;
     try {
-      onCreated(await createSeries({ title: title.trim(), logline, format }));
+      created = await createSeries({ title: title.trim(), logline, format });
+      if (pitch.trim()) {
+        setBusy("draft");
+        created = await draftSeriesBible(created.id, pitch);
+      }
+      onCreated(created);
     } catch (e) {
-      setErr(String(e));
+      // The series exists even if drafting failed; open it and say why.
+      if (created) { window.alert(`The series was created, but drafting its bible failed: ${errorMessage(e)}`); onCreated(created); }
+      else setErr(String(e));
     } finally {
-      setBusy(false);
+      setBusy("");
     }
   };
 
@@ -58,13 +68,21 @@ const NewSeriesForm: React.FC<{ onCreated: (s: Series) => void; onCancel: () => 
           {SERIES_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
         </select>
       </div>
+      <div style={{ marginBottom: 16 }}>
+        <label style={labelStyle}>Describe the show <span style={{ textTransform: "none", letterSpacing: 0 }}>(optional: Claude drafts the bible)</span></label>
+        <textarea
+          className="textarea" value={pitch} onChange={(e) => setPitch(e.target.value)}
+          placeholder="Who's in it, where it happens, what keeps going wrong, what it should feel like."
+          style={{ minHeight: 80, fontSize: 12 }}
+        />
+      </div>
       {err && <div style={{ fontSize: 11, color: "var(--sfx)", marginBottom: 10 }}>{err}</div>}
-      <div style={{ display: "flex", gap: 8 }}>
+      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button
-          className="btn btn-primary" onClick={handleCreate} disabled={busy}
+          className="btn btn-primary" onClick={handleCreate} disabled={!!busy}
           style={{ background: "var(--music)", borderColor: "var(--music)", color: "var(--bg-0)" }}
         >
-          {busy ? "Creating…" : "Create series"}
+          {busy === "draft" ? "Drafting the bible…" : busy ? "Creating…" : pitch.trim() ? "Create and draft" : "Create series"}
         </button>
         <button className="btn" onClick={onCancel}>Cancel</button>
       </div>

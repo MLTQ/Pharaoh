@@ -16,6 +16,7 @@ mod helpers;
 mod llm;
 mod project;
 pub(crate) mod scene_script;
+mod series;
 mod server_setup;
 
 use crate::app_support::{default_config_path, ensure_app_dirs, load_or_default_app_config};
@@ -27,6 +28,28 @@ pub async fn run(args: Vec<String>) -> Result<()> {
     ensure_app_dirs(&config)?;
 
     match args.as_slice() {
+        [group, action] if group == "series" && action == "list" => series::series_list(&config).await,
+        [group, action, rest @ ..] if group == "series" && action == "create" => {
+            series::series_create(&config, rest).await
+        }
+        [group, action, series_ref] if group == "series" && action == "show" => {
+            series::series_show(&config, series_ref).await
+        }
+        [group, action, series_ref] if group == "series" && action == "brief" => {
+            series::series_brief(&config, series_ref).await
+        }
+        [group, action, series_ref, rest @ ..] if group == "episode" && action == "pitch" => {
+            series::episode_pitch(&config, series_ref, rest).await
+        }
+        [group, action, series_ref, rest @ ..] if group == "episode" && action == "plan" => {
+            series::episode_plan(&config, series_ref, rest).await
+        }
+        [group, action, series_ref, file, rest @ ..] if group == "episode" && action == "import" => {
+            series::episode_import(&config, series_ref, file, rest).await
+        }
+        [group, action, series_ref, rest @ ..] if group == "episode" && action == "new" => {
+            series::episode_new(&config, series_ref, rest).await
+        }
         [group, action] if group == "project" && action == "list" => {
             project::project_list(&config).await
         }
@@ -310,6 +333,14 @@ pub async fn run(args: Vec<String>) -> Result<()> {
 
 fn usage() -> &'static str {
     "usage:
+  pharaoh series list
+  pharaoh series create --title <title> [--format sitcom|monster_of_the_week|commedia|anthology] [--logline <text>] [--pitch <describe the show; Claude drafts the bible>]
+  pharaoh series show <series_id_or_title>
+  pharaoh series brief <series_id_or_title>
+  pharaoh episode pitch <series> [--hint <text>]
+  pharaoh episode plan <series> --premise <text>
+  pharaoh episode import <series> <script.fountain|-> [--title <t>] [--logline <t>] [--synopsis <t>] [--canon <json {summary,facts,gags,threads}>] [--episode <project_id>]
+  pharaoh episode new <series> [--premise <text>] [--plan <beats.json>] [--episode <project_id>] [--punch-up false] [--model <name>]
   pharaoh project list
   pharaoh project status <project_id>
   pharaoh project create --title <title> [--logline <text>] [--tone <text>]

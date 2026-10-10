@@ -436,6 +436,7 @@ async fn dispatch(
     const COLLAB_CMDS: &[&str] = &[
         "update_project",
         "update_series",
+        "save_series_canon",
         "create_scene",
         "update_scene",
         "write_script",
@@ -467,6 +468,13 @@ async fn dispatch(
         "list_series" => ok(series::list_series(app)),
         "get_series" => ok(series::get_series(app, s_id(a, "seriesId").map_err(bad)?)),
         "list_series_episodes" => ok(series::list_series_episodes(app, s_id(a, "seriesId").map_err(bad)?)),
+        "list_series_canon" => ok(series::list_series_canon(app, s_id(a, "seriesId").map_err(bad)?)),
+        "list_series_sound_takes" => ok(series::list_series_sound_takes(
+            app,
+            s_id(a, "seriesId").map_err(bad)?,
+            s_id(a, "cueId").map_err(bad)?,
+        )),
+        "series_brief_text" => ok(episode_writer::series_brief_text(app, s_id(a, "seriesId").map_err(bad)?)),
         "get_project" => ok(project::get_project(app, s_id(a, "projectId").map_err(bad)?)),
         "open_project" => ok(project::open_project(app, s_id(a, "projectId").map_err(bad)?)),
         "list_scenes" => ok(project::list_scenes(app, s_id(a, "projectId").map_err(bad)?)),
@@ -540,6 +548,7 @@ async fn dispatch(
         // ── Collab mutations (gated above) ──────────────────────────────
         "update_project" => ok(project::update_project(app, de(a, "project").map_err(bad)?)),
         "update_series" => ok(series::update_series(app, de(a, "series").map_err(bad)?)),
+        "save_series_canon" => ok(series::save_series_canon(app, s_id(a, "seriesId").map_err(bad)?, de(a, "canon").map_err(bad)?)),
         "create_scene" => ok(project::create_scene(
             app,
             s_id(a, "projectId").map_err(bad)?,

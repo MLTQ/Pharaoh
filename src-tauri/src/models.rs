@@ -312,6 +312,14 @@ pub struct Series {
     pub continuity: String,
     pub episode_minutes: u32,
     pub cast: Vec<CastMember>,
+    /// Recurring locations, each with its own sound.
+    pub sets: Vec<SeriesSet>,
+    /// The episode's beat structure, in order. Empty = the format's classic shape.
+    pub formula: Vec<FormulaBeat>,
+    pub style: SeriesStyle,
+    /// Recurring audio: theme, stingers, bumpers, set beds. A script cue
+    /// `MUSIC: #theme` resolves to the cue with id `theme`.
+    pub sounds: Vec<SoundCue>,
     pub created_at: Option<DateTime<Utc>>,
     pub updated_at: Option<DateTime<Utc>>,
 }
@@ -339,6 +347,84 @@ pub struct CastMember {
     pub never: String,
     pub relationships: Vec<CastRelationship>,
     pub library_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SeriesSet {
+    pub id: String,
+    pub name: String,
+    /// Fountain scene heading, e.g. "INT. FOOD COURT - NIGHT".
+    pub heading: String,
+    pub description: String,
+    /// Ambient bed prompt, used when `bed_sound` has no file.
+    pub bed: String,
+    /// `SoundCue.id` of this set's recorded bed.
+    pub bed_sound: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct FormulaBeat {
+    pub name: String,
+    pub description: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SeriesStyle {
+    /// "none" | "cold_open" | "full".
+    pub narrator: String,
+    pub narrator_name: String,
+    /// Audience / content rating, e.g. "PG", "adult".
+    pub rating: String,
+    /// The house voice of the writing, as prose.
+    pub house_style: String,
+    /// Phrases the writing never uses.
+    pub banned: Vec<String>,
+    /// Scenes that show the show at its best; given to the writer as examples.
+    pub golden: Vec<GoldenScene>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct GoldenScene {
+    pub title: String,
+    /// Why it works.
+    pub note: String,
+    pub fountain: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct SoundCue {
+    /// Short slug used in scripts as `#id`.
+    pub id: String,
+    /// "theme" | "stinger" | "bumper" | "bed" | "sfx" | "music".
+    pub kind: String,
+    pub label: String,
+    /// Generation prompt, and the fallback when there is no file.
+    pub prompt: String,
+    pub duration_seconds: f32,
+    /// The approved take, relative to the series folder on disk; absolute
+    /// in everything the commands return.
+    pub file: Option<String>,
+    /// When the writer should use it ("opening titles", "act breaks").
+    pub usage: String,
+}
+
+/// What an episode established, for callbacks and continuity. Kept in
+/// `canon.json` next to `series.json`, newest last.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CanonEntry {
+    pub episode_id: String,
+    pub episode_title: String,
+    pub summary: String,
+    pub facts: Vec<String>,
+    pub gags: Vec<String>,
+    pub threads: Vec<String>,
+    pub created_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

@@ -44,6 +44,7 @@ The server and model choices come from blind listening tests (`docs/voice-pipeli
 - Fountain scene editor with audio-drama cues (`SFX:`, `BED:`, `MUSIC:`), `# Act` sections, one-click vocal-event chips (`[laughs]`, `[sighs]`, `[whispers]`…), and live compilation to script rows.
 - Prose to script: turn a prose chapter into scenes — narration, each speaker's lines, scene breaks and sound cues — without rewriting a word. The narrator names each voice after its first line in a scene ("Said Hagrid.") unless the prose already does. Claude plans it when `ANTHROPIC_API_KEY` is set; otherwise dialogue tags, action beats and turn-taking decide.
 - LLM scene drafting/revision (Anthropic) when `ANTHROPIC_API_KEY` is set.
+- Series: a show bible above its episodes, as a second launcher column beside one-shots. Cast built on stock types (commedia masks, sitcom types, monster-of-the-week roles) with engines, catchphrases and relationships; recurring sets with their own beds; a formula; house style and golden scenes; a sound package (theme, stingers, set beds) recorded once and reused losslessly; a canon log. "Make an episode" pitches, plans a beat sheet, writes and punches up the script with Claude, and lands it as an ordinary project with the cast's voices. A paragraph about a show can draft the whole bible.
 
 **Voices**
 - Character Library: each character's gold reference clip, emotional palette (named emotions with written direction and real reference lines), and optional voice lock.
@@ -294,7 +295,7 @@ Long jobs (generation, dissect, rebuilds) wait for their results and print them;
 
 ## Agent Interface (MCP)
 
-`servers/mcp/run.py` is an MCP server with 47 tools and 6 read-only `pharaoh://` resources, so MCP clients can drive Pharaoh without the GUI. For Claude Code or Claude Desktop, point the client at it over stdio:
+`servers/mcp/run.py` is an MCP server with 50 tools and 6 read-only `pharaoh://` resources, so MCP clients can drive Pharaoh without the GUI. For Claude Code or Claude Desktop, point the client at it over stdio:
 
 ```json
 {

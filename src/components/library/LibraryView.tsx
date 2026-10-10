@@ -56,9 +56,12 @@ import { useUiStore } from "../../store/uiStore";
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export const LibraryView: React.FC = () => {
+export const LibraryView: React.FC<{
+  /** Entry to open first (the Series home's "Design voice"). */
+  initialSelectedId?: string | null;
+}> = ({ initialSelectedId = null }) => {
   const [summaries, setSummaries] = useState<LibraryCharacterSummary[]>([]);
-  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(initialSelectedId);
   const [character, setCharacter] = useState<Character | null>(null);
   const [loading, setLoading] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -107,7 +110,7 @@ export const LibraryView: React.FC = () => {
   };
 
   useEffect(() => {
-    refreshList();
+    refreshList(initialSelectedId ?? undefined);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

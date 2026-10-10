@@ -9,6 +9,7 @@ pub mod character;
 pub mod corpus;
 pub mod dissect;
 pub mod emotions;
+pub mod episode_writer;
 pub mod layout;
 pub mod inference;
 pub mod llm;

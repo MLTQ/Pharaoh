@@ -19,6 +19,7 @@ Headless command entrypoint for Pharaoh. It exposes the GUI workflows as JSON-em
 | `cli/generate_scene.rs` | script-row generation bound back into script.csv | `generate row scene`, `generate all scene` |
 | `cli/asset_post.rs` | sidecar-backed asset listing/QA/takes/binding; clip import/process/normalize/resample/upscale | `asset list/meta/qa/takes/use`, `post import/process/normalize/resample/upscale` |
 | `cli/compose.rs` | scene/episode rendering, render meta, waveform inspection | `compose render scene`, `compose final`, `compose meta`, `audio peaks/duration/zero-crossings` |
+| `cli/series.rs` | series bibles and the episode writer; a series is named by id or title | `series list/create/show/brief`, `episode pitch/plan/new/import` |
 | `cli/llm.rs` | Anthropic-backed drafting and continuity review | `llm draft-scene`, `storyboard review/rewrite` |
 
 ## Components

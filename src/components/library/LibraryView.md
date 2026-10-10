@@ -3,6 +3,9 @@
 ## Purpose
 Character Library — the **canonical character creation suite** (Pharaoh-37l). Library bundles live at `<projects_dir>/_library/characters/<library_id>/` and are reusable across episodes via fork-and-pull sync. All voice design, palette construction, corpus building, and RVC training happens here; [CharacterDesignerView](../characters/CharacterDesignerView.md) is a read-only per-episode manifest that imports library characters and shows their assigned lines.
 
+## Props
+- `initialSelectedId?`: the entry to open first. The Series home's Voices tab passes the entry "Design voice" just created; the view is keyed by it.
+
 ## Components
 
 ### `LibraryView`
