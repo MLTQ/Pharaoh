@@ -435,6 +435,7 @@ async fn dispatch(
     // Mutations: everything below READ_ONLY_END is gated here.
     const COLLAB_CMDS: &[&str] = &[
         "update_project",
+        "update_series",
         "create_scene",
         "update_scene",
         "write_script",
@@ -463,6 +464,9 @@ async fn dispatch(
         // ── Reads ───────────────────────────────────────────────────────
         "get_projects_dir" => ok_plain(project::get_projects_dir(app)),
         "list_projects" => ok(project::list_projects(app)),
+        "list_series" => ok(series::list_series(app)),
+        "get_series" => ok(series::get_series(app, s_id(a, "seriesId").map_err(bad)?)),
+        "list_series_episodes" => ok(series::list_series_episodes(app, s_id(a, "seriesId").map_err(bad)?)),
         "get_project" => ok(project::get_project(app, s_id(a, "projectId").map_err(bad)?)),
         "open_project" => ok(project::open_project(app, s_id(a, "projectId").map_err(bad)?)),
         "list_scenes" => ok(project::list_scenes(app, s_id(a, "projectId").map_err(bad)?)),
@@ -535,6 +539,7 @@ async fn dispatch(
 
         // ── Collab mutations (gated above) ──────────────────────────────
         "update_project" => ok(project::update_project(app, de(a, "project").map_err(bad)?)),
+        "update_series" => ok(series::update_series(app, de(a, "series").map_err(bad)?)),
         "create_scene" => ok(project::create_scene(
             app,
             s_id(a, "projectId").map_err(bad)?,

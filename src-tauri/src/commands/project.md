@@ -10,7 +10,7 @@ Tauri commands for project and scene CRUD. This file owns persistence of `projec
 - **Interacts with**: `app_support.rs`, project launch UI.
 
 ### `create_project`, `open_project`, `get_project`, `list_projects`, `update_project`
-- **Does**: Manage top-level project records and metadata.
+- **Does**: Manage top-level project records and metadata. `create_project_at` is the AppHandle-free core, shared with series episodes ([series.rs](./series.md)), which pass a `series_id`. One-shots leave it `None` and it is not written.
 - **Interacts with**: `Project` in `models.rs`, `projectStore.ts`.
 
 ### `migrate_project_in_place` + `relativize_for_write`

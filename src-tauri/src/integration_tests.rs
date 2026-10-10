@@ -139,6 +139,7 @@ async fn end_to_end_render_pipeline() {
             model: "claude-sonnet-4-6".into(),
             api_key_env: "ANTHROPIC_API_KEY".into(),
         },
+        series_id: None,
     };
     let project_json = project_root.join("project.json");
     std::fs::write(&project_json, serde_json::to_string_pretty(&project).unwrap()).unwrap();

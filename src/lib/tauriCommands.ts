@@ -3,6 +3,7 @@
 import { invoke } from "./transport";
 import type {
   Project,
+  Series,
   EmotionRecipe,
   Scene,
   ScriptRow,
@@ -46,6 +47,32 @@ export const listProjects = (): Promise<Project[]> =>
 
 export const updateProject = (project: Project): Promise<Project> =>
   invoke("update_project", { project });
+
+// ── Series ───────────────────────────────────────────────────────────────────
+
+export const listSeries = (): Promise<Series[]> => invoke("list_series");
+
+export const getSeries = (seriesId: string): Promise<Series> =>
+  invoke("get_series", { seriesId });
+
+export const createSeries = (args: {
+  title: string;
+  logline?: string;
+  format?: string;
+}): Promise<Series> => invoke("create_series", args);
+
+export const updateSeries = (series: Series): Promise<Series> =>
+  invoke("update_series", { series });
+
+export const listSeriesEpisodes = (seriesId: string): Promise<Project[]> =>
+  invoke("list_series_episodes", { seriesId });
+
+/** A new project linked to the series, with the voiced cast imported. */
+export const createSeriesEpisode = (args: {
+  seriesId: string;
+  title?: string;
+  logline?: string;
+}): Promise<Project> => invoke("create_series_episode", args);
 
 // ── Scenes ───────────────────────────────────────────────────────────────────
 

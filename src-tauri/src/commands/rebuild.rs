@@ -845,6 +845,7 @@ fn build_into(root: &Path, project_id: &str, import_id: &str, import_dir: &Path,
         updated_at: now,
         characters: characters.clone(),
         llm_config: LlmConfig { provider: "anthropic".into(), model: "claude-sonnet-4-6".into(), api_key_env: "ANTHROPIC_API_KEY".into() },
+        series_id: None,
     };
     write_json(&root.join("project.json"), &project)?;
 

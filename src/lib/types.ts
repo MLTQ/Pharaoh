@@ -260,6 +260,52 @@ export interface Project {
   updated_at: string;
   characters: Character[];
   llm_config: LlmConfig;
+  /** Set when this project is an episode of a series; absent for one-shots. */
+  series_id?: string;
+}
+
+// ── Series (show bible) — mirrors models.rs Series / CastMember ─────────────
+
+export interface CastRelationship {
+  /** CastMember.id of the other character. */
+  with: string;
+  dynamic: string;
+}
+
+export interface CastMember {
+  id: string;
+  name: string;
+  archetype: string;
+  description: string;
+  want: string;
+  flaw: string;
+  /** What reliably makes their scenes go. */
+  engine: string;
+  /** How they talk: rhythm, vocabulary, tics. */
+  voice_notes: string;
+  catchphrases: string[];
+  /** Signature bits the writer can call on. */
+  lazzi: string[];
+  never: string;
+  relationships: CastRelationship[];
+  /** Character-library entry holding this character's voice. */
+  library_id: string | null;
+}
+
+export interface Series {
+  id: string;
+  title: string;
+  logline: string;
+  premise: string;
+  tone: string;
+  format: string;
+  themes: string[];
+  world: string;
+  continuity: string;
+  episode_minutes: number;
+  cast: CastMember[];
+  created_at: string | null;
+  updated_at: string | null;
 }
 
 export interface AppConfig {

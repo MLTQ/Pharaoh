@@ -57,6 +57,12 @@ pub fn run() {
             commands::project::get_scene,
             commands::project::list_scenes,
             commands::project::get_projects_dir,
+            commands::series::list_series,
+            commands::series::get_series,
+            commands::series::create_series,
+            commands::series::update_series,
+            commands::series::list_series_episodes,
+            commands::series::create_series_episode,
             // Script CSV
             commands::script::read_script,
             commands::script::write_script,

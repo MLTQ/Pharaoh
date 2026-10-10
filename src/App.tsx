@@ -20,6 +20,8 @@ import { DissectView } from "./components/dissect/DissectView";
 import { useDissectStore } from "./store/dissectStore";
 import { ProjectLauncherView } from "./components/launcher/ProjectLauncherView";
 import { ProjectChooser } from "./components/launcher/ProjectChooser";
+import { SeriesHomeView } from "./components/series/SeriesHomeView";
+import { useSeriesStore } from "./store/seriesStore";
 import { ToastHost } from "./components/shared/ToastHost";
 import { SetupBanner } from "./components/shared/SetupBanner";
 import { ErrorBoundary } from "./components/shared/ErrorBoundary";
@@ -257,6 +259,14 @@ export default function App() {
   // realProjectId transitions (otherwise React errors on hook count change).
   const [projectChooser, setProjectChooser] = useState<{ x: number; y: number } | null>(null);
   const [launcherPanel, setLauncherPanel] = useState<"projects" | "settings">("projects");
+  const openSeriesId = useSeriesStore((s) => s.openSeriesId);
+  const closeSeries = useSeriesStore((s) => s.closeSeries);
+  // Leaving a project returns to its series home; a one-shot has none.
+  const openProjectSeriesId = useProjectStore((s) => s.realProject?.series_id);
+  useEffect(() => {
+    if (realProjectId && !openProjectSeriesId) closeSeries();
+    else if (openProjectSeriesId) useSeriesStore.getState().openSeries(openProjectSeriesId);
+  }, [realProjectId, openProjectSeriesId, closeSeries]);
 
   // ── No project: launcher shell ───────────────────────────────────────────
   if (!realProjectId) {
@@ -267,7 +277,7 @@ export default function App() {
           <button
             className={`rail-btn ${launcherPanel === "projects" ? "active" : ""}`}
             title="Projects"
-            onClick={() => setLauncherPanel("projects")}
+            onClick={() => { setLauncherPanel("projects"); closeSeries(); }}
           >
             <Icon name="folder" style={{ width: 18, height: 18 }} />
           </button>
@@ -285,6 +295,8 @@ export default function App() {
         <div style={{ gridColumn: 2, gridRow: 1, position: "relative" }}>
           {launcherPanel === "settings" ? (
             <SettingsView />
+          ) : openSeriesId ? (
+            <SeriesHomeView key={openSeriesId} seriesId={openSeriesId} />
           ) : (
             <ProjectLauncherView onOpenSettings={() => setLauncherPanel("settings")} />
           )}

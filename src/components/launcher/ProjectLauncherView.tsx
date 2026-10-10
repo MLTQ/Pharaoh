@@ -1,9 +1,10 @@
 import React, { useState, useEffect } from "react";
-import { listProjects, createProject, getProjectsDir, listScenes } from "../../lib/tauriCommands";
+import { listProjects, createProject, getProjectsDir, listScenes, listSeries } from "../../lib/tauriCommands";
 import { RebuildWizard } from "./RebuildWizard";
+import { SeriesColumn } from "./SeriesColumn";
 import { useProjectStore } from "../../store/projectStore";
 import { useUiStore } from "../../store/uiStore";
-import type { Project } from "../../lib/types";
+import type { Project, Series } from "../../lib/types";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -165,6 +166,7 @@ const ProjectCard: React.FC<{
 
 export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({ onOpenSettings }) => {
   const [projects, setProjects] = useState<Project[]>([]);
+  const [series, setSeries]     = useState<Series[]>([]);
   const [projectsDir, setProjectsDir] = useState("");
   const [loading, setLoading]   = useState(true);
   const [openingId, setOpeningId] = useState<string | null>(null);
@@ -176,8 +178,9 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
   const { setView }          = useUiStore();
 
   useEffect(() => {
-    Promise.all([listProjects(), getProjectsDir()])
-      .then(([ps, dir]) => { setProjects(ps); setProjectsDir(dir); })
+    // Series failing (e.g. an older mesh host) must not hide the one-shots.
+    Promise.all([listProjects(), getProjectsDir(), listSeries().catch(() => [] as Series[])])
+      .then(([ps, dir, ss]) => { setProjects(ps); setProjectsDir(dir); setSeries(ss); })
       .catch((e) => setErr(String(e)))
       .finally(() => setLoading(false));
   }, []);
@@ -198,6 +201,9 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
     }
   };
 
+  // Episodes live under their series; this column is one-shots only.
+  const oneShots = projects.filter((p) => !p.series_id);
+
   const handleCreated = async (project: Project) => {
     const dir = await getProjectsDir().catch(() => "");
     loadRealProject(project, dir, []);
@@ -208,9 +214,10 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
     <div style={{
       position: "absolute", inset: 0, overflow: "auto",
       background: "var(--bg-0)", display: "flex", flexDirection: "column",
-      alignItems: "center", justifyContent: "center",
+      alignItems: "center",
     }}>
-      <div style={{ width: "100%", maxWidth: 560, padding: "0 24px" }}>
+      {/* margin:auto centres vertically without clipping the top when tall */}
+      <div style={{ width: "100%", maxWidth: 1180, padding: "32px 24px", margin: "auto 0" }}>
 
         {/* Logo / wordmark */}
         <div style={{ marginBottom: 32, textAlign: "center" }}>
@@ -245,6 +252,13 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
           </div>
         )}
 
+        <div style={{
+          display: "grid", gap: 32, alignItems: "start",
+          gridTemplateColumns: "repeat(auto-fit, minmax(380px, 1fr))",
+        }}>
+        <SeriesColumn series={series} projects={projects} loading={loading} />
+
+        <div>
         {/* New project form */}
         {showNew && (
           <NewProjectForm
@@ -256,13 +270,13 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
         {/* Project list header */}
         <div style={{
           display: "flex", alignItems: "center", justifyContent: "space-between",
-          marginBottom: 12,
+          marginBottom: 12, minHeight: 28, flexWrap: "wrap", gap: 8,
         }}>
-          <span style={{
+          <span style={{ whiteSpace: "nowrap",
             fontFamily: "var(--font-mono)", fontSize: 9.5, letterSpacing: "0.08em",
             color: "var(--fg-4)", textTransform: "uppercase",
           }}>
-            {loading ? "Loading…" : `Projects · ${projects.length}`}
+            {loading ? "Loading…" : `One-shots · ${oneShots.length}`}
           </span>
           {!showNew && (
             <span style={{ display: "flex", gap: 8 }}>
@@ -289,13 +303,13 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
         </div>
 
         {/* Project cards */}
-        {!loading && projects.length === 0 && !showNew && (
+        {!loading && oneShots.length === 0 && !showNew && (
           <div style={{
             padding: "40px 24px", textAlign: "center",
             border: "1px dashed var(--line-2)", borderRadius: 3,
             fontSize: 12, color: "var(--fg-4)", lineHeight: 1.7,
           }}>
-            No projects yet.
+            No one-shots yet.
             <br />
             <button
               className="btn"
@@ -311,7 +325,7 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
           </div>
         )}
 
-        {projects.map((p) => (
+        {oneShots.map((p) => (
           <ProjectCard
             key={p.id}
             project={p}
@@ -319,6 +333,8 @@ export const ProjectLauncherView: React.FC<{ onOpenSettings?: () => void }> = ({
             loading={openingId === p.id}
           />
         ))}
+        </div>
+        </div>
 
         {showRebuild && <RebuildWizard onClose={() => setShowRebuild(false)} />}
 

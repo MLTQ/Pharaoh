@@ -144,6 +144,16 @@ pub fn relativize_character_asset(bundle_dir: &Path, abs_path: &str) -> Option<S
 pub const LIBRARY_DIR_NAME: &str = "_library";
 pub const LIBRARY_CHARACTERS_SUBDIR: &str = "characters";
 
+pub const SERIES_DIR_NAME: &str = "_series";
+
+pub fn series_root_dir(projects_dir: &Path) -> PathBuf {
+    projects_dir.join(SERIES_DIR_NAME)
+}
+
+pub fn series_dir(projects_dir: &Path, series_id: &str) -> PathBuf {
+    series_root_dir(projects_dir).join(series_id)
+}
+
 pub fn library_root_dir(projects_dir: &Path) -> PathBuf {
     projects_dir.join(LIBRARY_DIR_NAME).join(LIBRARY_CHARACTERS_SUBDIR)
 }

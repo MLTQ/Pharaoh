@@ -280,6 +280,73 @@ pub struct Project {
     pub updated_at: DateTime<Utc>,
     pub characters: Vec<Character>,
     pub llm_config: LlmConfig,
+    /// The series this project is an episode of. `None` for one-shots — every
+    /// project made before series existed, so no migration is needed.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub series_id: Option<String>,
+}
+
+// ── Series (show bible) ────────────────────────────────────────────────────
+//
+// A series sits above projects: a fixed cast, world and voice that every
+// episode inherits. Stored at `<projects_dir>/_series/<id>/series.json`.
+// Episodes are ordinary projects whose `series_id` points here. Every field
+// defaults so the file stays hand-editable.
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct Series {
+    pub id: String,
+    pub title: String,
+    pub logline: String,
+    /// What the show is about, the situation that generates episodes.
+    pub premise: String,
+    pub tone: String,
+    /// "sitcom" | "monster_of_the_week" | "commedia" | "anthology" | free text.
+    pub format: String,
+    /// Recurring themes the writing returns to.
+    pub themes: Vec<String>,
+    /// Setting and the rules of the world, as prose.
+    pub world: String,
+    /// "episodic" (status quo resets) or "serialized" (canon binds).
+    pub continuity: String,
+    pub episode_minutes: u32,
+    pub cast: Vec<CastMember>,
+    pub created_at: Option<DateTime<Utc>>,
+    pub updated_at: Option<DateTime<Utc>>,
+}
+
+/// A recurring character: who they are on the page. The voice lives in the
+/// character library (`library_id`) and is copied into each episode.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CastMember {
+    pub id: String,
+    pub name: String,
+    /// Stock type the character is built on ("Arlecchino", "the straight man").
+    pub archetype: String,
+    pub description: String,
+    pub want: String,
+    pub flaw: String,
+    /// What reliably makes their scenes go: the comic or dramatic engine.
+    pub engine: String,
+    /// How they talk: rhythm, vocabulary, tics.
+    pub voice_notes: String,
+    pub catchphrases: Vec<String>,
+    /// Signature bits the writer can call on.
+    pub lazzi: Vec<String>,
+    /// Things this character would never say or do.
+    pub never: String,
+    pub relationships: Vec<CastRelationship>,
+    pub library_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+#[serde(default)]
+pub struct CastRelationship {
+    /// `CastMember.id` of the other character.
+    pub with: String,
+    pub dynamic: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

@@ -83,15 +83,27 @@ pub fn create_project(
     logline: Option<String>,
     tone: Option<String>,
 ) -> Result<Project> {
+    create_project_at(&app_projects_dir(&app)?, title, logline.unwrap_or_default(), tone.unwrap_or_default(), None)
+}
+
+/// Core of [`create_project`], shared with series episodes (`series_id`
+/// set) so a one-shot and an episode are the same thing on disk.
+pub(crate) fn create_project_at(
+    projects_dir: &Path,
+    title: String,
+    logline: String,
+    tone: String,
+    series_id: Option<String>,
+) -> Result<Project> {
     let id = Uuid::new_v4().to_string();
     let now = Utc::now();
 
     let project = Project {
         id: id.clone(),
         title,
-        logline: logline.unwrap_or_default(),
+        logline,
         synopsis: String::new(),
-        tone: tone.unwrap_or_default(),
+        tone,
         global_audio_notes: String::new(),
         target_duration_minutes: 30,
         created_at: now,
@@ -102,9 +114,10 @@ pub fn create_project(
             model: "claude-sonnet-4-6".to_string(),
             api_key_env: "ANTHROPIC_API_KEY".to_string(),
         },
+        series_id,
     };
 
-    let dir = project_dir(&app_projects_dir(&app)?, &id);
+    let dir = project_dir(projects_dir, &id);
     std::fs::create_dir_all(&dir)?;
     std::fs::create_dir_all(dir.join("scenes"))?;
     std::fs::create_dir_all(dir.join("output"))?;

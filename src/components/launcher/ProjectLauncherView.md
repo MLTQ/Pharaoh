@@ -1,7 +1,7 @@
 # ProjectLauncherView.tsx
 
 ## Purpose
-No-project start screen for Pharaoh. It lists existing projects, creates new projects, and hands successful opens into the real project workspace.
+No-project start screen for Pharaoh. Two columns: **Series** ([SeriesColumn](./SeriesColumn.md)) and **One-shots** (the project list). Projects with a `series_id` are episodes and appear only under their series. It creates new projects and hands successful opens into the real project workspace. A failing `list_series` (e.g. an older mesh host) leaves the series column empty instead of hiding the one-shots.
 
 ## Components
 

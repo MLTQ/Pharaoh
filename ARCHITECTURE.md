@@ -185,9 +185,14 @@ rationale (the modular-docs pattern).
     "provider": "anthropic | openai | local",
     "model": "claude-sonnet-4-6",
     "api_key_env": "ANTHROPIC_API_KEY"
-  }
+  },
+  "series_id": "uuid (episodes only; absent on one-shots)"
 }
 ```
+
+### series.json
+
+`<projects_dir>/_series/<id>/series.json`. A series is the show bible above its episodes: premise, format (`sitcom`, `monster_of_the_week`, `commedia`, `anthology` or free text), tone, themes, world, continuity (`episodic` or `serialized`), episode length, and the cast. Each cast member has an archetype, want, flaw, engine, how they talk, catchphrases, lazzi, never, relationships, and a `library_id` for their voice. An episode is an ordinary project with `series_id` set. Creating one copies the voiced cast in from the character library. The launcher shows series and one-shots in separate columns.
 
 ### storyboard.json
 

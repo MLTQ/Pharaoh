@@ -16,6 +16,7 @@ pub mod prose_script;
 pub mod setup_check;
 pub mod project;
 pub mod script;
+pub mod series;
 pub mod settings;
 pub mod setup;
 pub mod sidecar;

@@ -130,6 +130,7 @@ pub(super) async fn project_create(
             model: "claude-sonnet-4-6".into(),
             api_key_env: "ANTHROPIC_API_KEY".into(),
         },
+        series_id: None,
     };
 
     let projects_dir = PathBuf::from(&config.projects_dir);
