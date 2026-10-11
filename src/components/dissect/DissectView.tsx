@@ -19,9 +19,6 @@ import { useDissectStore } from "../../store/dissectStore";
 import { useProjectStore } from "../../store/projectStore";
 import { DissectReview } from "./DissectReview";
 
-// .m4b / .m4a audiobooks bring chapters, tags and cover art along with the audio.
-const AUDIO_EXTENSIONS = ["m4b", "m4a", "mp3", "wav", "flac", "ogg", "opus", "aac", "mp4", "mkv", "webm"];
-
 const STATUS_COLOR: Record<string, string> = {
   running: "var(--st-gen)", complete: "var(--st-rendered)", failed: "var(--sfx)", cancelled: "var(--fg-4)",
 };
@@ -96,10 +93,11 @@ export const DissectView: React.FC = () => {
     setError(null);
     try {
       const { open } = await import("@tauri-apps/plugin-dialog");
+      // Downloaded recordings can have no extension. FFmpeg identifies their
+      // format from the contents, so let the picker show every file.
       const picked = await open({
         title: "Choose a recording to dissect",
         multiple: false,
-        filters: [{ name: "Audio", extensions: AUDIO_EXTENSIONS }],
       });
       if (!picked) return;
       const path = typeof picked === "string" ? picked : (picked as { path: string }).path;

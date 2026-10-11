@@ -7,6 +7,7 @@ The **Dissect** tab (Story workspace → Source): take an existing audio drama o
 
 ### Imports list (left)
 - **Does**: Every import with live status from `dissectStore` (progress % while running), duration and voice count; "Import a recording…" with the separate-stems toggle. Refreshes every 4 s while anything runs.
+- The recording picker shows all files, including extensionless downloads and uppercase extensions. The pipeline uses FFmpeg to detect and decode the audio from its contents.
 
 ### Detail (right)
 - **Does**: Running → stage message, progress bar, Cancel. Failed / cancelled → the error (e.g. lost contact with the server) with Retry and Delete. Complete → [DissectReview](./DissectReview.md).
