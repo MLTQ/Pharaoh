@@ -106,6 +106,8 @@ In scripts, a sound-package tag after a cue (`MUSIC: #theme`, `BED: #hum`) plays
 | `dissect clips <import> <speaker[,speaker]> <emotion> [--limit 8] [--like <clip>]` | A speaker's best clips for an emotion, or the clips most like a given one. |
 | `dissect palette <library_id> [--per 4] [--replace true]` | Fill a Library character's emotional palette from its real lines. |
 | `dissect corpus <library_id> [--minutes 15]` | Fill its voice-lock training corpus from its real lines. |
+| `dissect reassign <import> --from <speaker> [--to <speaker> \| --label <new voice>] [--turns <start_s,…>] [--candidates <id,…>] [--all true]` | Fix the speaker attribution: move lines (by start time) and clips to another speaker or a new one; `--all true` merges `--from` into `--to`. A clip takes its line along, and a line its clips. |
+| `dissect reset-speakers <import>` | Undo every correction (back to the server's speakers). |
 | `dissect rebuild <import> --confirm-rights yes [--title] [--chapters 0,2] [--plan true] [--sounds] [--remainders]` | Turn the recording into a project. Speakers named with `dissect assign` come in as their Library characters (linked, with palette); speakers named as one character fold together. `--plan true` previews without building. |
 
 ### Generation

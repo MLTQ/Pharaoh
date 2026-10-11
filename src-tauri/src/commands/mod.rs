@@ -8,6 +8,7 @@ pub mod archive;
 pub mod character;
 pub mod corpus;
 pub mod dissect;
+pub mod dissect_edit;
 pub mod emotions;
 pub mod episode_writer;
 pub mod layout;

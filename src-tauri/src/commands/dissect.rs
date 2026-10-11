@@ -642,6 +642,8 @@ pub async fn retry(
         return Err(Error::Other(format!("only failed or cancelled imports can be retried (this one is {})", import.status)));
     }
     source_readable(&import.source_path)?;
+    // The re-run's manifest supersedes any speaker corrections.
+    crate::commands::dissect_edit::forget_original(&dir);
     let base = base.trim_end_matches('/').to_string();
     if background && is_remote_url(&base) {
         import.job_id = String::new();

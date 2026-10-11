@@ -862,6 +862,8 @@ export interface DissectSpeaker {
   chapters?: number[];
   credits?: DissectCredit[];
   candidates: DissectCandidate[];
+  /** Created by a speaker correction in the review. */
+  split?: boolean;
 }
 
 export interface DissectTurn {
@@ -892,6 +894,8 @@ export interface DissectManifest {
   /** Effects / music regions found on the stems (absent for older imports). */
   sounds?: DissectSounds;
   turns: DissectTurn[];
+  /** Speaker corrections applied in the review (absent = the server's attribution). */
+  corrections?: number;
 }
 
 export interface DissectStatus {

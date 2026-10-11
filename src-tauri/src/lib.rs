@@ -171,6 +171,8 @@ pub fn run() {
             commands::dissect::list_dissect_imports,
             commands::dissect::delete_dissect_import,
             commands::dissect::dissect_assign_speaker,
+            commands::dissect_edit::dissect_reassign,
+            commands::dissect_edit::dissect_reset_speakers,
             // Character library
             commands::character::list_library_characters,
             commands::character::save_character_to_library,

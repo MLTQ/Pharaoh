@@ -9,9 +9,21 @@
  */
 
 import React, { useEffect, useMemo, useState } from "react";
-import type { DissectChapter, DissectSpeaker, LibraryCharacterSummary } from "../../lib/types";
+import type { DissectChapter, DissectSpeaker, DissectTurn, LibraryCharacterSummary } from "../../lib/types";
 import { PlayButton } from "../shared/PlayButton";
 import { CHAR_HUE } from "../library/libraryShared";
+import { MoveToSelect } from "./MoveToSelect";
+import { DissectSpeakerLines } from "./DissectSpeakerLines";
+
+/** A speaker correction: lines (by start) and clips to another speaker or a new one. */
+export interface SpeakerMove {
+  turnStarts: number[];
+  candidateIds: string[];
+  to: string | null;
+  newLabel: string | null;
+  /** Merge the whole speaker into `to`. */
+  all: boolean;
+}
 
 export interface AssignChoice {
   candidateIds: string[];
@@ -47,7 +59,14 @@ export const DissectSpeakerCard: React.FC<{
   /** False until the rights box is ticked — the Add button stays disabled. */
   rightsConfirmed: boolean;
   onAssign: (choice: AssignChoice) => void;
-}> = ({ speaker, importDir, library, chapters, assignedTo, busy, rightsConfirmed, onAssign }) => {
+  importId: string;
+  /** Every speaker in the import: move and merge targets. */
+  speakers: DissectSpeaker[];
+  /** This speaker's lines, in order. */
+  turns: DissectTurn[];
+  onMove: (move: SpeakerMove) => void;
+}> = ({ speaker, importDir, library, chapters, assignedTo, busy, rightsConfirmed, onAssign, importId, speakers, turns, onMove }) => {
+  const [showLines, setShowLines] = useState(false);
   // Default: keep the top three clips, best one as gold.
   const [picked, setPicked] = useState<Set<string>>(
     () => new Set(speaker.candidates.slice(0, 3).map((c) => c.id)),
@@ -113,6 +132,20 @@ export const DissectSpeakerCard: React.FC<{
         {assignedTo && (
           <span style={{ fontSize: 11, color: "var(--st-rendered)" }}>✓ Added to {assignedTo}</span>
         )}
+        <button className="btn btn-sm" onClick={() => setShowLines((v) => !v)} title="Every line attributed to this voice">
+          {showLines ? "Hide lines" : `Lines (${turns.length})`}
+        </button>
+        {speakers.length > 1 && (
+          <MoveToSelect
+            speakers={speakers} from={speaker.id} placeholder="Merge into…" allowNew={false} disabled={busy} width={104}
+            onMove={(t) => {
+              const into = speakers.find((s) => s.id === t.to)?.label ?? t.to;
+              if (window.confirm(`Merge all of ${speaker.label} into ${into}?`)) {
+                onMove({ turnStarts: [], candidateIds: [], to: t.to, newLabel: null, all: true });
+              }
+            }}
+          />
+        )}
       </div>
 
       {speaker.sample_text && (
@@ -164,7 +197,7 @@ export const DissectSpeakerCard: React.FC<{
             return (
               <div key={c.id} style={{
                 display: "grid",
-                gridTemplateColumns: "20px 24px 20px 1fr auto",
+                gridTemplateColumns: "20px 24px 20px 1fr auto auto",
                 alignItems: "center", gap: 8,
                 padding: "6px 14px", borderBottom: "1px solid var(--line-1)",
                 background: gold === c.id ? "var(--bg-2)" : undefined,
@@ -215,10 +248,21 @@ export const DissectSpeakerCard: React.FC<{
                     </span>
                   )}
                 </span>
+                <MoveToSelect
+                  speakers={speakers} from={speaker.id} placeholder="Move…" disabled={busy} width={64}
+                  onMove={(t) => onMove({ turnStarts: [], candidateIds: [c.id], to: t.to, newLabel: t.newLabel, all: false })}
+                />
               </div>
             );
           })}
         </div>
+      )}
+
+      {showLines && (
+        <DissectSpeakerLines
+          importId={importId} speaker={speaker} speakers={speakers} turns={turns} chapters={chapters} busy={busy}
+          onMove={(turnStarts, t) => onMove({ turnStarts, candidateIds: [], to: t.to, newLabel: t.newLabel, all: false })}
+        />
       )}
 
       {/* Assign row */}

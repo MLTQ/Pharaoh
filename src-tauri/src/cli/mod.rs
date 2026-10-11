@@ -169,6 +169,12 @@ pub async fn run(args: Vec<String>) -> Result<()> {
         [group, action, import_id, rest @ ..] if group == "dissect" && action == "retry" => {
             dissect::retry(&config, import_id, rest).await
         }
+        [group, action, import_id, rest @ ..] if group == "dissect" && action == "reassign" => {
+            dissect::reassign(&config, import_id, rest)
+        }
+        [group, action, import_id] if group == "dissect" && action == "reset-speakers" => {
+            dissect::reset_speakers(&config, import_id)
+        }
         [group, action, import_id] if group == "dissect" && action == "delete" => {
             dissect::delete(&config, import_id)
         }
@@ -387,6 +393,8 @@ fn usage() -> &'static str {
   pharaoh dissect cancel <import_id>
   pharaoh dissect retry <import_id> [--wait true|false]
   pharaoh dissect delete <import_id>
+  pharaoh dissect reassign <import_id> --from <speaker> [--to <speaker> | --label <new speaker>] [--turns <start_s,...>] [--candidates <id,...>] [--all true]
+  pharaoh dissect reset-speakers <import_id>
   pharaoh server health [tts|sfx|music|post|dissect|all]
   pharaoh server config
   pharaoh server config-set [--tts-url <url>] [--sfx-url <url>] [--music-url <url>] [--post-url <url>] [--dissect-url <url>]

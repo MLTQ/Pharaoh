@@ -223,6 +223,7 @@ export const DissectView: React.FC = () => {
               projectId={realProjectId}
               scenes={realScenes}
               onAssigned={(_c, addedToProject) => { if (addedToProject) void reloadProjectFromDisk(); }}
+              onManifest={(manifest) => setDetail((d) => (d ? { ...d, manifest } : d))}
             />
             <div style={{ padding: "0 26px 30px" }}>
               <button className="btn btn-sm" onClick={() => handleDelete(sel.import_id)}>Delete this import</button>

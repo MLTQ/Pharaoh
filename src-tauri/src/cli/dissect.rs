@@ -142,6 +142,47 @@ pub(super) fn delete(config: &AppConfig, import_id: &str) -> Result<()> {
     print_json(&serde_json::json!({ "deleted": import_id }))
 }
 
+/// `dissect reassign <import_id> --from S1 [--to S3 | --label <new speaker>]
+/// [--turns 12.3,45.6] [--candidates S1_c2,S1_c4] [--all true]`: move lines
+/// (by start time) and clips to another speaker or a new one; `--all` merges.
+pub(super) fn reassign(config: &AppConfig, import_id: &str, rest: &[String]) -> Result<()> {
+    use crate::commands::dissect_edit::{reassign_in, ReassignRequest};
+    let flags = parse_flags(rest)?;
+    let from = flag_opt(&flags, "from").ok_or_else(|| Error::Other("missing --from <speaker>".into()))?;
+    let list = |k: &str| -> Vec<String> {
+        flag_opt(&flags, k).map(|v| v.split(',').map(|x| x.trim().to_string()).filter(|x| !x.is_empty()).collect()).unwrap_or_default()
+    };
+    let turn_starts = list("turns")
+        .iter()
+        .map(|x| x.parse::<f64>().map_err(|_| Error::Other(format!("--turns: {x} is not a time in seconds"))))
+        .collect::<Result<Vec<f64>>>()?;
+    let req = ReassignRequest {
+        import_id: import_id.into(),
+        from,
+        to: flag_opt(&flags, "to"),
+        new_label: flag_opt(&flags, "label"),
+        turn_starts,
+        candidate_ids: list("candidates"),
+        all: flag_opt(&flags, "all").is_some_and(|v| v == "true"),
+    };
+    let dir = crate::commands::dissect::import_dir(&projects_dir(config), import_id)?;
+    let m = reassign_in(&dir, &req)?;
+    print_json(&serde_json::json!({
+        "corrections": m["corrections"],
+        "speakers": m["speakers"].as_array().map(|s| s.iter().map(|s| serde_json::json!({
+            "id": s["id"], "label": s["label"], "turn_count": s["turn_count"], "total_speech_s": s["total_speech_s"],
+            "candidates": s["candidates"].as_array().map(|c| c.len()).unwrap_or(0),
+        })).collect::<Vec<_>>()),
+    }))
+}
+
+/// `dissect reset-speakers <import_id>`: undo every speaker correction.
+pub(super) fn reset_speakers(config: &AppConfig, import_id: &str) -> Result<()> {
+    let dir = crate::commands::dissect::import_dir(&projects_dir(config), import_id)?;
+    let m = crate::commands::dissect_edit::reset_in(&dir)?;
+    print_json(&serde_json::json!({ "reset": import_id, "speakers": m["speakers"].as_array().map(|s| s.len()) }))
+}
+
 /// `dissect cancel <import_id>`
 pub(super) async fn cancel(config: &AppConfig, import_id: &str) -> Result<()> {
     print_json(&dissect::cancel(&reqwest::Client::new(), &projects_dir(config), import_id).await?)

@@ -21,6 +21,7 @@ import type {
   DissectOptions,
   DissectImport,
   DissectStatus,
+  DissectManifest,
   DissectImportSummary,
   EpisodeChapter,
   M4bOptions,
@@ -887,6 +888,22 @@ export const dissectRetry = (importId: string): Promise<DissectImport> =>
   invoke("dissect_retry", { importId });
 
 /** Audition file for a span of a stem (cut on demand, cached per import). */
+/** Move lines (by start) and clips to another speaker, a new one (`to: null`),
+ *  or merge a whole speaker (`all`). Returns the corrected manifest. */
+export const dissectReassign = (request: {
+  import_id: string;
+  from: string;
+  to: string | null;
+  new_label?: string | null;
+  turn_starts?: number[];
+  candidate_ids?: string[];
+  all?: boolean;
+}): Promise<DissectManifest> => invoke("dissect_reassign", { request });
+
+/** Undo every speaker correction: back to the server's manifest. */
+export const dissectResetSpeakers = (importId: string): Promise<DissectManifest> =>
+  invoke("dissect_reset_speakers", { importId });
+
 export const dissectClip = (importId: string, stem: string, start: number, end: number): Promise<string> =>
   invoke("dissect_clip", { importId, stem, start, end });
 

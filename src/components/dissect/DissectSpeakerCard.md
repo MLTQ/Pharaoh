@@ -12,6 +12,9 @@ One detected speaker in a dissect import: stats, a sample line, candidate clips 
 ### Credits and chapters
 - **Does**: "Credits heard" chips (from `speaker.credits`) fill the character name and set the performer, which is sent as `performer` and stored on the character's `voice_provenance`. Editing the name by hand clears the performer. The header shows "in N of M chapters"; each clip's position shows its chapter.
 
+### Corrections
+- **Does**: Each clip row has **Move…** (to another speaker or a new voice); the header has **Lines (N)**, which opens [DissectSpeakerLines](./DissectSpeakerLines.md), and **Merge into…** (confirmed). All go through `onMove(SpeakerMove)`; the parent calls `dissect_reassign`.
+
 ### Assign row
 - **Does**: Target select (new character / add to existing), name field, and Add. Disabled (and dimmed) until the parent's rights box is ticked and a target is valid.
 
@@ -20,3 +23,4 @@ One detected speaker in a dissect import: stats, a sample line, candidate clips 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `DissectReview.tsx` | `onAssign({candidateIds, goldId, libraryId, newName})`; `goldId` ∈ `candidateIds` | Changing `AssignChoice` |
+| `DissectReview.tsx` | `onMove({turnStarts, candidateIds, to, newLabel, all})`, plus `importId`, `speakers`, this speaker's `turns` | Changing `SpeakerMove` |

@@ -14,12 +14,12 @@
  * Sounds go to scene assets and carry no voice, so they aren't gated.
  */
 
-import React, { useCallback, useEffect, useState } from "react";
-import type { Character, DissectStatus, LibraryCharacterSummary, Scene } from "../../lib/types";
-import { dissectAssignSpeaker, importCharacterFromLibrary, listLibraryCharacters } from "../../lib/tauriCommands";
+import React, { useCallback, useEffect, useMemo, useState } from "react";
+import type { Character, DissectManifest, DissectStatus, DissectTurn, LibraryCharacterSummary, Scene } from "../../lib/types";
+import { dissectAssignSpeaker, dissectReassign, dissectResetSpeakers, importCharacterFromLibrary, listLibraryCharacters } from "../../lib/tauriCommands";
 import { reportError } from "../../lib/errors";
 import { fileSrc } from "../../lib/transport";
-import { DissectSpeakerCard, type AssignChoice } from "./DissectSpeakerCard";
+import { DissectSpeakerCard, type AssignChoice, type SpeakerMove } from "./DissectSpeakerCard";
 import { DissectOverview } from "./DissectOverview";
 import { DissectSoundList } from "./DissectSoundList";
 
@@ -39,7 +39,9 @@ export const DissectReview: React.FC<{
   projectId: string | null;
   scenes: Scene[];
   onAssigned?: (character: Character, addedToProject: boolean) => void;
-}> = ({ status, projectId, scenes, onAssigned }) => {
+  /** Speaker corrections rewrite the manifest; the parent keeps the new one. */
+  onManifest?: (manifest: DissectManifest) => void;
+}> = ({ status, projectId, scenes, onAssigned, onManifest }) => {
   const manifest = status.manifest!;
   const importId = status.import_id;
   const [tab, setTab] = useState<Tab>("voices");
@@ -93,7 +95,46 @@ export const DissectReview: React.FC<{
     }
   };
 
-  const minorCount = manifest.speakers.filter((sp) => isMinor(sp.total_speech_s)).length;
+  const turnsBySpeaker = useMemo(() => {
+    const by = new Map<string, DissectTurn[]>();
+    for (const t of manifest.turns) {
+      const list = by.get(t.speaker);
+      if (list) list.push(t); else by.set(t.speaker, [t]);
+    }
+    for (const list of by.values()) list.sort((a, b) => a.start - b.start);
+    return by;
+  }, [manifest.turns]);
+
+  const handleMove = async (from: string, move: SpeakerMove) => {
+    setBusySpeaker(from);
+    setError(null);
+    try {
+      const m = await dissectReassign({
+        import_id: importId, from, to: move.to, new_label: move.newLabel,
+        turn_starts: move.turnStarts, candidate_ids: move.candidateIds, all: move.all,
+      });
+      // A speaker added to a character keeps that; its moved clips no longer count.
+      if (move.all) setAssigned((prev) => { const next = { ...prev }; delete next[from]; return next; });
+      onManifest?.(m);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusySpeaker(null);
+    }
+  };
+
+  const handleReset = async () => {
+    if (!window.confirm("Undo every speaker correction and go back to the detected speakers?")) return;
+    try {
+      onManifest?.(await dissectResetSpeakers(importId));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  // Voices split off by hand always show, however short.
+  const folded = (sp: { total_speech_s: number; split?: boolean }) => !sp.split && isMinor(sp.total_speech_s);
+  const minorCount = manifest.speakers.filter(folded).length;
   const s = manifest.sounds;
   const chapters = manifest.chapters ?? [];
   const tabs: { key: Tab; label: string; n: number | null }[] = [
@@ -176,14 +217,20 @@ export const DissectReview: React.FC<{
               Also add new characters to this episode's cast
             </label>
           )}
+          {(manifest.corrections ?? 0) > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12, fontSize: 11.5, color: "var(--fg-2)" }}>
+              {manifest.corrections} speaker correction{manifest.corrections === 1 ? "" : "s"}
+              <button className="btn btn-sm" onClick={handleReset}>Reset speakers</button>
+            </div>
+          )}
           {manifest.speakers.length === 0 && <div style={{ fontSize: 12, color: "var(--fg-3)" }}>No speech found in this recording.</div>}
           {manifest.speakers.length === 1 && (
             <div style={{ fontSize: 11.5, color: "var(--fg-3)", marginBottom: 10, lineHeight: 1.5 }}>
               One voice throughout. Speaker detection follows voices, not characters — a single narrator
-              performing every part (as in many audiobooks) is one speaker.
+              performing every part (as in many audiobooks) is one speaker. Open its lines to move parts to their own voices.
             </div>
           )}
-          {manifest.speakers.filter((sp) => showMinor || !isMinor(sp.total_speech_s)).map((sp) => (
+          {manifest.speakers.filter((sp) => showMinor || !folded(sp)).map((sp) => (
             <DissectSpeakerCard
               key={`${importId}-${sp.id}`}
               speaker={sp}
@@ -194,6 +241,10 @@ export const DissectReview: React.FC<{
               busy={busySpeaker === sp.id}
               rightsConfirmed={rights}
               onAssign={(choice) => handleAssign(sp.id, choice)}
+              importId={importId}
+              speakers={manifest.speakers}
+              turns={turnsBySpeaker.get(sp.id) ?? []}
+              onMove={(move) => handleMove(sp.id, move)}
             />
           ))}
           {minorCount > 0 && (

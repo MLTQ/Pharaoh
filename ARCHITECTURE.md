@@ -672,7 +672,9 @@ reason instead of polling forever.
 **Known gotchas:**
 - Linux + NVIDIA. ~5.5 GB VRAM for the NeMo models plus the separator.
 - A narrator who also reads a character is usually one speaker to both the
-  diarizer and TitaNet; the user picks clips by hand. Split/merge tools are a follow-up.
+  diarizer and TitaNet. The review can move lines and clips to another speaker
+  or a new one and merge speakers (`commands/dissect_edit.rs`, applied to
+  `manifest.json` with the server's kept as `manifest.server.json` for reset).
 - License: Nemotron-3-Diarization is OpenMDW-1.1. The BandIt Plus checkpoint is
   trained on Divide-and-Remaster — verify its terms before commercial use, as with Woosh.
 - ufw on the inference host must allow 18007 for LAN clients.
