@@ -11,9 +11,9 @@ Builds Pharaoh on macOS and Linux, uploads CI artifacts, and publishes GitHub re
 - **Rationale**: The workflow installs Rust explicitly so macOS and Linux both resolve `cargo` through the verified rustup toolchain path.
 
 ### `Smoke-test Linux AppImage CLI`
-- **Does**: Executes the built AppImage with `setup hardware` before publishing it.
+- **Does**: Executes the built AppImage with `setup hardware`, then runs `scripts/check-appimage-media.sh` before publishing it.
 - **Interacts with**: The AppImage artifact and Pharaoh's headless CLI entrypoint.
-- **Rationale**: Verifies that the Linux artifact can start in CLI mode without requiring GTK window initialization.
+- **Rationale**: Verifies CLI startup and WAV decoding with the packaged GStreamer libraries/plugins. The media check also requires the packaged scanner and PulseAudio sink; it uses a fake output sink so CI does not need a sound server.
 
 ### `release` job
 - **Does**: Downloads build artifacts, resolves stable versus nightly release metadata, moves the rolling nightly tag when needed, and publishes binaries plus checksums.
@@ -30,3 +30,4 @@ Builds Pharaoh on macOS and Linux, uploads CI artifacts, and publishes GitHub re
 
 ## Notes
 - The Linux smoke test uses `APPIMAGE_EXTRACT_AND_RUN=1` so CI can execute the AppImage even when FUSE mounting is unavailable.
+- Linux builds install the base/good GStreamer plugins and libav, and enable Tauri's `bundleMediaFramework` to ship media playback support.

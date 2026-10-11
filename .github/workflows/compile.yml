@@ -45,6 +45,10 @@ jobs:
             libayatana-appindicator3-dev \
             librsvg2-dev \
             libfuse2 \
+            gstreamer1.0-plugins-base \
+            gstreamer1.0-plugins-good \
+            gstreamer1.0-libav \
+            gstreamer1.0-tools \
             patchelf
 
       - name: Setup Node.js
@@ -74,7 +78,9 @@ jobs:
         run: npm ci
 
       - name: Type-check and build frontend
-        run: npm run build
+        run: |
+          npm run check
+          npm run build
 
       - name: Check Rust backend
         run: cargo check --manifest-path src-tauri/Cargo.toml
@@ -99,6 +105,7 @@ jobs:
           chmod +x "$appimage"
           APPIMAGE_EXTRACT_AND_RUN=1 "$appimage" setup hardware > appimage-cli-smoke.json
           test -s appimage-cli-smoke.json
+          bash scripts/check-appimage-media.sh "$appimage"
 
       - name: Package macOS binary
         if: runner.os != 'Linux'

@@ -384,6 +384,13 @@ npm run tauri bundle -- --bundles appimage
 
 Release outputs are in `src-tauri/target/release/bundle/`; the standalone executable is `src-tauri/target/release/pharaoh`. AppImages built on Arch require a compatible host glibc; use the Ubuntu CI build for distribution to older Linux systems.
 
+AppImages include GStreamer playback plugins via `bundle.linux.appimage.bundleMediaFramework`.
+On Arch, install the media packaging dependencies with
+`sudo pacman -S --needed patchelf gst-plugins-base gst-plugins-good gst-libav`.
+The npm Tauri wrapper supplies Arch's GStreamer helper directory so the plugin scanner is included.
+After packaging, run `bash scripts/check-appimage-media.sh src-tauri/target/release/bundle/appimage/Pharaoh_0.1.0_amd64.AppImage`
+to check WAV decoding and audio output plugins without playing sound.
+
 ## Known Limitations
 
 - Breeze, MOSS-SoundEffect, YuE2 and Dissect need Linux + NVIDIA; Macs get the fallback engines.

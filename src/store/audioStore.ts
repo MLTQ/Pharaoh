@@ -8,6 +8,22 @@ let _audio: HTMLAudioElement | null = null;
 let _rafId: number | null = null;
 let _stopAt: number | null = null;
 
+async function withPlaybackTimeout<T>(promise: Promise<T>, phase: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  try {
+    return await Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(() => reject(new Error(
+          `Audio ${phase} timed out. Check that the file is readable and media playback plugins are available.`,
+        )), 15_000);
+      }),
+    ]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 function playableSrc(path: string): string {
   if (/^(https?:|blob:|data:)/.test(path)) return path;
   return fileSrc(path);
@@ -52,25 +68,32 @@ export const useAudioStore = create<AudioState>((set, get) => ({
   play: async (path: string, offsetSeconds = 0, stopAtSeconds: number | null = null) => {
     stopCurrent();
     set({ playing: path, position: offsetSeconds, duration: 0 });
+    let currentAudio: HTMLAudioElement | null = null;
     try {
       const audio = new Audio(playableSrc(path));
+      currentAudio = audio;
       audio.preload = "metadata";
       _audio = audio;
 
-      await new Promise<void>((resolve, reject) => {
+      await withPlaybackTimeout(new Promise<void>((resolve, reject) => {
         audio.onloadedmetadata = () => resolve();
         audio.onerror = () => {
-          // MediaError code 4 (MEDIA_ERR_SRC_NOT_SUPPORTED) usually means the
-          // asset protocol isn't reaching the file — most often because
-          // app.security.assetProtocol.scope in tauri.conf.json doesn't cover
-          // this path. Surface that explicitly instead of a vague "failed".
           const code = audio.error?.code;
           const detail = code === 4
-            ? `src not reachable (asset protocol scope may not cover this path)`
+            ? `unsupported audio or inaccessible file (check media plugins and asset protocol scope)`
             : audio.error?.message || `MediaError code ${code ?? "?"}`;
           reject(new Error(`audio preview failed to load: ${detail} — path=${path}`));
         };
-      });
+      }), "loading");
+      if (_audio !== audio) return;
+
+      // Errors can also arrive after metadata, when the decoder/output starts.
+      audio.onerror = () => {
+        if (_audio !== audio) return;
+        reportError("Playback failed", new Error(audio.error?.message || "Audio decoding or output failed"), { id: "audio-play-failed" });
+        stopCurrent();
+        set({ playing: null, position: 0 });
+      };
 
       const duration = Number.isFinite(audio.duration) ? audio.duration : 0;
       const offset = Math.max(0, Math.min(offsetSeconds, duration || offsetSeconds));
@@ -100,9 +123,12 @@ export const useAudioStore = create<AudioState>((set, get) => ({
         _rafId = requestAnimationFrame(tick);
       };
 
-      await audio.play();
+      await withPlaybackTimeout(audio.play(), "startup");
+      if (_audio !== audio) return;
       _rafId = requestAnimationFrame(tick);
     } catch (e) {
+      // An older load/start timeout must not stop a newer preview.
+      if (currentAudio && _audio !== currentAudio) return;
       // Stable id: scrubbing can retry play rapidly — refresh one toast
       // instead of stacking.
       reportError("Playback failed", e, { id: "audio-play-failed" });

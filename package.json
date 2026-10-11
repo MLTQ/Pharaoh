@@ -8,8 +8,9 @@
     "preview": "vite preview",
     "tauri": "node scripts/tauri.mjs",
     "check:commands": "node scripts/check-invoke-commands.mjs",
+    "check:audio": "node --test scripts/check-audio-store.mjs",
     "typecheck": "tsc --noEmit",
-    "check": "npm run typecheck && npm run check:commands"
+    "check": "npm run typecheck && npm run check:commands && npm run check:audio"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.5.0",

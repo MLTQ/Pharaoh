@@ -24,3 +24,4 @@ Lightweight streaming preview store for generated WAV files. It centralizes clip
 - Local filesystem paths are converted with Tauri `convertFileSrc`; browser-like URLs are passed through unchanged.
 - **Error surfacing**: `play` never rejects — failures are caught internally, reported via `lib/errors.reportError("Playback failed", …)` (error toast + console), and playback state is reset. The toast uses the stable id `audio-play-failed` so rapid retries (e.g. scrubbing) refresh one toast instead of stacking. Call sites do not need their own `.catch` for user feedback.
 - `playableSrc` resolves through `fileSrc` in `lib/transport.ts`: Tauri asset protocol on the host, the share server's Range-aware `/file` route for mesh viewers.
+- Metadata loading and playback startup each have a 15-second timeout. Timeout and decoder errors reset the play button and show an error; stale completions/errors from a replaced preview cannot stop the current preview.

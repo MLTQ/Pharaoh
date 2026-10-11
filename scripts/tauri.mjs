@@ -11,6 +11,9 @@ if (process.platform === 'linux' && args.some(arg => arg === 'build' || arg === 
     // linuxdeploy's bundled strip predates Arch's RELR ELF sections. Cargo
     // already strips our release executable; leave bundled system libraries alone.
     env.NO_STRIP = '1';
+    // The media plugin defaults to Debian's multiarch helper directory.
+    // Arch installs gst-plugin-scanner alongside its GStreamer plugins.
+    env.GSTREAMER_HELPERS_DIR ??= '/usr/lib/gstreamer-1.0';
   }
 }
 
