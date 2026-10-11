@@ -7,6 +7,8 @@ import { reportError } from "../lib/errors";
 let _audio: HTMLAudioElement | null = null;
 let _rafId: number | null = null;
 let _stopAt: number | null = null;
+let _objectUrl: string | null = null;
+let _loadController: AbortController | null = null;
 
 async function withPlaybackTimeout<T>(promise: Promise<T>, phase: string): Promise<T> {
   let timer: ReturnType<typeof setTimeout> | undefined;
@@ -30,11 +32,17 @@ function playableSrc(path: string): string {
 }
 
 function stopCurrent(): void {
+  _loadController?.abort();
+  _loadController = null;
   if (_audio) {
     _audio.pause();
     _audio.removeAttribute("src");
     _audio.load();
     _audio = null;
+  }
+  if (_objectUrl) {
+    URL.revokeObjectURL(_objectUrl);
+    _objectUrl = null;
   }
   if (_rafId !== null) {
     cancelAnimationFrame(_rafId);
@@ -70,15 +78,38 @@ export const useAudioStore = create<AudioState>((set, get) => ({
     set({ playing: path, position: offsetSeconds, duration: 0 });
     let currentAudio: HTMLAudioElement | null = null;
     try {
-      const audio = new Audio(playableSrc(path));
+      const source = playableSrc(path);
+      const audio = new Audio(source);
       currentAudio = audio;
       audio.preload = "metadata";
       _audio = audio;
 
+      let attemptedBlob = false;
       await withPlaybackTimeout(new Promise<void>((resolve, reject) => {
         audio.onloadedmetadata = () => resolve();
-        audio.onerror = () => {
+        audio.onerror = async () => {
+          if (_audio !== audio) return;
           const code = audio.error?.code;
+          // WebKitGTK can fetch custom-scheme files but its media pipeline
+          // rejects asset:// URLs. Retry through a scoped fetch and Blob URL.
+          if (code === 4 && source.startsWith("asset:") && !attemptedBlob) {
+            attemptedBlob = true;
+            const controller = new AbortController();
+            _loadController = controller;
+            try {
+              const response = await fetch(source, { signal: controller.signal });
+              if (!response.ok) throw new Error(`Audio file request failed (HTTP ${response.status}) — path=${path}`);
+              const blob = await response.blob();
+              if (_audio !== audio) return;
+              _loadController = null;
+              _objectUrl = URL.createObjectURL(blob);
+              audio.src = _objectUrl;
+              audio.load();
+            } catch (error) {
+              reject(error);
+            }
+            return;
+          }
           const detail = code === 4
             ? `unsupported audio or inaccessible file (check media plugins and asset protocol scope)`
             : audio.error?.message || `MediaError code ${code ?? "?"}`;

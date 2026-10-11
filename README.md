@@ -390,6 +390,10 @@ On Arch, install the media packaging dependencies with
 The npm Tauri wrapper supplies Arch's GStreamer helper directory so the plugin scanner is included.
 After packaging, run `bash scripts/check-appimage-media.sh src-tauri/target/release/bundle/appimage/Pharaoh_0.1.0_amd64.AppImage`
 to check WAV decoding and audio output plugins without playing sound.
+The check also runs the preview store in WebKit on a virtual display; on Arch this
+requires `python-gobject` and `xorg-server-xvfb`. Previews retry unsupported `asset:`
+URLs through a Blob fetched with the same asset permissions; that fallback loads
+the complete clip into memory and releases it when playback stops.
 
 ## Known Limitations
 

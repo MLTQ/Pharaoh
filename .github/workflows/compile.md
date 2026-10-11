@@ -31,3 +31,4 @@ Builds Pharaoh on macOS and Linux, uploads CI artifacts, and publishes GitHub re
 ## Notes
 - The Linux smoke test uses `APPIMAGE_EXTRACT_AND_RUN=1` so CI can execute the AppImage even when FUSE mounting is unavailable.
 - Linux builds install the base/good GStreamer plugins and libav, and enable Tauri's `bundleMediaFramework` to ship media playback support.
+- The media check runs the actual TypeScript audio store in WebKit on Xvfb, using Tauri-style custom asset responses. It verifies playback completion and Blob URL cleanup, catching custom-scheme failures that a GStreamer-only check misses.
