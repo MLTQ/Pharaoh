@@ -132,17 +132,6 @@ pub struct WriterProgress {
 
 // ── Brief ────────────────────────────────────────────────────────────────────
 
-fn format_label(id: &str) -> &str {
-    match id {
-        "sitcom" => "sitcom",
-        "monster_of_the_week" => "monster-of-the-week series",
-        "commedia" => "commedia dell'arte scenario",
-        "anthology" => "anthology series",
-        "" => "audio drama series",
-        other => other,
-    }
-}
-
 fn push_field(out: &mut String, label: &str, value: &str) {
     let v = value.trim();
     if !v.is_empty() {
@@ -155,15 +144,13 @@ fn push_field(out: &mut String, label: &str, value: &str) {
 pub fn series_brief(series: &Series, canon: &[CanonEntry]) -> String {
     let mut o = String::new();
     o.push_str(&format!("# {}\n\n", series.title));
-    o.push_str(&format!("A {}.", format_label(&series.format)));
     if series.episode_minutes > 0 {
         o.push_str(&format!(
-            " Episodes run about {} minutes (~{} spoken words).",
+            "Episodes run about {} minutes (~{} spoken words).\n\n",
             series.episode_minutes,
             series.episode_minutes * WORDS_PER_MINUTE
         ));
     }
-    o.push_str("\n\n");
     push_field(&mut o, "Logline", &series.logline);
     push_field(&mut o, "Premise", &series.premise);
     push_field(&mut o, "Tone", &series.tone);
@@ -188,8 +175,7 @@ pub fn series_brief(series: &Series, canon: &[CanonEntry]) -> String {
     if !series.cast.is_empty() {
         o.push_str("\n## Cast\nCharacter cues must use these names, in capitals.\n");
         for m in &series.cast {
-            let arche = if m.archetype.trim().is_empty() { String::new() } else { format!(" ({})", m.archetype.trim()) };
-            o.push_str(&format!("\n### {}{}\n", m.name.trim(), arche));
+            o.push_str(&format!("\n### {}\n", m.name.trim()));
             push_field(&mut o, "Who", &m.description);
             push_field(&mut o, "Wants", &m.want);
             push_field(&mut o, "Flaw", &m.flaw);
@@ -244,10 +230,8 @@ pub fn series_brief(series: &Series, canon: &[CanonEntry]) -> String {
         }
     }
 
-    o.push_str("\n## Formula\n");
-    if series.formula.is_empty() {
-        o.push_str(&format!("The classic structure of a {}.\n", format_label(&series.format)));
-    } else {
+    if !series.formula.is_empty() {
+        o.push_str("\n## Formula\n");
         for (i, b) in series.formula.iter().enumerate() {
             o.push_str(&format!("{}. {}", i + 1, b.name.trim()));
             if !b.description.trim().is_empty() {
@@ -502,7 +486,7 @@ async fn plan_with(claude: &mut Claude, brief: &str, series: &Series, premise: &
     let minutes = series.episode_minutes.max(1);
     let prompt = format!(
         "{brief}\n\n---\nPremise for this episode: {premise}\n\n\
-Write the beat sheet. Follow the formula; each scene names its act or beat. Use the series sets where they fit (set_id and their exact heading); for a one-off place leave set_id empty. Aim for {minutes} minutes: scenes that each turn something. Give every scene the beats that happen in it, in order. \
+Write the beat sheet. Follow the formula if there is one; each scene names its act or beat. Use the series sets where they fit (set_id and their exact heading); for a one-off place leave set_id empty. Aim for {minutes} minutes: scenes that each turn something. Give every scene the beats that happen in it, in order. \
 List any new characters the episode needs as guests (at most two), each with a voice description for casting: age, accent, timbre, texture. Note which canon facts, gags or threads it pays off.",
         premise = if premise.trim().is_empty() { "(your choice; surprise me)" } else { premise.trim() },
     );
@@ -752,224 +736,6 @@ pub fn bind_sound_cues(projects_dir: &Path, project_id: &str, series: &Series) -
     Ok(bound)
 }
 
-// ── Bible from a paragraph ───────────────────────────────────────────────────
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct BibleDraft {
-    format: String,
-    logline: String,
-    premise: String,
-    tone: String,
-    themes: Vec<String>,
-    world: String,
-    continuity: String,
-    episode_minutes: u32,
-    cast: Vec<CastDraft>,
-    sets: Vec<SetDraft>,
-    formula: Vec<crate::models::FormulaBeat>,
-    style: StyleDraft,
-    sounds: Vec<SoundDraft>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct CastDraft {
-    name: String,
-    archetype: String,
-    description: String,
-    want: String,
-    flaw: String,
-    engine: String,
-    voice_notes: String,
-    catchphrases: Vec<String>,
-    lazzi: Vec<String>,
-    never: String,
-    relationships: Vec<RelDraft>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct RelDraft {
-    with: String,
-    dynamic: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct SetDraft {
-    name: String,
-    heading: String,
-    description: String,
-    bed: String,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct StyleDraft {
-    narrator: String,
-    house_style: String,
-    banned: Vec<String>,
-}
-
-#[derive(Debug, Clone, Deserialize, Default)]
-#[serde(default)]
-struct SoundDraft {
-    id: String,
-    kind: String,
-    label: String,
-    prompt: String,
-    usage: String,
-}
-
-fn bible_schema() -> serde_json::Value {
-    let int = serde_json::json!({ "type": "integer" });
-    obj(serde_json::json!({
-        "format": { "type": "string", "enum": ["sitcom", "monster_of_the_week", "commedia", "anthology"] },
-        "logline": s(), "premise": s(), "tone": s(), "themes": strings(), "world": s(),
-        "continuity": { "type": "string", "enum": ["episodic", "serialized"] },
-        "episode_minutes": int,
-        "cast": { "type": "array", "items": obj(serde_json::json!({
-            "name": s(), "archetype": s(), "description": s(), "want": s(), "flaw": s(), "engine": s(),
-            "voice_notes": s(), "catchphrases": strings(), "lazzi": strings(), "never": s(),
-            "relationships": { "type": "array", "items": obj(serde_json::json!({ "with": s(), "dynamic": s() })) },
-        })) },
-        "sets": { "type": "array", "items": obj(serde_json::json!({ "name": s(), "heading": s(), "description": s(), "bed": s() })) },
-        "formula": { "type": "array", "items": obj(serde_json::json!({ "name": s(), "description": s() })) },
-        "style": obj(serde_json::json!({
-            "narrator": { "type": "string", "enum": ["none", "cold_open", "full"] },
-            "house_style": s(), "banned": strings(),
-        })),
-        "sounds": { "type": "array", "items": obj(serde_json::json!({
-            "id": s(), "kind": { "type": "string", "enum": ["theme", "stinger", "bumper", "bed", "sfx", "music"] },
-            "label": s(), "prompt": s(), "usage": s(),
-        })) },
-    }))
-}
-
-fn slug(s: &str) -> String {
-    let mut out = String::new();
-    for c in s.to_lowercase().chars() {
-        if c.is_ascii_alphanumeric() {
-            out.push(c);
-        } else if !out.ends_with('-') && !out.is_empty() {
-            out.push('-');
-        }
-    }
-    out.trim_end_matches('-').chars().take(40).collect()
-}
-
-/// Fill a series' bible from a paragraph about the show. Fields the user
-/// already wrote are kept; cast, sets and sounds are added alongside any
-/// that exist.
-pub async fn draft_bible_impl(projects_dir: &Path, series_id: &str, pitch: &str, settings: &WriterSettings) -> Result<Series> {
-    let mut series = load_series(projects_dir, series_id)?;
-    let mut claude = Claude::new(settings)?;
-    let prompt = format!(
-        "A new audio drama series called \"{}\".{}\n\nThe creator's description:\n{}\n\n---\nDraft its bible. \
-A troupe of three to six characters, each built on a stock type (commedia masks, sitcom types or monster-of-the-week roles as fits) but specific: \
-an engine that generates scenes, a want and a flaw that collide with the others', a distinct way of talking, one or two catchphrases at most, signature bits, and how they treat the others (relationships name the other character). \
-Two to four recurring sets with Fountain headings and an ambience bed prompt. The formula: the episode's beats in order. A short house style and clichés to avoid. \
-A sound package: a theme, an act-break stinger and any recurring musical or sound cue, each with a short tag id and a generation prompt (instrumental music only). \
-Keep it original: no existing characters or shows.",
-        series.title,
-        if series.logline.trim().is_empty() { String::new() } else { format!(" Logline: {}", series.logline.trim()) },
-        pitch.trim(),
-    );
-    let d: BibleDraft = claude.ask(&prompt, bible_schema(), "high", 32000).await?;
-    merge_bible(&mut series, d);
-    crate::commands::series::save_series_at(projects_dir, &mut series)?;
-    Ok(series)
-}
-
-fn merge_bible(series: &mut Series, d: BibleDraft) {
-    use crate::models::{CastMember, CastRelationship, SeriesSet, SoundCue};
-    let keep = |cur: &mut String, new: String| {
-        if cur.trim().is_empty() {
-            *cur = new.trim().to_string();
-        }
-    };
-    keep(&mut series.format, d.format);
-    keep(&mut series.logline, d.logline);
-    keep(&mut series.premise, d.premise);
-    keep(&mut series.tone, d.tone);
-    keep(&mut series.world, d.world);
-    if series.themes.is_empty() {
-        series.themes = d.themes;
-    }
-    if !d.continuity.is_empty() {
-        series.continuity = d.continuity;
-    }
-    if d.episode_minutes > 0 && series.cast.is_empty() {
-        series.episode_minutes = d.episode_minutes.clamp(2, 60);
-    }
-    if series.formula.is_empty() {
-        series.formula = d.formula;
-    }
-    keep(&mut series.style.narrator, d.style.narrator);
-    keep(&mut series.style.house_style, d.style.house_style);
-    if series.style.banned.is_empty() {
-        series.style.banned = d.style.banned;
-    }
-
-    let mut taken: Vec<String> = series.cast.iter().map(|m| m.id.clone()).collect();
-    let mut new_cast: Vec<(CastMember, Vec<RelDraft>)> = vec![];
-    for c in d.cast {
-        if series.cast.iter().any(|m| m.name.eq_ignore_ascii_case(c.name.trim())) {
-            continue;
-        }
-        let mut id = format!("cast_{}", slug(&c.name));
-        while taken.contains(&id) {
-            id.push('_');
-        }
-        taken.push(id.clone());
-        new_cast.push((
-            CastMember {
-                id, name: c.name.trim().into(), archetype: c.archetype, description: c.description, want: c.want, flaw: c.flaw,
-                engine: c.engine, voice_notes: c.voice_notes, catchphrases: c.catchphrases, lazzi: c.lazzi, never: c.never,
-                relationships: vec![], library_id: None,
-            },
-            c.relationships,
-        ));
-    }
-    let names: Vec<(String, String)> = series.cast.iter().map(|m| (m.name.to_lowercase(), m.id.clone()))
-        .chain(new_cast.iter().map(|(m, _)| (m.name.to_lowercase(), m.id.clone()))).collect();
-    for (mut m, rels) in new_cast {
-        m.relationships = rels
-            .into_iter()
-            .filter_map(|r| names.iter().find(|(n, _)| *n == r.with.trim().to_lowercase()).map(|(_, id)| CastRelationship { with: id.clone(), dynamic: r.dynamic }))
-            .filter(|r| r.with != m.id)
-            .collect();
-        series.cast.push(m);
-    }
-
-    let mut sound_ids: Vec<String> = series.sounds.iter().map(|c| c.id.clone()).collect();
-    for c in d.sounds {
-        let mut id = slug(if c.id.trim().is_empty() { &c.label } else { &c.id });
-        if id.is_empty() {
-            id = c.kind.clone();
-        }
-        while sound_ids.contains(&id) {
-            id.push_str("-2");
-        }
-        sound_ids.push(id.clone());
-        let dur = match c.kind.as_str() { "stinger" => 4.0, "bumper" => 5.0, "sfx" => 3.0, "theme" | "bed" => 20.0, _ => 15.0 };
-        series.sounds.push(SoundCue { id, kind: c.kind, label: c.label, prompt: c.prompt, duration_seconds: dur, file: None, usage: c.usage });
-    }
-    let mut set_ids: Vec<String> = series.sets.iter().map(|x| x.id.clone()).collect();
-    for x in d.sets {
-        let mut id = slug(&x.name);
-        if id.is_empty() {
-            id = "set".into();
-        }
-        while set_ids.contains(&id) {
-            id.push_str("-2");
-        }
-        set_ids.push(id.clone());
-        series.sets.push(SeriesSet { id, name: x.name, heading: x.heading.to_uppercase(), description: x.description, bed: x.bed, bed_sound: None });
-    }
-}
-
 // ── Tauri ────────────────────────────────────────────────────────────────────
 
 fn app_config(app: &AppHandle) -> Result<AppConfig> {
@@ -982,12 +748,6 @@ fn app_config(app: &AppHandle) -> Result<AppConfig> {
 pub fn series_brief_text(app: AppHandle, series_id: String) -> Result<String> {
     let (_, _, brief) = load_bible(&app_projects_dir(&app)?, &series_id)?;
     Ok(brief)
-}
-
-#[tauri::command]
-pub async fn draft_series_bible(app: AppHandle, series_id: String, pitch: String, settings: Option<WriterSettings>) -> Result<Series> {
-    let dir = app_projects_dir(&app)?;
-    draft_bible_impl(&dir, &series_id, &pitch, &settings.unwrap_or_default()).await
 }
 
 #[tauri::command]
@@ -1026,7 +786,6 @@ mod tests {
         Series {
             id: "s1".into(),
             title: "Night Shift".into(),
-            format: "monster_of_the_week".into(),
             episode_minutes: 8,
             cast: vec![CastMember { id: "c1".into(), name: "Dot".into(), engine: "Runs toward danger".into(), catchphrases: vec!["Called it.".into(), " ".into()], ..Default::default() }],
             sets: vec![SeriesSet { id: "court".into(), name: "Food court".into(), heading: "INT. FOOD COURT - NIGHT".into(), bed_sound: Some("hum".into()), ..Default::default() }],
@@ -1048,35 +807,7 @@ mod tests {
         assert!(b.contains("bed line `BED: #hum`"));
         assert!(b.contains("`MUSIC: #theme`"));
         assert!(b.contains("Marv's thermos"));
-        assert!(b.contains("classic structure of a monster-of-the-week"));
-    }
-
-    #[test]
-    fn drafted_bible_fills_gaps_and_links_relationships() {
-        let mut s = series();
-        s.tone = "Mine".into();
-        let d: BibleDraft = serde_json::from_value(serde_json::json!({
-            "format": "sitcom", "tone": "Theirs", "premise": "A mall.", "episode_minutes": 6,
-            "cast": [
-                { "name": "Dot", "engine": "dupe" },
-                { "name": "Marv Ellis", "archetype": "The skeptic", "relationships": [{ "with": "dot", "dynamic": "Protective" }, { "with": "Nobody", "dynamic": "x" }] }
-            ],
-            "sets": [{ "name": "Food Court", "heading": "int. food court - night" }],
-            "sounds": [{ "id": "theme", "kind": "theme", "label": "Theme", "prompt": "organ" }, { "id": "", "kind": "stinger", "label": "Act Break!" }],
-        })).unwrap();
-        merge_bible(&mut s, d);
-        assert_eq!(s.tone, "Mine", "what the user wrote is kept");
-        assert_eq!(s.format, "monster_of_the_week");
-        assert_eq!(s.premise, "A mall.");
-        assert_eq!(s.cast.len(), 2, "a cast member with the same name isn't duplicated");
-        let marv = &s.cast[1];
-        assert_eq!(marv.id, "cast_marv-ellis");
-        assert_eq!(marv.relationships.len(), 1);
-        assert_eq!(marv.relationships[0].with, "c1");
-        assert_eq!(s.sets[1].id, "food-court");
-        assert_eq!(s.sets[1].heading, "INT. FOOD COURT - NIGHT");
-        let ids: Vec<&str> = s.sounds.iter().map(|c| c.id.as_str()).collect();
-        assert_eq!(ids, vec!["theme", "hum", "theme-2", "act-break"]);
+        assert!(!b.contains("## Formula"), "no formula, no section");
     }
 
     #[test]
@@ -1098,7 +829,6 @@ mod tests {
         walk(&pitch_schema());
         walk(&plan_schema());
         walk(&draft_schema());
-        walk(&bible_schema());
     }
 
     #[test]

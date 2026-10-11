@@ -63,7 +63,6 @@ export const getSeries = (seriesId: string): Promise<Series> =>
 export const createSeries = (args: {
   title: string;
   logline?: string;
-  format?: string;
 }): Promise<Series> => invoke("create_series", args);
 
 export const updateSeries = (series: Series): Promise<Series> =>
@@ -95,11 +94,6 @@ export const listSeriesSoundTakes = (seriesId: string, cueId: string): Promise<S
 /** The bible as the writer sees it (Markdown). */
 export const seriesBriefText = (seriesId: string): Promise<string> =>
   invoke("series_brief_text", { seriesId });
-
-/** Claude drafts the bible (cast, sets, formula, style, sound cues) from a
- *  description of the show; fields already written are kept. */
-export const draftSeriesBible = (seriesId: string, pitch: string): Promise<Series> =>
-  invoke("draft_series_bible", { seriesId, pitch });
 
 export const pitchEpisodes = (seriesId: string, hint?: string): Promise<EpisodePitch[]> =>
   invoke("pitch_episodes", { seriesId, hint });

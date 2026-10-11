@@ -275,7 +275,6 @@ export interface CastRelationship {
 export interface CastMember {
   id: string;
   name: string;
-  archetype: string;
   description: string;
   want: string;
   flaw: string;
@@ -399,7 +398,6 @@ export interface Series {
   logline: string;
   premise: string;
   tone: string;
-  format: string;
   themes: string[];
   world: string;
   continuity: string;

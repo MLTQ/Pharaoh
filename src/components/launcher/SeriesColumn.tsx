@@ -1,7 +1,5 @@
 import React, { useState } from "react";
-import { createSeries, draftSeriesBible } from "../../lib/tauriCommands";
-import { errorMessage } from "../../lib/errors";
-import { SERIES_FORMATS, formatLabel } from "../../lib/archetypes";
+import { createSeries } from "../../lib/tauriCommands";
 import { useSeriesStore } from "../../store/seriesStore";
 import type { Project, Series } from "../../lib/types";
 
@@ -11,28 +9,18 @@ import type { Project, Series } from "../../lib/types";
 const NewSeriesForm: React.FC<{ onCreated: (s: Series) => void; onCancel: () => void }> = ({ onCreated, onCancel }) => {
   const [title, setTitle] = useState("");
   const [logline, setLogline] = useState("");
-  const [format, setFormat] = useState("sitcom");
-  const [pitch, setPitch] = useState("");
-  const [busy, setBusy] = useState<"" | "create" | "draft">("");
+  const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const handleCreate = async () => {
     if (!title.trim()) { setErr("Title is required."); return; }
-    setBusy("create"); setErr(null);
-    let created: Series | null = null;
+    setBusy(true); setErr(null);
     try {
-      created = await createSeries({ title: title.trim(), logline, format });
-      if (pitch.trim()) {
-        setBusy("draft");
-        created = await draftSeriesBible(created.id, pitch);
-      }
-      onCreated(created);
+      onCreated(await createSeries({ title: title.trim(), logline }));
     } catch (e) {
-      // The series exists even if drafting failed; open it and say why.
-      if (created) { window.alert(`The series was created, but drafting its bible failed: ${errorMessage(e)}`); onCreated(created); }
-      else setErr(String(e));
+      setErr(String(e));
     } finally {
-      setBusy("");
+      setBusy(false);
     }
   };
 
@@ -49,40 +37,26 @@ const NewSeriesForm: React.FC<{ onCreated: (s: Series) => void; onCancel: () => 
           className="input" autoFocus value={title}
           onChange={(e) => setTitle(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter") handleCreate(); if (e.key === "Escape") onCancel(); }}
-          placeholder="The Night Shift"
+          placeholder="Title"
           style={{ width: "100%", fontSize: 14 }}
         />
       </div>
-      <div style={{ marginBottom: 12 }}>
+      <div style={{ marginBottom: 16 }}>
         <label style={labelStyle}>Logline</label>
         <input
           className="input" value={logline}
           onChange={(e) => setLogline(e.target.value)}
-          placeholder="Three security guards, one haunted mall, every night."
+          placeholder="One sentence"
           style={{ width: "100%", fontSize: 12 }}
-        />
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <label style={labelStyle}>Format</label>
-        <select className="select" value={format} onChange={(e) => setFormat(e.target.value)} style={{ fontSize: 12 }}>
-          {SERIES_FORMATS.map((f) => <option key={f.id} value={f.id}>{f.label}</option>)}
-        </select>
-      </div>
-      <div style={{ marginBottom: 16 }}>
-        <label style={labelStyle}>Describe the show <span style={{ textTransform: "none", letterSpacing: 0 }}>(optional: Claude drafts the bible)</span></label>
-        <textarea
-          className="textarea" value={pitch} onChange={(e) => setPitch(e.target.value)}
-          placeholder="Who's in it, where it happens, what keeps going wrong, what it should feel like."
-          style={{ minHeight: 80, fontSize: 12 }}
         />
       </div>
       {err && <div style={{ fontSize: 11, color: "var(--sfx)", marginBottom: 10 }}>{err}</div>}
       <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
         <button
-          className="btn btn-primary" onClick={handleCreate} disabled={!!busy}
+          className="btn btn-primary" onClick={handleCreate} disabled={busy}
           style={{ background: "var(--music)", borderColor: "var(--music)", color: "var(--bg-0)" }}
         >
-          {busy === "draft" ? "Drafting the bible…" : busy ? "Creating…" : pitch.trim() ? "Create and draft" : "Create series"}
+          {busy ? "Creating…" : "Create series"}
         </button>
         <button className="btn" onClick={onCancel}>Cancel</button>
       </div>
@@ -115,13 +89,6 @@ const SeriesCard: React.FC<{ series: Series; episodes: number; onOpen: () => voi
       </div>
     )}
     <div style={{ marginTop: 8, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
-      {series.format && (
-        <span style={{
-          fontFamily: "var(--font-mono)", fontSize: 9, letterSpacing: "0.04em",
-          color: "var(--music)", background: "color-mix(in oklch, var(--music) 10%, transparent)",
-          padding: "1px 6px", borderRadius: 2,
-        }}>{formatLabel(series.format)}</span>
-      )}
       <span style={metaStyle}>{series.cast.length} in cast</span>
       <span style={metaStyle}>{episodes} episode{episodes !== 1 ? "s" : ""}</span>
     </div>
@@ -157,11 +124,10 @@ export const SeriesColumn: React.FC<{ series: Series[]; projects: Project[]; loa
           border: "1px dashed var(--line-2)", borderRadius: 3,
           fontSize: 12, color: "var(--fg-4)", lineHeight: 1.7,
         }}>
-          A series keeps a cast, a world and a house style,
-          <br />so every episode sounds like the same show.
+          No series yet.
           <br />
           <button className="btn" onClick={() => setShowNew(true)} style={{ marginTop: 12 }}>
-            Start a series →
+            Create a series →
           </button>
         </div>
       )}

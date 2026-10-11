@@ -73,18 +73,15 @@ export const EpisodesTab: React.FC<{
             <span style={{ fontWeight: 600, fontSize: 13.5, color: "var(--fg-0)" }}>{writing.message}…</span>
             <span style={monoMeta}>{Math.floor(elapsed / 60)}:{String(elapsed % 60).padStart(2, "0")}</span>
           </div>
-          <div style={{ fontSize: 11.5, color: "var(--fg-3)", marginTop: 6, lineHeight: 1.5 }}>
-            Planning, writing and a writers' room pass usually take a few minutes. You can keep editing the bible or leave; a notice appears when it's done.
-          </div>
         </Card>
       ) : plan ? (
         <PlanEditor plan={plan} setPlan={setPlan} series={series} onWrite={() => write(plan)} onBack={() => setPlan(null)} onReplan={breakStory} replanning={busy === "plan"} punchUp={punchUp} setPunchUp={setPunchUp} />
       ) : (
         <Card>
           <SectionTitle>Make an episode</SectionTitle>
-          <Field label="Premise" hint="Optional. Leave empty and Claude picks.">
+          <Field label="Premise" hint="Optional.">
             <textarea className="textarea" style={{ minHeight: 64 }} value={premise} onChange={(e) => setPremise(e.target.value)}
-              placeholder="The carousel starts taking requests." />
+              />
           </Field>
           {pitches.length > 0 && (
             <div style={{ display: "grid", gap: 8, margin: "12px 0 4px" }}>
@@ -114,13 +111,11 @@ export const EpisodesTab: React.FC<{
           </div>
           <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 10, lineHeight: 1.6 }}>
             {series.cast.length === 0 ? (
-              <>No cast yet. <a onClick={() => onGoTo("cast")} style={linkStyle}>Add the troupe</a> first; the writer builds every scene from them.</>
+              <>No cast. <a onClick={() => onGoTo("cast")} style={linkStyle}>Add cast</a>.</>
             ) : unvoiced.length > 0 ? (
-              <>{unvoiced.map((m) => m.name || "Unnamed").join(", ")} {unvoiced.length === 1 ? "has" : "have"} no voice yet and will join each episode as a blank character to design. <a onClick={() => onGoTo("cast")} style={linkStyle}>Give them one</a>.</>
-            ) : (
-              <>The whole cast joins with their library voices.</>
-            )}
-            {" "}Or <a onClick={blank} style={linkStyle}>{busy === "blank" ? "creating…" : "start a blank episode"}</a> and write it yourself.
+              <>No voice: {unvoiced.map((m) => m.name || "Unnamed").join(", ")}. <a onClick={() => onGoTo("cast")} style={linkStyle}>Cast</a>.</>
+            ) : null}
+            {" "}<a onClick={blank} style={linkStyle}>{busy === "blank" ? "Creating…" : "Blank episode"}</a>
           </div>
         </Card>
       )}

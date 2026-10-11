@@ -1,10 +1,18 @@
 import React, { useState } from "react";
 import { saveLibraryCharacter } from "../../lib/tauriCommands";
-import { ARCHETYPES, ARCHETYPE_FAMILIES, applyArchetype, blankCastMember } from "../../lib/archetypes";
 import { emptyCharacter } from "../library/libraryShared";
 import { reportError } from "../../lib/errors";
 import type { CastMember, LibraryCharacterSummary, Series } from "../../lib/types";
 import { Empty, Field, LinesInput, TwoCol, linkStyle, monoMeta } from "./seriesUi";
+
+function blankCastMember(name: string): CastMember {
+  return {
+    id: `cast_${Math.random().toString(36).slice(2, 8)}`,
+    name, description: "", want: "", flaw: "", engine: "",
+    voice_notes: "", catchphrases: [], lazzi: [], never: "", relationships: [],
+    library_id: null,
+  };
+}
 
 export const CastTab: React.FC<{
   series: Series;
@@ -71,7 +79,7 @@ export const CastTab: React.FC<{
           >
             <div style={{ fontSize: 13, fontWeight: 600, color: "var(--fg-0)" }}>{m.name || "Unnamed"}</div>
             <div style={{ ...monoMeta, marginTop: 2 }}>
-              {m.archetype || "no archetype"} · {m.library_id ? "voiced" : "no voice"}
+              {m.library_id ? "voiced" : "no voice"}
             </div>
           </div>
         ))}
@@ -85,10 +93,7 @@ export const CastTab: React.FC<{
           onDesignVoice={() => (sel.library_id ? onDesignVoice(sel.library_id) : designVoice(sel))}
         />
       ) : (
-        <Empty>
-          The troupe: the characters every episode is built from.
-          <br />Start blank or from a stock type.
-        </Empty>
+        <Empty>No cast yet.</Empty>
       )}
     </div>
   );
@@ -111,29 +116,11 @@ const CastEditor: React.FC<{
 
   return (
     <div style={{ display: "grid", gap: 14 }}>
-      <TwoCol>
-        <Field label="Name">
-          <input className="input" value={m.name} onChange={(e) => set({ name: e.target.value })} />
-        </Field>
-        <Field label="Archetype" hint="Fills empty fields only.">
-          <select
-            className="select" value={ARCHETYPES.some((a) => a.name === m.archetype) ? m.archetype : ""}
-            onChange={(e) => {
-              const a = ARCHETYPES.find((x) => x.name === e.target.value);
-              onChange(a ? applyArchetype(m, a) : { ...m, archetype: "" });
-            }}
-          >
-            <option value="">{m.archetype && !ARCHETYPES.some((a) => a.name === m.archetype) ? m.archetype : "None"}</option>
-            {ARCHETYPE_FAMILIES.map((f) => (
-              <optgroup key={f} label={f}>
-                {ARCHETYPES.filter((a) => a.family === f).map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
-              </optgroup>
-            ))}
-          </select>
-        </Field>
-      </TwoCol>
+      <Field label="Name">
+        <input className="input" value={m.name} onChange={(e) => set({ name: e.target.value })} />
+      </Field>
 
-      <Field label="Voice" hint="A character-library entry; its approved takes are copied into each new episode.">
+      <Field label="Voice">
         <div style={{ display: "flex", gap: 8 }}>
           <select className="select" value={m.library_id ?? ""} onChange={(e) => set({ library_id: e.target.value || null })}>
             <option value="">No voice yet</option>
@@ -150,15 +137,14 @@ const CastEditor: React.FC<{
         </div>
         {linked && linked.palette_count === 0 && (
           <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 4 }}>
-            No approved takes yet. <a onClick={onDesignVoice} style={linkStyle}>Audition and approve one</a> so episodes clone it.
+            No approved takes. <a onClick={onDesignVoice} style={linkStyle}>Approve one</a>
           </div>
         )}
       </Field>
 
       <Field label="Description">
         <textarea className="textarea" style={{ minHeight: 60 }} value={m.description}
-          onChange={(e) => set({ description: e.target.value })}
-          placeholder="Age, job, look, the one-line pitch." />
+          onChange={(e) => set({ description: e.target.value })} />
       </Field>
       <TwoCol>
         <Field label="Want">
@@ -168,21 +154,21 @@ const CastEditor: React.FC<{
           <textarea className="textarea" style={{ minHeight: 60 }} value={m.flaw} onChange={(e) => set({ flaw: e.target.value })} />
         </Field>
       </TwoCol>
-      <Field label="Engine" hint="What reliably makes their scenes go.">
+      <Field label="Engine">
         <textarea className="textarea" style={{ minHeight: 60 }} value={m.engine} onChange={(e) => set({ engine: e.target.value })} />
       </Field>
-      <Field label="How they talk" hint="Rhythm, vocabulary, tics.">
+      <Field label="How they talk">
         <textarea className="textarea" style={{ minHeight: 60 }} value={m.voice_notes} onChange={(e) => set({ voice_notes: e.target.value })} />
       </Field>
       <TwoCol>
         <Field label="Catchphrases" hint="One per line.">
           <LinesInput minHeight={80} value={m.catchphrases} onChange={(catchphrases) => set({ catchphrases })} />
         </Field>
-        <Field label="Lazzi" hint="Signature bits, one per line.">
+        <Field label="Signature bits" hint="One per line.">
           <LinesInput minHeight={80} value={m.lazzi} onChange={(lazzi) => set({ lazzi })} />
         </Field>
       </TwoCol>
-      <Field label="Never" hint="What they would never say or do.">
+      <Field label="Never">
         <textarea className="textarea" style={{ minHeight: 50 }} value={m.never} onChange={(e) => set({ never: e.target.value })} />
       </Field>
 
@@ -195,7 +181,7 @@ const CastEditor: React.FC<{
                   {o.name || "Unnamed"}
                 </span>
                 <input className="input" value={dynamicWith(o.id)} onChange={(e) => setDynamic(o.id, e.target.value)}
-                  placeholder={`How ${m.name || "they"} treats ${o.name || "them"}`} />
+                />
               </div>
             ))}
           </div>

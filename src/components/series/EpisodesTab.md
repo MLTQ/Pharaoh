@@ -1,7 +1,7 @@
 # EpisodesTab.tsx
 
 ## Purpose
-The writers' room. A premise (typed, picked from three pitches, or empty for Claude's choice) goes straight to **Write episode**, or through **Beat sheet first**: an editable plan (title, logline, per-scene summary and beats, cut scenes) that is then written. "Writers' room pass" toggles the punch-up. **Start a blank episode** makes an empty linked project to write by hand.
+The writers' room. A premise (typed, picked from three pitches, or empty to leave it to the writer) goes straight to **Write episode**, or through **Beat sheet first**: an editable plan (title, logline, per-scene summary and beats, cut scenes) that is then written. "Writers' room pass" toggles the punch-up. **Start a blank episode** makes an empty linked project to write by hand.
 
 ## Behaviour
 - Writing runs in `seriesStore.startWrite`, so it survives tab and view changes; the card shows the current stage and elapsed time, and a toast offers **Open →** when it lands.

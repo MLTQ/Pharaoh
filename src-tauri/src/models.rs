@@ -302,8 +302,6 @@ pub struct Series {
     /// What the show is about, the situation that generates episodes.
     pub premise: String,
     pub tone: String,
-    /// "sitcom" | "monster_of_the_week" | "commedia" | "anthology" | free text.
-    pub format: String,
     /// Recurring themes the writing returns to.
     pub themes: Vec<String>,
     /// Setting and the rules of the world, as prose.
@@ -331,8 +329,6 @@ pub struct Series {
 pub struct CastMember {
     pub id: String,
     pub name: String,
-    /// Stock type the character is built on ("Arlecchino", "the straight man").
-    pub archetype: String,
     pub description: String,
     pub want: String,
     pub flaw: String,

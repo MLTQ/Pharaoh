@@ -61,7 +61,7 @@ def _series_root() -> Path:
 @mcp.tool()
 def list_series() -> str:
     """
-    List every series (show bible): id, title, format, logline, cast names and
+    List every series (show bible): id, title, logline, cast names and
     episode count. A series is a recurring cast, world and house style; its
     episodes are ordinary projects with `series_id` set.
     """
@@ -87,7 +87,6 @@ def list_series() -> str:
             out.append({
                 "id": sid,
                 "title": s.get("title", ""),
-                "format": s.get("format", ""),
                 "logline": s.get("logline", ""),
                 "cast": [m.get("name", "") for m in s.get("cast", [])],
                 "episodes": episodes.get(sid, 0),

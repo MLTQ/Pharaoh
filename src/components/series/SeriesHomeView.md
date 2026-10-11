@@ -7,7 +7,7 @@ The home of one series, shown in the launcher shell (no project open) when `seri
 |---|---|---|
 | Episodes | [EpisodesTab](./EpisodesTab.md) | Make an episode (premise, pitches, beat sheet, write), the episode list |
 | Bible | [BibleTab](./BibleTab.md) | Premise, format, tone, themes, world, continuity, length, formula |
-| Cast | [CastTab](./CastTab.md) | The troupe, archetypes, library voices, "Design voice" |
+| Cast | [CastTab](./CastTab.md) | The cast, library voices, "Design voice" |
 | Sets | [SetsTab](./SetsTab.md) | Recurring locations, headings, beds |
 | Sound | [SoundTab](./SoundTab.md) | The sound package: cues, takes, approval |
 | Style | [StyleTab](./StyleTab.md) | Narrator, rating, house style, banned phrases, golden scenes |

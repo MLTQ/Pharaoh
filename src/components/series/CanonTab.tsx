@@ -35,14 +35,8 @@ export const CanonTab: React.FC<{ series: Series }> = ({ series }) => {
       <SectionTitle right={dirty ? <button className="btn btn-primary" style={primaryBtn} onClick={save} disabled={saving}>{saving ? "Saving…" : "Save canon"}</button> : undefined}>
         Canon
       </SectionTitle>
-      <div style={{ fontSize: 11.5, color: "var(--fg-4)", marginBottom: 12, lineHeight: 1.6 }}>
-        {series.continuity === "serialized"
-          ? "Serialized: the writer treats these as binding."
-          : "Episodic: the writer uses these for callbacks and to avoid repeating plots."}
-        {" "}The newest {24} entries go into every episode's brief.
-      </div>
       {canon.length === 0 ? (
-        <Empty>Written episodes add their summary, facts, running gags and open threads here.</Empty>
+        <Empty>No canon.</Empty>
       ) : [...canon].map((c, i) => ({ c, i })).reverse().map(({ c, i }) => (
         <div key={c.episode_id || i} style={{ padding: 14, border: "1px solid var(--line-1)", borderRadius: 4, background: "var(--bg-2)", marginBottom: 10 }}>
           <div style={{ display: "flex", alignItems: "baseline", gap: 10, marginBottom: 8 }}>

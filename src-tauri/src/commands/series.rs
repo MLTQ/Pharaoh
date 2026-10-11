@@ -121,16 +121,14 @@ pub fn create_series(
     app: AppHandle,
     title: String,
     logline: Option<String>,
-    format: Option<String>,
 ) -> Result<Series> {
-    create_series_at(&app_projects_dir(&app)?, title, logline, format)
+    create_series_at(&app_projects_dir(&app)?, title, logline)
 }
 
 pub fn create_series_at(
     projects_dir: &Path,
     title: String,
     logline: Option<String>,
-    format: Option<String>,
 ) -> Result<Series> {
     let title = title.trim().to_string();
     if title.is_empty() {
@@ -141,7 +139,6 @@ pub fn create_series_at(
         id: Uuid::new_v4().to_string(),
         title,
         logline: logline.unwrap_or_default(),
-        format: format.unwrap_or_else(|| "sitcom".into()),
         continuity: "episodic".into(),
         episode_minutes: 10,
         created_at: Some(now),
@@ -185,12 +182,6 @@ pub fn update_series(app: AppHandle, series: Series) -> Result<Series> {
     s.updated_at = Some(Utc::now());
     store_series(&projects_dir, &s)?;
     load_series(&projects_dir, &s.id)
-}
-
-/// Write a series (stamping updated_at) and hand it back as stored.
-pub fn save_series_at(projects_dir: &Path, series: &mut Series) -> Result<()> {
-    series.updated_at = Some(Utc::now());
-    store_series(projects_dir, series)
 }
 
 #[tauri::command]

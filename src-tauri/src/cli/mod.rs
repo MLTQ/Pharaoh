@@ -334,7 +334,7 @@ pub async fn run(args: Vec<String>) -> Result<()> {
 fn usage() -> &'static str {
     "usage:
   pharaoh series list
-  pharaoh series create --title <title> [--format sitcom|monster_of_the_week|commedia|anthology] [--logline <text>] [--pitch <describe the show; Claude drafts the bible>]
+  pharaoh series create --title <title> [--logline <text>]
   pharaoh series show <series_id_or_title>
   pharaoh series brief <series_id_or_title>
   pharaoh episode pitch <series> [--hint <text>]

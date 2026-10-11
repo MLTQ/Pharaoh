@@ -31,27 +31,27 @@ export const SetsTab: React.FC<{ series: Series; patch: (p: Partial<Series>) => 
     <div>
       <SectionTitle right={<button className="btn btn-sm" onClick={add}>+ Set</button>}>Sets</SectionTitle>
       {series.sets.length === 0 ? (
-        <Empty>Where the show keeps happening: the apartment, the bar, the lab. Each set gets a heading and its own sound.</Empty>
+        <Empty>No sets.</Empty>
       ) : series.sets.map((s) => (
         <div key={s.id} style={{ padding: 16, border: "1px solid var(--line-1)", borderRadius: 4, background: "var(--bg-2)", marginBottom: 12 }}>
           <TwoCol>
             <Field label="Name">
-              <input className="input" value={s.name} placeholder="Food court"
+              <input className="input" value={s.name}
                 onChange={(e) => setSet(s.id, { name: e.target.value })} />
             </Field>
-            <Field label="Heading" hint="Fountain scene heading.">
-              <input className="input mono" value={s.heading} placeholder="INT. FOOD COURT - NIGHT"
+            <Field label="Heading">
+              <input className="input mono" value={s.heading} placeholder="INT. PLACE - TIME"
                 onChange={(e) => setSet(s.id, { heading: e.target.value.toUpperCase() })} />
             </Field>
           </TwoCol>
           <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
             <Field label="Description">
-              <input className="input" value={s.description} placeholder="What's here, what it feels like"
+              <input className="input" value={s.description}
                 onChange={(e) => setSet(s.id, { description: e.target.value })} />
             </Field>
             <TwoCol>
               <Field label="Bed" hint="Ambience prompt.">
-                <input className="input" value={s.bed} placeholder="empty mall at night, fluorescent hum"
+                <input className="input" value={s.bed}
                   onChange={(e) => setSet(s.id, { bed: e.target.value })} />
               </Field>
               <Field label="Recorded bed">
@@ -61,7 +61,7 @@ export const SetsTab: React.FC<{ series: Series; patch: (p: Partial<Series>) => 
                 </select>
                 {!s.bed_sound && s.bed.trim() && (
                   <div style={{ fontSize: 11, color: "var(--fg-4)", marginTop: 4 }}>
-                    <a onClick={() => recordBed(s)} style={linkStyle}>Record this bed once</a> so every episode sounds like the same room.
+                    <a onClick={() => recordBed(s)} style={linkStyle}>Add as a sound cue</a>
                   </div>
                 )}
               </Field>

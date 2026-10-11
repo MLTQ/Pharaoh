@@ -68,7 +68,6 @@ pub fn run() {
             commands::series::list_series_sound_takes,
             commands::series::prepare_series_sound_dir,
             commands::episode_writer::series_brief_text,
-            commands::episode_writer::draft_series_bible,
             commands::episode_writer::pitch_episodes,
             commands::episode_writer::plan_episode,
             commands::episode_writer::write_episode,

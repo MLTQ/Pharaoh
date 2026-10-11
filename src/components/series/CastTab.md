@@ -1,7 +1,7 @@
 # CastTab.tsx
 
 ## Purpose
-The troupe. Each member: name, archetype (fills empty fields from `ARCHETYPES`), library voice, description, want, flaw, engine, how they talk, catchphrases, lazzi, never, and how they treat each other member.
+The cast. Each member: name, library voice, description, want, flaw, engine, how they talk, catchphrases, signature bits (`lazzi` on disk), never, and how they treat each other member. All free text; no stock types.
 
 ## Design voice
 With no voice linked, **Design voice →** saves a new character-library entry seeded from the sheet (name, description; base voice description from description + how they talk), links its `library_id`, and opens the Voices tab on it. With one linked, **Edit voice →** opens it there. A linked voice with no approved takes gets a nudge: episodes clone approved takes.

@@ -1,12 +1,11 @@
 # episode_writer.rs
 
 ## Purpose
-"Make me an episode of X." A series bible becomes a prompt brief; Claude pitches, plans a beat sheet, writes the episode in audio-drama Fountain and punches it up; the script lands as an ordinary episode project. Also drafts a whole bible from a paragraph about a show.
-
+"Make me an episode of X." A series bible becomes a prompt brief; Claude pitches, plans a beat sheet, writes the episode in audio-drama Fountain and punches it up; the script lands as an ordinary episode project. 
 ## Components
 
 ### `series_brief(series, canon)`
-- **Does**: The bible as Markdown: format and length (~150 spoken words a minute), premise, world, cast (engine, want, flaw, how they talk, catchphrases capped at one use each, lazzi, never, relationships), sets with their exact headings and bed lines (`BED: #tag` when a recorded bed is linked), sound package tags, formula (or "the classic structure of a …"), style (narrator mode, house style, banned phrases), golden scenes, and the newest 24 canon entries.
+- **Does**: The bible as Markdown: length (~150 spoken words a minute), premise, world, cast (engine, want, flaw, how they talk, catchphrases capped at one use each, lazzi, never, relationships), sets with their exact headings and bed lines (`BED: #tag` when a recorded bed is linked), sound package tags, formula (omitted when empty), style (narrator mode, house style, banned phrases), golden scenes, and the newest 24 canon entries.
 - **Interacts with**: every prompt below, `pharaoh series brief`, MCP `get_series_brief`, the `series_brief_text` command.
 
 ### `Claude::ask`
@@ -30,16 +29,13 @@
 - **Does**: A row whose prompt starts with `#tag` takes that sound cue's prompt; if the cue has an approved file, it is copied bit-exact to `<scene>/assets/series_<tag>.wav` and bound as the row's `file`, so generation skips it and layout places it. Unknown tags lose their `#`.
 - **Rationale**: Copies keep every episode self-contained and lossless; the series take can be replaced later without changing finished episodes.
 
-### `draft_bible_impl` / `merge_bible`
-- **Does**: A paragraph about the show → format, logline, premise, tone, themes, world, continuity, length, cast (with relationships by name), sets, formula, style, sound cues. Merging keeps everything the user already wrote, skips cast names already present, links relationships to cast ids, and slugs unique ids for sets and sound cues.
-
 ## Tauri commands
-`series_brief_text`, `draft_series_bible`, `pitch_episodes`, `plan_episode`, `write_episode` (emits `episode-writer` {series_id, stage, message}). Generation commands are host-only on the mesh; the brief is mirrored.
+`series_brief_text`, `pitch_episodes`, `plan_episode`, `write_episode` (emits `episode-writer` {series_id, stage, message}). Generation commands are host-only on the mesh; the brief is mirrored.
 
 ## Contracts
 
 | Dependent | Expects | Breaking changes |
 |-----------|---------|------------------|
 | `seriesStore.ts` | `write_episode({args})` → `WriteEpisodeResult`; `episode-writer` events | Shape or event changes |
-| `cli/series.rs` | `pitch_impl`, `plan_impl`, `write_impl`, `land_episode`, `draft_bible_impl`, `series_brief` | Signatures |
+| `cli/series.rs` | `pitch_impl`, `plan_impl`, `write_impl`, `land_episode`, `series_brief` | Signatures |
 | `cli::scene_script::import_fountain` | Fountain with INT./EXT. headings | Import semantics |

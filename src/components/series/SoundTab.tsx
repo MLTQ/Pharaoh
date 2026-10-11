@@ -56,11 +56,8 @@ export const SoundTab: React.FC<{ series: Series; patch: (p: Partial<Series>) =>
       }>
         Sound package
       </SectionTitle>
-      <div style={{ fontSize: 11.5, color: "var(--fg-4)", marginBottom: 14, lineHeight: 1.6 }}>
-        Recorded once, reused in every episode. The writer places a cue with its tag, e.g. <code>MUSIC: #theme</code>; the approved take is copied into the episode losslessly. Cues without a take are generated per episode from their prompt.
-      </div>
       {series.sounds.length === 0 ? (
-        <Empty>No recurring sounds yet. A theme and an act-break stinger go a long way.</Empty>
+        <Empty>No sounds.</Empty>
       ) : (
         series.sounds.map((c) => <CueCard key={c.id} seriesId={series.id} cue={c} taken={series.sounds.map((x) => x.id)} onChange={(p) => setCue(c.id, p)} onRemove={() => remove(c)} />)
       )}
@@ -113,11 +110,10 @@ const CueCard: React.FC<{
         </Field>
       </TwoCol>
       <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-        <Field label="Prompt" hint={cueEngine(cue) === "music" ? "For the music server (instrumental)." : "For the SFX server."}>
-          <input className="input" value={cue.prompt} onChange={(e) => onChange({ prompt: e.target.value })}
-            placeholder={cue.kind === "theme" ? "surf-rock organ, spooky and jaunty, 120 bpm" : "describe the sound"} />
+        <Field label="Prompt" hint={cueEngine(cue) === "music" ? "Music server." : "SFX server."}>
+          <input className="input" value={cue.prompt} onChange={(e) => onChange({ prompt: e.target.value })} />
         </Field>
-        <Field label="When to use it" hint="Read by the writer.">
+        <Field label="When to use it">
           <input className="input" value={cue.usage} onChange={(e) => onChange({ usage: e.target.value })} />
         </Field>
       </div>

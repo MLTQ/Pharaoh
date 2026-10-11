@@ -27,15 +27,14 @@ export const StyleTab: React.FC<{ series: Series; episodes: Project[]; patch: (p
           </Field>
         ) : <div />}
         <Field label="Rating">
-          <input className="input" value={st.rating} placeholder="PG, 12+, adult…" onChange={(e) => set({ rating: e.target.value })} />
+          <input className="input" value={st.rating} onChange={(e) => set({ rating: e.target.value })} />
         </Field>
       </TwoCol>
-      <Field label="House style" hint="How the show is written.">
-        <textarea className="textarea" value={st.house_style} onChange={(e) => set({ house_style: e.target.value })}
-          placeholder="Banter-forward. Every scene ends on a button. No speeches longer than three lines." />
+      <Field label="House style">
+        <textarea className="textarea" value={st.house_style} onChange={(e) => set({ house_style: e.target.value })} />
       </Field>
-      <Field label="Never write" hint="Clichés and phrases to avoid, one per line.">
-        <LinesInput value={st.banned} onChange={(banned) => set({ banned })} placeholder="Well, well, well" />
+      <Field label="Never write" hint="One per line.">
+        <LinesInput value={st.banned} onChange={(banned) => set({ banned })} />
       </Field>
 
       <div>
@@ -47,11 +46,8 @@ export const StyleTab: React.FC<{ series: Series; episodes: Project[]; patch: (p
         }>
           Golden scenes
         </SectionTitle>
-        <div style={{ fontSize: 11.5, color: "var(--fg-4)", marginBottom: 10 }}>
-          Scenes that show the show at its best. The writer matches their voice. Two or three are plenty.
-        </div>
         {st.golden.length === 0 ? (
-          <Empty>None yet. When an episode lands a scene you love, add it here.</Empty>
+          <Empty>No golden scenes.</Empty>
         ) : st.golden.map((g, i) => (
           <div key={i} style={{ padding: 14, border: "1px solid var(--line-1)", borderRadius: 4, background: "var(--bg-2)", marginBottom: 10 }}>
             <TwoCol>

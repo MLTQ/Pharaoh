@@ -23,7 +23,7 @@ pub(super) async fn series_list(config: &AppConfig) -> Result<()> {
         .into_iter()
         .map(|s| {
             serde_json::json!({
-                "id": s.id, "title": s.title, "format": s.format, "logline": s.logline,
+                "id": s.id, "title": s.title, "logline": s.logline,
                 "cast": s.cast.iter().map(|m| &m.name).collect::<Vec<_>>(),
                 "episodes": episodes_in(&d, &s.id).len(),
             })
@@ -54,13 +54,7 @@ pub(super) async fn series_brief(config: &AppConfig, reference: &str) -> Result<
 pub(super) async fn series_create(config: &AppConfig, rest: &[String]) -> Result<()> {
     let flags = parse_flags(rest)?;
     let title = flag_opt(&flags, "title").ok_or_else(|| Error::Other("missing --title".into()))?;
-    let d = dir(config);
-    let mut s = create_series_at(&d, title, flag_opt(&flags, "logline"), flag_opt(&flags, "format"))?;
-    if let Some(pitch) = flag_opt(&flags, "pitch") {
-        eprintln!("[bible] drafting from the description");
-        s = episode_writer::draft_bible_impl(&d, &s.id, &pitch, &settings(&flags)).await?;
-    }
-    print_json(&s)
+    print_json(&create_series_at(&dir(config), title, flag_opt(&flags, "logline"))?)
 }
 
 pub(super) async fn episode_pitch(config: &AppConfig, reference: &str, rest: &[String]) -> Result<()> {

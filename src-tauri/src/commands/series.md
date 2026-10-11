@@ -22,7 +22,7 @@ Tauri commands for series (show bibles). A series is a cast, world and house sty
 - `prepare_series_sound_dir` creates that folder before a take is generated (jobs use the synthetic project id `_series`); `list_series_sound_takes` lists its WAVs newest first with durations.
 
 ### CLI helpers
-- `list_series_in`, `create_series_at`, `episodes_in`, `save_series_at`, and `resolve_series` (an id, an exact title, or a unique fragment of a title, case-insensitive).
+- `list_series_in`, `create_series_at`, `episodes_in`, and `resolve_series` (an id, an exact title, or a unique fragment of a title, case-insensitive).
 
 ### `check_id`
 - **Does**: Series ids become directory names and mesh viewers can send them, so anything but `[A-Za-z0-9-]` is refused.
@@ -34,4 +34,4 @@ Tauri commands for series (show bibles). A series is a cast, world and house sty
 | `tauriCommands.ts` | Series JSON matches `Series` in `types.ts` | Shape changes |
 | `share.rs` | Reads mirrored; `update_series` collab-gated; create commands host-only | Exposing creation to mesh |
 | `project.rs` | `create_project_at(dir, title, logline, tone, series_id)` | Signature changes |
-| `episode_writer.rs` | `load_series`, `load_canon`, `store_canon`, `create_episode_at`, `save_series_at` | Signatures |
+| `episode_writer.rs` | `load_series`, `load_canon`, `store_canon`, `create_episode_at` | Signatures |

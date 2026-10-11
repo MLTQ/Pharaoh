@@ -64,7 +64,7 @@ A series is a show bible (cast, sets, formula, style, sound package, canon) abov
 | Command | What it does |
 |---|---|
 | `series list` | Every series with its cast and episode count. |
-| `series create --title <t> [--format sitcom\|monster_of_the_week\|commedia\|anthology] [--logline] [--pitch <text>]` | New series. `--pitch` describes the show and Claude drafts the bible: cast with engines and relationships, sets, formula, style, sound cues. |
+| `series create --title <t> [--logline]` | New series. |
 | `series show <series>` | The bible, its episodes and canon as JSON. |
 | `series brief <series>` | The bible as the writer sees it (Markdown). |
 | `episode pitch <series> [--hint <text>]` | Three loglines that avoid the canon. |

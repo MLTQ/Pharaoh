@@ -1,6 +1,5 @@
 import React, { useCallback, useEffect, useRef, useState } from "react";
 import { getProjectsDir, getSeries, listLibraryCharacters, listSeriesEpisodes, updateSeries } from "../../lib/tauriCommands";
-import { formatLabel } from "../../lib/archetypes";
 import { openProjectById } from "../../lib/openProject";
 import { reportError } from "../../lib/errors";
 import { useSeriesStore } from "../../store/seriesStore";
@@ -138,7 +137,7 @@ export const SeriesHomeView: React.FC<{ seriesId: string }> = ({ seriesId }) => 
         </span>
       </div>
       <div style={{ ...monoMeta, color: "var(--music)", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 4 }}>
-        Series · {formatLabel(draft.format)}
+        Series
       </div>
       <div style={{ fontWeight: 600, fontSize: 26, color: "var(--fg-0)", letterSpacing: "-0.02em" }}>{draft.title}</div>
       {draft.logline && <div style={{ fontSize: 13, color: "var(--fg-3)", marginTop: 4, lineHeight: 1.5 }}>{draft.logline}</div>}
@@ -174,9 +173,6 @@ export const SeriesHomeView: React.FC<{ seriesId: string }> = ({ seriesId }) => 
       {tab === "canon" && <CanonTab series={draft} />}
       {tab === "voices" && (
         <div>
-          <div style={{ fontSize: 11.5, color: "var(--fg-4)", marginBottom: 10, lineHeight: 1.6 }}>
-            The character library, shared by every project. Design a voice, approve takes for its palette, then link it to a cast member in Cast.
-          </div>
           <div style={{ position: "relative", height: "calc(100vh - 260px)", minHeight: 480, border: "1px solid var(--line-1)", borderRadius: 4, overflow: "hidden" }}>
             <LibraryView key={voiceTarget ?? "library"} initialSelectedId={voiceTarget} />
           </div>
